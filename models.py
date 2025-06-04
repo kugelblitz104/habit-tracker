@@ -90,6 +90,7 @@ class TrackerBase(SQLModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     completed: bool = True
     skipped: bool = False
+    note: Optional[str] = None
 
 class Tracker(TrackerBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -102,9 +103,9 @@ class TrackerCreate(TrackerBase):
 class TrackerRead(TrackerBase):
     id: int
 
-class TrackerUpdate(SQLModel):
-    completed: Optional[bool] = None
-    skipped: Optional[bool] = None
+class TrackerUpdate(TrackerBase):
+    completed: Optional[bool] = True
+    skipped: Optional[bool] = False
 
 class TrackerDelete(SQLModel):
     id: int
