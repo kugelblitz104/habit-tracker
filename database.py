@@ -1,4 +1,3 @@
-from .models import users, habits, trackers
 from sqlmodel import create_engine, SQLModel
 from sqlalchemy.orm import sessionmaker
 
