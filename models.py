@@ -1,7 +1,7 @@
 from sqlmodel import Field, Relationship, SQLModel
 from datetime import datetime
 from pydantic import EmailStr, field_validator
-from datetime import datetime
+from datetime import datetime, date, time
 from typing import List, Optional
 
 class UserBase(SQLModel):
@@ -87,7 +87,8 @@ class HabitList(SQLModel):
     
 class TrackerBase(SQLModel):
     habit_id: int
-    timestamp: datetime = Field(default_factory=datetime.now)
+    dated: date = Field(default_factory=datetime.now)
+    timed: time = Field(default_factory=datetime.now)
     completed: bool = True
     skipped: bool = False
     note: Optional[str] = None

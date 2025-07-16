@@ -94,7 +94,8 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
         Tracker(
             habit=habit,
             habit_id=habit.id if habit.id is not None else 1,
-            timestamp=datetime.now(),
+            dated=datetime.now().date(),
+            timed=datetime.now().time(),
             completed=True,
             skipped=False,
             note="Initial tracker note"
@@ -105,7 +106,8 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
         trackers.append(
             Tracker(
                 habit_id=habit.id if habit.id is not None else 1,
-                timestamp=datetime(2025, 6, i),
+                dated=datetime(2025, 6, i),
+                timed=datetime.now().time(),
                 completed=True,
                 skipped=(i % 2 == 0), # Alternate between True and False
                 note=f"Tracker note {i}"
@@ -117,6 +119,6 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
         session.commit()
         for tracker in trackers:
             session.refresh(tracker)
-            print(f"Created tracker for habit ID: {tracker.habit_id} on date: {tracker.timestamp}")
+            print(f"Created tracker for habit ID: {tracker.habit_id} on date: {tracker.dated}")
             
     return trackers
