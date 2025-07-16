@@ -28,7 +28,6 @@ class UserRead(UserBase):
     updated_date: Optional[datetime] = None
 
 class UserUpdate(SQLModel):
-    id: int
     username: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
@@ -72,7 +71,6 @@ class HabitRead(HabitBase):
     updated_date: Optional[datetime] = None
 
 class HabitUpdate(SQLModel):
-    id: int
     name: Optional[str] = None
     question: Optional[str] = None
     color: Optional[str] = None
@@ -107,7 +105,6 @@ class TrackerRead(TrackerBase):
     id: int
 
 class TrackerUpdate(TrackerBase):
-    id: int
     completed: Optional[bool] = True
     skipped: Optional[bool] = False
 

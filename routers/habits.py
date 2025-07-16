@@ -25,9 +25,9 @@ def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=404, detail="Habit not found")
     return HabitRead.model_validate(habit)
 
-@router.put('/')
-def update_habit(habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]):
-    db_habit = db.get(Habit, habit_update.id)
+@router.put('/{habit_id}')
+def update_habit(habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]):
+    db_habit = db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     habit_data = HabitUpdate.model_validate(habit_update)

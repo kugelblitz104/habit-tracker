@@ -25,9 +25,9 @@ def read_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
         return None
     return UserRead.model_validate(user)
 
-@router.put('/')
-def update_user(user_update: UserUpdate, db: Annotated[Session, Depends(get_db)]):
-    db_user = db.get(User, user_update.id)
+@router.put('/{user_id}')
+def update_user(user_id: int, user_update: UserUpdate, db: Annotated[Session, Depends(get_db)]):
+    db_user = db.get(User, user_id)
     if not db_user:
         return None
     user_data = UserUpdate.model_validate(user_update)
