@@ -55,10 +55,10 @@ def delete_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]):
     db.commit()
     return HabitDelete(id=habit_id)
 
-@router.get('/')
-def list_habits(user_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5):
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    db_habits = db.query(Habit).filter(getattr(Habit, "user_id") == user_id).limit(limit).all()
-    return HabitList(habits=[HabitRead.model_validate(h) for h in db_habits])
+# @router.get('/')
+# def list_habits(user_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5):
+#     user = db.get(User, user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+#     db_habits = db.query(Habit).filter(getattr(Habit, "user_id") == user_id).limit(limit).all()
+#     return HabitList(habits=[HabitRead.model_validate(h) for h in db_habits])
