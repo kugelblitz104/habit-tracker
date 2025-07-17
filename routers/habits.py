@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import desc
 from ..core.dependencies import get_db
 from ..models import *
 from typing import Annotated
@@ -30,7 +31,7 @@ def list_habit_trackers(habit_id: int, db: Annotated[Session, Depends(get_db)], 
     habit = db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
-    db_trackers = db.query(Tracker).filter(getattr(Tracker, "habit_id") == habit_id).limit(limit).all()
+    db_trackers = db.query(Tracker).filter(getattr(Tracker, "habit_id") == habit_id).limit(limit).order_by(desc(Tracker.dated)).all()
     return [TrackerRead.model_validate(t) for t in db_trackers]
 
 @router.put('/{habit_id}')

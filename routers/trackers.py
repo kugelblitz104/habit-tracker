@@ -9,8 +9,9 @@ router = APIRouter(
     tags=['trackers'],
     responses={404: {"description": "Not found"}}
 )
-# TODO: Implement 404 handling
+
 # TODO: Implement authentication and authorization
+# TODO: Disallow creation of trackers on the same date
 
 @router.post('/')
 def create_tracker(tracker: TrackerCreate, db: Annotated[Session, Depends(get_db)]):
