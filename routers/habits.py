@@ -25,6 +25,14 @@ def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=404, detail="Habit not found")
     return HabitRead.model_validate(habit)
 
+@router.get('/{habit_id}/trackers')
+def list_habit_trackers(habit_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5):
+    habit = db.get(Habit, habit_id)
+    if not habit:
+        raise HTTPException(status_code=404, detail="Habit not found")
+    db_trackers = db.query(Tracker).filter(getattr(Tracker, "habit_id") == habit_id).limit(limit).all()
+    return [TrackerRead.model_validate(t) for t in db_trackers]
+
 @router.put('/{habit_id}')
 def update_habit(habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]):
     db_habit = db.get(Habit, habit_id)
@@ -48,9 +56,9 @@ def delete_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]):
     return HabitDelete(id=habit_id)
 
 @router.get('/')
-def list_habits(user_id: int, db: Annotated[Session, Depends(get_db)]):
+def list_habits(user_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5):
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    db_habits = db.query(Habit).filter(getattr(Habit, "user_id") == user_id).all()
+    db_habits = db.query(Habit).filter(getattr(Habit, "user_id") == user_id).limit(limit).all()
     return HabitList(habits=[HabitRead.model_validate(h) for h in db_habits])

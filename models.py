@@ -14,7 +14,7 @@ class User(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True)
     password_hash: str
-    habits: List["Habit"] = Relationship(back_populates="user")
+    habits: List["Habit"] = Relationship(back_populates="user", cascade_delete=True)
     created_date: datetime = Field(default_factory=datetime.now)
     updated_date: Optional[datetime] = None
 
@@ -54,7 +54,7 @@ class Habit(HabitBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id")
     user: Optional["User"] = Relationship(back_populates="habits")
-    trackers: List["Tracker"] = Relationship(back_populates="habit")
+    trackers: List["Tracker"] = Relationship(back_populates="habit", cascade_delete=True)
     name: str = Field()
     reminder: bool = False
     notes: Optional[str] = None
@@ -105,9 +105,7 @@ class TrackerRead(TrackerBase):
     id: int
 
 class TrackerUpdate(TrackerBase):
-    completed: Optional[bool] = True
-    skipped: Optional[bool] = False
-
+    id: int
 class TrackerDelete(SQLModel):
     id: int
 
