@@ -1,0 +1,14 @@
+[project]
+name = "habit_tracker"
+version = "0.1.0"
+description = "habit tracker api"
+authors = [{name = "Justin Jones", email = "kugelblitz104@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dotenv"
+,   "sqlmodel"
+,   "fastapi[standard]"
+,   "pydantic[email]"
+]
+

@@ -4,6 +4,8 @@ from pydantic import EmailStr, field_validator
 from datetime import datetime, date, time
 from typing import List, Optional
 
+# TODO: Add Created Date and Updated Date to Tracker objects
+
 class UserBase(SQLModel):
     username: str
     first_name: str
@@ -35,6 +37,8 @@ class UserUpdate(SQLModel):
     password_hash: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
+
+# FIXME: Can likely delete redundant Delete models
 class UserDelete(SQLModel):
     id: int
 
