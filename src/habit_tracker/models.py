@@ -4,8 +4,6 @@ from pydantic import EmailStr, field_validator
 from datetime import datetime, date, time
 from typing import List, Optional
 
-# TODO: Add Created Date and Updated Date to Tracker objects
-
 class UserBase(SQLModel):
     username: str
     first_name: str
@@ -37,11 +35,6 @@ class UserUpdate(SQLModel):
     password_hash: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
-
-# FIXME: Can likely delete redundant Delete models
-class UserDelete(SQLModel):
-    id: int
-
 class UserList(SQLModel):
     users: List[UserRead] = Field(default_factory=list)
 
@@ -50,7 +43,8 @@ class HabitBase(SQLModel):
     name: str
     question: str
     color: str
-    frequency: str
+    frequency: int
+    range: int
     reminder: bool = False
     notes: Optional[str] = None
 
@@ -60,8 +54,6 @@ class Habit(HabitBase, table=True):
     user: Optional["User"] = Relationship(back_populates="habits")
     trackers: List["Tracker"] = Relationship(back_populates="habit", cascade_delete=True)
     name: str = Field()
-    reminder: bool = False
-    notes: Optional[str] = None
     created_date: datetime = Field(default_factory=datetime.now)
     updated_date: Optional[datetime] = None
 
@@ -83,16 +75,12 @@ class HabitUpdate(SQLModel):
     notes: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
-class HabitDelete(SQLModel):
-    id: int
-
 class HabitList(SQLModel):
     habits: List[HabitRead] = Field(default_factory=list)
     
 class TrackerBase(SQLModel):
     habit_id: int
     dated: date = Field(default_factory=datetime.now)
-    timed: time = Field(default_factory=datetime.now)
     completed: bool = True
     skipped: bool = False
     note: Optional[str] = None
@@ -101,6 +89,8 @@ class Tracker(TrackerBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     habit_id: int = Field(foreign_key="habit.id")
     habit: Optional["Habit"] = Relationship(back_populates="trackers")
+    created_date: datetime = Field(default_factory=datetime.now)
+    updated_date: Optional[datetime] = None
 
 class TrackerCreate(TrackerBase):
     pass
@@ -108,10 +98,12 @@ class TrackerCreate(TrackerBase):
 class TrackerRead(TrackerBase):
     id: int
 
-class TrackerUpdate(TrackerBase):
-    id: int
-class TrackerDelete(SQLModel):
-    id: int
+class TrackerUpdate(SQLModel):
+    dated: Optional[date] = None
+    completed: Optional[bool] = None
+    skipped: Optional[bool] = None
+    note: Optional[str] = None
+    updated_date: datetime = Field(default_factory=datetime.now)
 
 class TrackerList(SQLModel):
     trackers: List[TrackerRead] = Field(default_factory=list)
