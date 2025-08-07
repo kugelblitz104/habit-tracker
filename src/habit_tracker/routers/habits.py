@@ -54,7 +54,7 @@ def delete_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=404, detail="Habit not found")
     db.delete(db_habit)
     db.commit()
-    return HabitDelete(id=habit_id)
+    return {"detail": "Habit deleted successfully"}
 
 # @router.get('/')
 # def list_habits(user_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5):

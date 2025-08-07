@@ -53,7 +53,7 @@ def delete_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=404, detail="User not found")
     db.delete(db_user)
     db.commit()
-    return UserDelete(id=user_id)
+    return {"detail": "User deleted successfully"}
 
 @router.get('/')
 def list_users(db: Annotated[Session, Depends(get_db)], limit: int = 5):

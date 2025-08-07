@@ -60,7 +60,8 @@ def create_mock_habits (user: User, num_habits: int = 1):
             name="Drink Water",
             question="Did you drink enough water today?",
             color="#00FF00",
-            frequency="daily",
+            frequency=1,
+            range=1,
             reminder=True,
             notes="Stay hydrated!"
         )
@@ -73,7 +74,8 @@ def create_mock_habits (user: User, num_habits: int = 1):
                 name=f"Habit{i}",
                 question=f"Did you complete habit {i}?",
                 color="#FF0000",
-                frequency="weekly",
+                frequency=1,
+                range=7,
                 reminder=False,
                 notes=f"Notes for habit {i}"
             )
@@ -95,7 +97,6 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
             habit=habit,
             habit_id=habit.id if habit.id is not None else 1,
             dated=datetime.now().date(),
-            timed=datetime.now().time(),
             completed=True,
             skipped=False,
             note="Initial tracker note"
@@ -107,7 +108,6 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
             Tracker(
                 habit_id=habit.id if habit.id is not None else 1,
                 dated=datetime(2025, 6, i),
-                timed=datetime.now().time(),
                 completed=True,
                 skipped=(i % 2 == 0), # Alternate between True and False
                 note=f"Tracker note {i}"

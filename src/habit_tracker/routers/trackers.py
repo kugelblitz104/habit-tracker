@@ -48,7 +48,7 @@ def delete_tracker(tracker_id: int, db: Annotated[Session, Depends(get_db)]):
         raise HTTPException(status_code=404, detail="Tracker not found")
     db.delete(db_tracker)
     db.commit()
-    return TrackerDelete(id=tracker_id)
+    return {"detail": "Tracker deleted successfully"}
 
 # @router.get('/')
 # def list_trackers(habit_id: int, db: Annotated[Session, Depends(get_db)]):
