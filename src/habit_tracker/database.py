@@ -23,7 +23,7 @@ def create_db_and_tables(engine):
             create_mock_trackers(habit, random.randint(1, 5))
 
 
-def create_mock_users(num_users: int = 1):
+def create_mock_users(num_users: int = 1) -> list[User]:
     users = [
         User(
             username="johndoe",
