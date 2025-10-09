@@ -1,14 +1,16 @@
-from sqlmodel import Field, Relationship, SQLModel
-from datetime import datetime
-from pydantic import EmailStr, field_validator
-from datetime import datetime, date, time
+from datetime import date, datetime
 from typing import List, Optional
+
+from pydantic import EmailStr
+from sqlmodel import Field, Relationship, SQLModel
+
 
 class UserBase(SQLModel):
     username: str
     first_name: str
     last_name: str
     email: EmailStr
+
 
 class User(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -18,14 +20,17 @@ class User(UserBase, table=True):
     created_date: datetime = Field(default_factory=datetime.now)
     updated_date: Optional[datetime] = None
 
+
 class UserCreate(UserBase):
     password_hash: str
+
 
 class UserRead(UserBase):
     id: int
     habits: List["Habit"] = Field(default_factory=list)
     created_date: datetime
     updated_date: Optional[datetime] = None
+
 
 class UserUpdate(SQLModel):
     username: Optional[str] = None
@@ -35,8 +40,10 @@ class UserUpdate(SQLModel):
     password_hash: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
+
 class UserList(SQLModel):
     users: List[UserRead] = Field(default_factory=list)
+
 
 class HabitBase(SQLModel):
     user_id: int
@@ -48,23 +55,29 @@ class HabitBase(SQLModel):
     reminder: bool = False
     notes: Optional[str] = None
 
+
 class Habit(HabitBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id")
     user: Optional["User"] = Relationship(back_populates="habits")
-    trackers: List["Tracker"] = Relationship(back_populates="habit", cascade_delete=True)
+    trackers: List["Tracker"] = Relationship(
+        back_populates="habit", cascade_delete=True
+    )
     name: str = Field()
     created_date: datetime = Field(default_factory=datetime.now)
     updated_date: Optional[datetime] = None
 
+
 class HabitCreate(HabitBase):
     pass
+
 
 class HabitRead(HabitBase):
     id: int
     trackers: List["Tracker"] = Field(default_factory=list)
     created_date: datetime
     updated_date: Optional[datetime] = None
+
 
 class HabitUpdate(SQLModel):
     name: Optional[str] = None
@@ -75,15 +88,18 @@ class HabitUpdate(SQLModel):
     notes: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
+
 class HabitList(SQLModel):
     habits: List[HabitRead] = Field(default_factory=list)
-    
+
+
 class TrackerBase(SQLModel):
     habit_id: int
     dated: date = Field(default_factory=datetime.now)
     completed: bool = True
     skipped: bool = False
     note: Optional[str] = None
+
 
 class Tracker(TrackerBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -92,11 +108,14 @@ class Tracker(TrackerBase, table=True):
     created_date: datetime = Field(default_factory=datetime.now)
     updated_date: Optional[datetime] = None
 
+
 class TrackerCreate(TrackerBase):
     pass
 
+
 class TrackerRead(TrackerBase):
     id: int
+
 
 class TrackerUpdate(SQLModel):
     dated: Optional[date] = None
@@ -104,6 +123,7 @@ class TrackerUpdate(SQLModel):
     skipped: Optional[bool] = None
     note: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
+
 
 class TrackerList(SQLModel):
     trackers: List[TrackerRead] = Field(default_factory=list)

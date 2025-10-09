@@ -1,7 +1,5 @@
-from ..database import SessionLocal
-from sqlalchemy.orm import Session
-from typing import Annotated
-from fastapi import Header, HTTPException
+from habit_tracker.database import SessionLocal
+
 
 def get_db():
     db = SessionLocal()
