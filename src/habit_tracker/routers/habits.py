@@ -45,8 +45,8 @@ def list_habit_trackers(
     db_trackers = (
         db.query(Tracker)
         .filter(getattr(Tracker, "habit_id") == habit_id)
-        .limit(limit)
         .order_by(Tracker.dated.desc())
+        .limit(limit)
         .all()
     )
     return [TrackerRead.model_validate(t) for t in db_trackers]
