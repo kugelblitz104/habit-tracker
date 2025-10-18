@@ -1,9 +1,16 @@
-from habit_tracker.models.habits import HabitCreate, HabitList, HabitRead, HabitUpdate
+from habit_tracker.models.habits import (
+    HabitCreate,
+    HabitList,
+    HabitRead,
+    HabitUpdate,
+    HabitKPIs,
+)
 from habit_tracker.models.trackers import (
     TrackerCreate,
     TrackerList,
     TrackerRead,
     TrackerUpdate,
+    Streak,
 )
 from habit_tracker.models.users import (
     UserCreate,
@@ -27,8 +34,10 @@ __all__ = [
     "HabitRead",
     "HabitUpdate",
     "HabitList",
+    "HabitKPIs",
     "TrackerCreate",
     "TrackerRead",
     "TrackerUpdate",
     "TrackerList",
+    "Streak",
 ]

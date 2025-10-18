@@ -28,6 +28,16 @@ class HabitRead(HabitBase):
     updated_date: Optional[datetime] = None
 
 
+class HabitKPIs(BaseModel):
+    id: int
+    current_streak: int | None
+    longest_streak: int | None
+    total_completions: int
+    thirty_day_completion_rate: float
+    overall_completion_rate: float
+    last_completed_date: Optional[datetime] = None
+
+
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
     question: Optional[str] = None

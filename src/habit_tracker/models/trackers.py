@@ -35,3 +35,15 @@ class TrackerUpdate(BaseModel):
 
 class TrackerList(BaseModel):
     trackers: List[TrackerRead] = []
+
+
+class Streak(BaseModel):
+    start_date: date
+    end_date: date
+
+    @classmethod
+    def from_date(cls, start: date) -> "Streak":
+        return cls(start_date=start, end_date=start)
+
+    def length(self) -> int:
+        return (self.end_date - self.start_date).days
