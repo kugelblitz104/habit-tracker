@@ -1,10 +1,10 @@
 import random
 from datetime import datetime
 
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlmodel import SQLModel, create_engine
 
-from habit_tracker.models import Habit, Tracker, User
+from habit_tracker.schemas.db_models import Base, Habit, Tracker, User
 
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
@@ -15,7 +15,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def create_db_and_tables(engine):
-    SQLModel.metadata.create_all(engine)
+    Base.metadata.create_all(engine)
     users = create_mock_users(random.randint(1, 5))  # Create between 1 and 5 mock users
     for user in users:
         habits = create_mock_habits(user, random.randint(1, 3))

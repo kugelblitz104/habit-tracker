@@ -21,7 +21,7 @@ router = APIRouter(
 
 @router.post("/")
 def create_tracker(tracker: TrackerCreate, db: Annotated[Session, Depends(get_db)]):
-    db_tracker = Tracker.model_validate(tracker)
+    db_tracker = Tracker(**tracker.model_dump())
     db.add(db_tracker)
     db.commit()
     db.refresh(db_tracker)
@@ -45,10 +45,9 @@ def update_tracker(
     db_tracker = db.get(Tracker, tracker_id)
     if not db_tracker:
         raise HTTPException(status_code=404, detail="Tracker not found")
-    tracker_data = TrackerUpdate.model_validate(tracker_update)
-    for key, value in tracker_data.model_dump().items():
-        if value is not None:
-            setattr(db_tracker, key, value)
+    tracker_data = tracker_update.model_dump(exclude_unset=True)
+    for key, value in tracker_data.items():
+        setattr(db_tracker, key, value)
     db.commit()
     db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)

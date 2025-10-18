@@ -22,7 +22,7 @@ router = APIRouter(
 
 @router.post("/")
 def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
-    db_user = User.model_validate(user)
+    db_user = User(**user.model_dump())
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -57,10 +57,9 @@ def update_user(
     db_user = db.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
-    user_data = UserUpdate.model_validate(user_update)
-    for key, value in user_data.model_dump().items():
-        if value is not None:
-            setattr(db_user, key, value)
+    user_data = user_update.model_dump(exclude_unset=True)
+    for key, value in user_data.items():
+        setattr(db_user, key, value)
     db.commit()
     db.refresh(db_user)
     return UserRead.model_validate(db_user)

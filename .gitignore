@@ -277,3 +277,5 @@ http-client.private.env.json
 .cursorindexingignore
 
 database.db
+
+.hintrc
