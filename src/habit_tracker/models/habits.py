@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
+import re
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # Habit Schemas
@@ -14,6 +15,20 @@ class HabitBase(BaseModel):
     range: int
     reminder: bool = False
     notes: Optional[str] = None
+
+    @field_validator("color")
+    @classmethod
+    def validate_color(cls, v: str) -> str:
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
+            raise ValueError("Color must be a valid hex code, e.g., #FFF or #FFFFFF")
+        return v
+
+    @field_validator("frequency", "range")
+    @classmethod
+    def validate_frequency_and_range(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("Frequency and range must be positive integers")
+        return v
 
 
 class HabitCreate(HabitBase):
@@ -35,7 +50,7 @@ class HabitKPIs(BaseModel):
     total_completions: int
     thirty_day_completion_rate: float
     overall_completion_rate: float
-    last_completed_date: Optional[datetime] = None
+    last_completed_date: Optional[date] = None
 
 
 class HabitUpdate(BaseModel):
@@ -45,8 +60,11 @@ class HabitUpdate(BaseModel):
     frequency: Optional[int] = None
     reminder: Optional[bool] = None
     notes: Optional[str] = None
-    updated_date: datetime = datetime.now()
+    updated_date: datetime = Field(default_factory=datetime.now)
 
 
 class HabitList(BaseModel):
     habits: List[HabitRead] = []
+    total: int
+    limit: int
+    offset: int

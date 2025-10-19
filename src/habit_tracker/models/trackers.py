@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # Tracker Schemas
@@ -30,11 +30,14 @@ class TrackerUpdate(BaseModel):
     completed: Optional[bool] = None
     skipped: Optional[bool] = None
     note: Optional[str] = None
-    updated_date: datetime = datetime.now()
+    updated_date: datetime = Field(default_factory=datetime.now)
 
 
 class TrackerList(BaseModel):
     trackers: List[TrackerRead] = []
+    total: int
+    limit: int
+    offset: int
 
 
 class Streak(BaseModel):
@@ -46,4 +49,4 @@ class Streak(BaseModel):
         return cls(start_date=start, end_date=start)
 
     def length(self) -> int:
-        return (self.end_date - self.start_date).days
+        return (self.end_date - self.start_date).days + 1

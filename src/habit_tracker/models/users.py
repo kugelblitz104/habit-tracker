@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # User Schemas
@@ -30,8 +30,11 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     email: Optional[EmailStr] = None
     password_hash: Optional[str] = None
-    updated_date: datetime = datetime.now()
+    updated_date: datetime = Field(default_factory=datetime.now)
 
 
 class UserList(BaseModel):
     users: List[UserRead] = []
+    total: int
+    limit: int
+    offset: int

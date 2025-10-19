@@ -1,26 +1,30 @@
+import os
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from habit_tracker.schemas.db_models import Base, Habit, Tracker, User
 
+echo = os.getenv("SQLALCHEMY_ECHO", "true").lower() == "true"
 sqlite_file_name = "database.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
-engine = create_engine(sqlite_url, echo=True)
+engine = create_engine(sqlite_url, echo=echo)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 def create_db_and_tables(engine):
     Base.metadata.create_all(engine)
-    users = create_mock_users(random.randint(1, 5))  # Create between 1 and 5 mock users
-    for user in users:
-        habits = create_mock_habits(user, random.randint(1, 3))
-        for habit in habits:
-            create_mock_trackers(habit, random.randint(1, 5))
+    with SessionLocal() as session:
+        if session.query(User).count() == 0:
+            users = create_mock_users(random.randint(1, 5))
+            for user in users:
+                habits = create_mock_habits(user, random.randint(1, 3))
+                for habit in habits:
+                    create_mock_trackers(habit, random.randint(1, 5))
 
 
 def create_mock_users(num_users: int = 1) -> list[User]:
@@ -112,7 +116,7 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
         trackers.append(
             Tracker(
                 habit_id=habit.id if habit.id is not None else 1,
-                dated=datetime(2025, 6, i),
+                dated=datetime.now().date() - timedelta(days=num_trackers - i),
                 completed=True,
                 skipped=(i % 2 == 0),  # Alternate between True and False
                 note=f"Tracker note {i}",

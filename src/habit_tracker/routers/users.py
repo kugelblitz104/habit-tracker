@@ -1,6 +1,7 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from habit_tracker.core.dependencies import get_db
@@ -21,7 +22,7 @@ router = APIRouter(
 
 
 @router.post("/")
-def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
+def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]) -> UserRead:
     db_user = User(**user.model_dump())
     db.add(db_user)
     db.commit()
@@ -30,7 +31,7 @@ def create_user(user: UserCreate, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("/{user_id}")
-def read_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
+def read_user(user_id: int, db: Annotated[Session, Depends(get_db)]) -> UserRead:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -39,21 +40,26 @@ def read_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
 
 @router.get("/{user_id}/habits")
 def list_user_habits(
-    user_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5
-):
+    user_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=5, ge=1, le=100),
+) -> HabitList:
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    db_habits = (
-        db.query(Habit).filter(getattr(Habit, "user_id") == user_id).limit(limit).all()
+    db_habits = db.query(Habit).filter(Habit.user_id == user_id).limit(limit).all()
+    return HabitList(
+        habits=[HabitRead.model_validate(h) for h in db_habits],
+        total=db.query(Habit).filter(Habit.user_id == user_id).count(),
+        limit=limit,
+        offset=0,
     )
-    return HabitList(habits=[HabitRead.model_validate(h) for h in db_habits])
 
 
 @router.put("/{user_id}")
 def update_user(
     user_id: int, user_update: UserUpdate, db: Annotated[Session, Depends(get_db)]
-):
+) -> UserRead:
     db_user = db.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -66,16 +72,25 @@ def update_user(
 
 
 @router.delete("/{user_id}")
-def delete_user(user_id: int, db: Annotated[Session, Depends(get_db)]):
+def delete_user(user_id: int, db: Annotated[Session, Depends(get_db)]) -> JSONResponse:
     db_user = db.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     db.delete(db_user)
     db.commit()
-    return {"detail": "User deleted successfully"}
+    return JSONResponse(
+        content={"detail": "User deleted successfully"}, status_code=200
+    )
 
 
 @router.get("/")
-def list_users(db: Annotated[Session, Depends(get_db)], limit: int = 5):
+def list_users(
+    db: Annotated[Session, Depends(get_db)], limit: int = Query(default=5, ge=1, le=100)
+) -> UserList:
     db_users = db.query(User).limit(limit).all()
-    return UserList(users=[UserRead.model_validate(u) for u in db_users])
+    return UserList(
+        users=[UserRead.model_validate(u) for u in db_users],
+        total=db.query(User).count(),
+        limit=limit,
+        offset=0,
+    )

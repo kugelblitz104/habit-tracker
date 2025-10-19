@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -43,14 +43,16 @@ def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitR
 
 @router.get("/{habit_id}/trackers")
 def list_habit_trackers(
-    habit_id: int, db: Annotated[Session, Depends(get_db)], limit: int = 5
+    habit_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    limit: int = Query(default=5, ge=1, le=100),
 ) -> list[TrackerRead]:
     habit = db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     db_trackers = (
         db.query(Tracker)
-        .filter(getattr(Tracker, "habit_id") == habit_id)
+        .filter(Tracker.habit_id == habit_id)
         .order_by(Tracker.dated.desc())
         .limit(limit if limit > 0 else None)
         .all()
@@ -76,7 +78,7 @@ def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> Ha
 
     last_tracker = (
         db.query(Tracker)
-        .filter(getattr(Tracker, "habit_id") == habit_id)
+        .filter(Tracker.habit_id == habit_id)
         .order_by(Tracker.dated.desc())
         .first()
     )
@@ -88,8 +90,8 @@ def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> Ha
 
     kpis = HabitKPIs(
         id=habit.id,
-        current_streak=current_streak,
-        longest_streak=longest_streak,
+        current_streak=current_streak if len(streaks) > 0 else 0,
+        longest_streak=longest_streak if len(streaks) > 0 else 0,
         total_completions=count_completions,
         thirty_day_completion_rate=(
             thirty_day_completions / 30 if thirty_day_completions > 0 else 0

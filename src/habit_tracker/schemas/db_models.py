@@ -1,7 +1,16 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Date, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -64,7 +73,7 @@ class Tracker(Base):
     habit_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("habit.id", ondelete="CASCADE"), nullable=False
     )
-    dated: Mapped[datetime] = mapped_column(Date, default=datetime.now, nullable=False)
+    dated: Mapped[date] = mapped_column(Date, default=date.today, nullable=False)
     completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -75,3 +84,9 @@ class Tracker(Base):
 
     # Relationships
     habit: Mapped["Habit"] = relationship("Habit", back_populates="trackers")
+
+    # Constraints
+    __table_args__ = (
+        # Ensure one tracker per habit per date
+        UniqueConstraint("habit_id", "dated", name="uix_habit_dated"),
+    )
