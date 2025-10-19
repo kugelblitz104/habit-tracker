@@ -12,9 +12,10 @@ from habit_tracker.models import (
     HabitKPIs,
     HabitRead,
     HabitUpdate,
-    Tracker,
-    TrackerRead,
     Streak,
+    Tracker,
+    TrackerList,
+    TrackerRead,
 )
 
 router = APIRouter(
@@ -62,8 +63,13 @@ def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitR
 def list_habit_trackers(
     habit_id: int,
     db: Annotated[Session, Depends(get_db)],
-    limit: int = Query(default=5, ge=1, le=100, description="Maximum number of trackers to return (1-100)"),
-) -> list[TrackerRead]:
+    limit: int = Query(
+        default=5,
+        ge=1,
+        le=100,
+        description="Maximum number of trackers to return (1-100)",
+    ),
+) -> TrackerList:
     """
     Get all tracker entries for a specific habit, ordered by date (most recent first).
 
@@ -82,7 +88,12 @@ def list_habit_trackers(
         .limit(limit if limit > 0 else None)
         .all()
     )
-    return [TrackerRead.model_validate(t) for t in db_trackers]
+    return TrackerList(
+        trackers=[TrackerRead.model_validate(t) for t in db_trackers],
+        total=len(db_trackers),
+        limit=limit,
+        offset=0,
+    )
 
 
 @router.get("/{habit_id}/kpis", summary="Get habit KPIs and statistics")
@@ -158,7 +169,9 @@ def get_habit_streaks(
     habit = read_habit(habit_id, db)
     days_since_created = (datetime.now().date() - habit.created_date.date()).days
 
-    all_trackers = list_habit_trackers(habit_id, db=db, limit=days_since_created + 1)
+    all_trackers = list_habit_trackers(
+        habit_id, db=db, limit=days_since_created + 1
+    ).trackers
     completed_dates = [x.dated for x in all_trackers if x.completed]
     skipped_dates = [x.dated for x in all_trackers if x.skipped]
 
