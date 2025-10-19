@@ -22,10 +22,22 @@ router = APIRouter(
 )
 
 
-@router.post("/")
+@router.post("/", status_code=201, summary="Create a new habit")
 def create_habit(
     habit: HabitCreate, db: Annotated[Session, Depends(get_db)]
 ) -> HabitRead:
+    """
+    Create a new habit with the following information:
+
+    - **user_id**: The ID of the user who owns this habit
+    - **name**: Name of the habit
+    - **question**: The daily question to prompt for this habit
+    - **color**: Color code for visual representation
+    - **frequency**: How many times the habit should be completed within the range
+    - **range**: The number of days within which the frequency should be met
+    - **reminder**: Whether to enable reminders for this habit
+    - **notes**: Optional additional notes about the habit
+    """
     db_habit = Habit(**habit.model_dump())
     db.add(db_habit)
     db.commit()
@@ -33,20 +45,33 @@ def create_habit(
     return HabitRead.model_validate(db_habit)
 
 
-@router.get("/{habit_id}")
+@router.get("/{habit_id}", summary="Get a habit by ID")
 def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitRead:
+    """
+    Retrieve a specific habit by its ID.
+
+    - **habit_id**: The unique identifier of the habit to retrieve
+    """
     habit = db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     return HabitRead.model_validate(habit)
 
 
-@router.get("/{habit_id}/trackers")
+@router.get("/{habit_id}/trackers", summary="List all trackers for a habit")
 def list_habit_trackers(
     habit_id: int,
     db: Annotated[Session, Depends(get_db)],
-    limit: int = Query(default=5, ge=1, le=100),
+    limit: int = Query(default=5, ge=1, le=100, description="Maximum number of trackers to return (1-100)"),
 ) -> list[TrackerRead]:
+    """
+    Get all tracker entries for a specific habit, ordered by date (most recent first).
+
+    - **habit_id**: The unique identifier of the habit
+    - **limit**: Maximum number of trackers to return (default: 5, max: 100)
+
+    Returns tracker entries showing completion/skip status for each date.
+    """
     habit = db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
@@ -60,8 +85,21 @@ def list_habit_trackers(
     return [TrackerRead.model_validate(t) for t in db_trackers]
 
 
-@router.get("/{habit_id}/kpis")
+@router.get("/{habit_id}/kpis", summary="Get habit KPIs and statistics")
 def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitKPIs:
+    """
+    Get Key Performance Indicators (KPIs) for a specific habit.
+
+    - **habit_id**: The unique identifier of the habit
+
+    Returns comprehensive statistics including:
+    - Current streak length
+    - Longest streak achieved
+    - Total completions
+    - 30-day completion rate
+    - Overall completion rate since creation
+    - Last completed date
+    """
     habit = read_habit(habit_id, db=db)
 
     thirty_day_completions = (
@@ -105,10 +143,18 @@ def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> Ha
     return HabitKPIs.model_validate(kpis)
 
 
-@router.get("/{habit_id}/streaks")
+@router.get("/{habit_id}/streaks", summary="Get habit streaks")
 def get_habit_streaks(
     habit_id, db: Annotated[Session, Depends(get_db)]
 ) -> list[Streak]:
+    """
+    Get all streak periods for a specific habit.
+
+    - **habit_id**: The unique identifier of the habit
+
+    Returns a list of all streak periods with start and end dates.
+    Streaks are calculated based on the habit's frequency and range settings.
+    """
     habit = read_habit(habit_id, db)
     days_since_created = (datetime.now().date() - habit.created_date.date()).days
 
@@ -161,10 +207,18 @@ def get_habit_streaks(
     return streaks
 
 
-@router.put("/{habit_id}")
+@router.put("/{habit_id}", summary="Replace a habit (full update)")
 def update_habit(
     habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]
 ) -> HabitRead:
+    """
+    Replace all fields of an existing habit. All fields must be provided.
+
+    This performs a full replacement of the habit resource.
+    Use PATCH if you want to update only specific fields.
+
+    - **habit_id**: The unique identifier of the habit to update
+    """
     db_habit = db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
@@ -176,10 +230,27 @@ def update_habit(
     return HabitRead.model_validate(db_habit)
 
 
-@router.patch("/{habit_id}")
+@router.patch("/{habit_id}", summary="Update a habit (partial update)")
 def patch_habit(
     habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]
 ) -> HabitRead:
+    """
+    Update specific fields of an existing habit. Only provided fields will be updated.
+
+    This performs a partial update of the habit resource.
+    Use PUT if you want to replace the entire resource.
+
+    - **habit_id**: The unique identifier of the habit to update
+
+    You can update any combination of these fields:
+    - **name**: Name of the habit
+    - **question**: The daily question to prompt for this habit
+    - **color**: Color code for visual representation
+    - **frequency**: How many times the habit should be completed within the range
+    - **range**: The number of days within which the frequency should be met
+    - **reminder**: Whether to enable reminders for this habit
+    - **notes**: Optional additional notes about the habit
+    """
     db_habit = db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
@@ -191,10 +262,17 @@ def patch_habit(
     return HabitRead.model_validate(db_habit)
 
 
-@router.delete("/{habit_id}")
+@router.delete("/{habit_id}", summary="Delete a habit")
 def delete_habit(
     habit_id: int, db: Annotated[Session, Depends(get_db)]
 ) -> JSONResponse:
+    """
+    Delete a habit by its ID.
+
+    - **habit_id**: The unique identifier of the habit to delete
+
+    This action cannot be undone. All associated tracker entries will also be deleted.
+    """
     db_habit = db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
