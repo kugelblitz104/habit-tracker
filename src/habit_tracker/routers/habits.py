@@ -168,6 +168,21 @@ def update_habit(
     db_habit = db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
+    habit_data = habit_update.model_dump()
+    for key, value in habit_data.items():
+        setattr(db_habit, key, value)
+    db.commit()
+    db.refresh(db_habit)
+    return HabitRead.model_validate(db_habit)
+
+
+@router.patch("/{habit_id}")
+def patch_habit(
+    habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]
+) -> HabitRead:
+    db_habit = db.get(Habit, habit_id)
+    if not db_habit:
+        raise HTTPException(status_code=404, detail="Habit not found")
     habit_data = habit_update.model_dump(exclude_unset=True)
     for key, value in habit_data.items():
         setattr(db_habit, key, value)

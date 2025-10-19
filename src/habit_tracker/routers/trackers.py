@@ -49,6 +49,23 @@ def update_tracker(
     db_tracker = db.get(Tracker, tracker_id)
     if not db_tracker:
         raise HTTPException(status_code=404, detail="Tracker not found")
+    tracker_data = tracker_update.model_dump()
+    for key, value in tracker_data.items():
+        setattr(db_tracker, key, value)
+    db.commit()
+    db.refresh(db_tracker)
+    return TrackerRead.model_validate(db_tracker)
+
+
+@router.patch("/{tracker_id}")
+def patch_tracker(
+    tracker_id: int,
+    tracker_update: TrackerUpdate,
+    db: Annotated[Session, Depends(get_db)],
+) -> TrackerRead:
+    db_tracker = db.get(Tracker, tracker_id)
+    if not db_tracker:
+        raise HTTPException(status_code=404, detail="Tracker not found")
     tracker_data = tracker_update.model_dump(exclude_unset=True)
     for key, value in tracker_data.items():
         setattr(db_tracker, key, value)

@@ -63,6 +63,21 @@ def update_user(
     db_user = db.get(User, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+    user_data = user_update.model_dump()
+    for key, value in user_data.items():
+        setattr(db_user, key, value)
+    db.commit()
+    db.refresh(db_user)
+    return UserRead.model_validate(db_user)
+
+
+@router.patch("/{user_id}")
+def patch_user(
+    user_id: int, user_update: UserUpdate, db: Annotated[Session, Depends(get_db)]
+) -> UserRead:
+    db_user = db.get(User, user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
     user_data = user_update.model_dump(exclude_unset=True)
     for key, value in user_data.items():
         setattr(db_user, key, value)
