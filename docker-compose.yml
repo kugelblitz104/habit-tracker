@@ -13,10 +13,41 @@ services:
         volumes:
             - postgres_data:/var/lib/postgresql/data
         healthcheck:
-            test: ['CMD-SHELL', 'pg_isready -U habit_tracker -d habit_tracker_dev']
+            test:
+                [
+                    'CMD-SHELL',
+                    'pg_isready -U habit_tracker -d habit_tracker_dev'
+                ]
             interval: 10s
             timeout: 5s
             retries: 5
+
+    api:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: habit_tracker_api
+        environment:
+            DATABASE_URL: postgresql://habit_tracker:dev_password@postgres:5432/habit_tracker_dev
+        ports:
+            - '8080:8080'
+        depends_on:
+            postgres:
+                condition: service_healthy
+        volumes:
+            - ./src:/code/src
+        command:
+            [
+                'uv',
+                'run',
+                'uvicorn',
+                'habit_tracker.main:app',
+                '--host',
+                '0.0.0.0',
+                '--port',
+                '8080',
+                '--reload'
+            ]
 
 volumes:
     postgres_data:
