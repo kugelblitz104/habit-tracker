@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+    postgres:
+        image: postgres:16-alpine
+        container_name: habit_tracker_db
+        environment:
+            POSTGRES_USER: habit_tracker
+            POSTGRES_PASSWORD: dev_password
+            POSTGRES_DB: habit_tracker_dev
+        ports:
+            - '5432:5432'
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U habit_tracker -d habit_tracker_dev']
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+volumes:
+    postgres_data:

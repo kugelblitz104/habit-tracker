@@ -279,3 +279,7 @@ http-client.private.env.json
 database.db
 
 .hintrc
+
+# Alembic
+*.pyc
+__pycache__/
