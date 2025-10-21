@@ -20,7 +20,3 @@ native-tls = true
 
 [project.scripts]
 habit-tracker = "habit_tracker.main:app"
-init-db = "habit_tracker.database:init_db"
-reset-db = "habit_tracker.database:reset_db"
-seed-db = "habit_tracker.database:seed_db"
-backup-db = "habit_tracker.database:backup_db"
