@@ -13,6 +13,6 @@ COPY ./src /code/src
 COPY ./alembic.ini /code/alembic.ini
 COPY ./alembic /code/alembic
 
-WORKDIR /code/src
+WORKDIR /code
 
-CMD uv run alembic upgrade head && uv run uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080
+CMD uv run alembic upgrade head && uv run uvicorn src.habit_tracker.main:app --host 0.0.0.0 --port 8080
