@@ -12,5 +12,4 @@ COPY ./src /code/src
 
 WORKDIR /code/src
 
-RUN alembic upgrade head
-CMD ["uv", "run", "uvicorn", "habit_tracker.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD uv run alembic upgrade head && uv run uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080
