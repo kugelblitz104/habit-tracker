@@ -27,6 +27,7 @@ services:
         container_name: habit_tracker_api
         environment:
             DATABASE_URL: postgresql://habit_tracker:dev_password@postgres:5432/habit_tracker_dev
+            CORS_ORIGINS: http://localhost:5173
         ports:
             - '8080:8080'
         depends_on:
@@ -34,18 +35,9 @@ services:
                 condition: service_healthy
         volumes:
             - ./src:/code/src
-        command:
-            [
-                'uv',
-                'run',
-                'uvicorn',
-                'habit_tracker.main:app',
-                '--host',
-                '0.0.0.0',
-                '--port',
-                '8080',
-                '--reload'
-            ]
+        command: >
+            sh -c "uv run alembic upgrade head && 
+            uv run uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080 --reload"
 
 volumes:
     postgres_data:
