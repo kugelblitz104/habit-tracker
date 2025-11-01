@@ -13,13 +13,15 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password_hash: str
+    plaintext_password: str
+    is_admin: bool = False
 
 
 class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    is_admin: bool
     created_date: datetime
     updated_date: Optional[datetime] = None
 
@@ -30,6 +32,7 @@ class UserUpdate(BaseModel):
     last_name: Optional[str] = None
     email: Optional[EmailStr] = None
     password_hash: Optional[str] = None
+    is_admin: Optional[bool] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
 
@@ -38,3 +41,18 @@ class UserList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class Token(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class TokenData(BaseModel):
+    user_id: Optional[int] = None

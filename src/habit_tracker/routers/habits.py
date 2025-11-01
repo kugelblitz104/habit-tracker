@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 
-from habit_tracker.core.dependencies import get_db
+from habit_tracker.core.dependencies import get_current_user, get_db
 from habit_tracker.models import (
     Habit,
     HabitCreate,
@@ -18,15 +18,18 @@ from habit_tracker.models import (
     TrackerList,
     TrackerRead,
 )
+from habit_tracker.schemas.db_models import User
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
 )
 
 
-@router.post("/", status_code=201, summary="Create a new habit")
+@router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a new habit")
 async def create_habit(
-    habit: HabitCreate, db: Annotated[AsyncSession, Depends(get_db)]
+    habit: HabitCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HabitRead:
     """
     Create a new habit with the following information:
@@ -40,7 +43,7 @@ async def create_habit(
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
     """
-    db_habit = Habit(**habit.model_dump())
+    db_habit = Habit(**habit.model_dump(), user_id=current_user.id)
     db.add(db_habit)
     await db.commit()
     await db.refresh(db_habit)
@@ -49,7 +52,9 @@ async def create_habit(
 
 @router.get("/{habit_id}", summary="Get a habit by ID")
 async def read_habit(
-    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+    habit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HabitRead:
     """
     Retrieve a specific habit by its ID.
@@ -58,7 +63,15 @@ async def read_habit(
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+
+    if habit.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this habit",
+        )
     return HabitRead.model_validate(habit)
 
 
@@ -66,6 +79,7 @@ async def read_habit(
 async def list_habit_trackers(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(
         default=5,
         ge=1,
@@ -83,7 +97,14 @@ async def list_habit_trackers(
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    if habit.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this habit's trackers",
+        )
 
     result = await db.execute(
         select(Tracker)
@@ -103,7 +124,9 @@ async def list_habit_trackers(
 
 @router.get("/{habit_id}/kpis", summary="Get habit KPIs and statistics")
 async def get_habit_kpis(
-    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+    habit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HabitKPIs:
     """
     Get Key Performance Indicators (KPIs) for a specific habit.
@@ -118,7 +141,7 @@ async def get_habit_kpis(
     - Overall completion rate since creation
     - Last completed date
     """
-    habit = await read_habit(habit_id, db=db)
+    habit = await read_habit(habit_id, db, current_user)
 
     thirty_day_completions = (
         await db.execute(
@@ -143,7 +166,7 @@ async def get_habit_kpis(
         )
     ).scalar()
 
-    streaks = await get_habit_streaks(habit_id, db=db)
+    streaks = await get_habit_streaks(habit_id, db, current_user)
     if len(streaks) > 0:
         current_streak = streaks[-1].length()
         longest_streak = max((s.length() for s in streaks), default=0)
@@ -173,7 +196,9 @@ async def get_habit_kpis(
 
 @router.get("/{habit_id}/streaks", summary="Get habit streaks")
 async def get_habit_streaks(
-    habit_id, db: Annotated[AsyncSession, Depends(get_db)]
+    habit_id,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[Streak]:
     """
     Get all streak periods for a specific habit.
@@ -183,11 +208,11 @@ async def get_habit_streaks(
     Returns a list of all streak periods with start and end dates.
     Streaks are calculated based on the habit's frequency and range settings.
     """
-    habit = await read_habit(habit_id, db)
+    habit = await read_habit(habit_id, db, current_user)
     days_since_created = (datetime.now().date() - habit.created_date.date()).days
 
     tracker_list = await list_habit_trackers(
-        habit_id, db=db, limit=days_since_created + 1
+        habit_id, db=db, current_user=current_user, limit=days_since_created + 1
     )
     all_trackers = tracker_list.trackers
     completed_dates = [x.dated for x in all_trackers if x.completed]
@@ -243,6 +268,7 @@ async def update_habit(
     habit_id: int,
     habit_update: HabitUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HabitRead:
     """
     Replace all fields of an existing habit. All fields must be provided.
@@ -254,7 +280,15 @@ async def update_habit(
     """
     db_habit = await db.get(Habit, habit_id)
     if not db_habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+
+    if db_habit.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update this habit",
+        )
     habit_data = habit_update.model_dump()
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
@@ -268,6 +302,7 @@ async def patch_habit(
     habit_id: int,
     habit_update: HabitUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> HabitRead:
     """
     Update specific fields of an existing habit. Only provided fields will be updated.
@@ -288,7 +323,14 @@ async def patch_habit(
     """
     db_habit = await db.get(Habit, habit_id)
     if not db_habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    if db_habit.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update this habit",
+        )
     habit_data = habit_update.model_dump(exclude_unset=True)
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
@@ -299,7 +341,9 @@ async def patch_habit(
 
 @router.delete("/{habit_id}", summary="Delete a habit")
 async def delete_habit(
-    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+    habit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     """
     Delete a habit by its ID.
@@ -310,7 +354,14 @@ async def delete_habit(
     """
     db_habit = await db.get(Habit, habit_id)
     if not db_habit:
-        raise HTTPException(status_code=404, detail="Habit not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    if db_habit.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this habit",
+        )
     await db.delete(db_habit)
     await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

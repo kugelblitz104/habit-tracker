@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 
-from habit_tracker.routers import habits, trackers, users
+from habit_tracker.routers import habits, trackers, users, auth
 
 load_dotenv()
 
@@ -29,3 +29,4 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(habits.router)
 app.include_router(trackers.router)
+app.include_router(auth.router)
