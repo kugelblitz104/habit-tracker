@@ -9,7 +9,7 @@ load_dotenv()
 
 class Settings(BaseSettings):
     database_url: str = ""
-    sqlalchemy_echo: bool = True
+    sqlalchemy_echo: bool = False
 
     # for local development only
     secret_key: str = "secretsecretsecret"
