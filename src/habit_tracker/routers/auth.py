@@ -55,8 +55,8 @@ async def register(user_data: UserCreate, db: Annotated[AsyncSession, Depends(ge
     await db.refresh(new_user)
 
     # Generate tokens
-    access_token = create_access_token(data={"sub": new_user.id})
-    refresh_token = create_refresh_token(data={"sub": new_user.id})
+    access_token = create_access_token(data={"sub": str(new_user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(new_user.id)})
 
     return {
         "access_token": access_token,
@@ -80,11 +80,6 @@ async def login(
     user = await db.execute(select(User).filter(User.username == form_data.username))
     user = user.scalar_one_or_none()
 
-    if not user:
-        # Try by email
-        user = await db.execute(select(User).filter(User.email == form_data.username))
-        user = user.scalar_one_or_none()
-
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -92,8 +87,8 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token = create_access_token(data={"sub": user.id})
-    refresh_token = create_refresh_token(data={"sub": user.id})
+    access_token = create_access_token(data={"sub": str(user.id)})
+    refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
     return {
         "access_token": access_token,
@@ -122,8 +117,8 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
         )
 
-    new_access_token = create_access_token(data={"sub": user.id})
-    new_refresh_token = create_refresh_token(data={"sub": user.id})
+    new_access_token = create_access_token(data={"sub": str(user.id)})
+    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
     return {
         "access_token": new_access_token,
