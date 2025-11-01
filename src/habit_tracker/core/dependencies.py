@@ -1,12 +1,11 @@
 import logging
 from typing import Annotated
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from habit_tracker.database import SessionLocal
-from habit_tracker.models.users import UserRead
 from habit_tracker.schemas.db_models import User
 from habit_tracker.core.security import decode_token
 
@@ -25,14 +24,13 @@ async def get_db():
             await db.close()
 
 
-security = HTTPBearer()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 async def get_current_user(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
+    token: Annotated[str, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
-    token = credentials.credentials
     payload = decode_token(token)
 
     if payload is None:
@@ -88,7 +86,9 @@ def is_admin_or_owner(current_user: User, resource_user_id: int) -> bool:
     return current_user.is_admin or current_user.id == resource_user_id
 
 
-def authorize_resource_access(current_user: User, resource_user_id: int, resource_name: str = "resource") -> None:
+def authorize_resource_access(
+    current_user: User, resource_user_id: int, resource_name: str = "resource"
+) -> None:
     """
     Authorize access to a resource. Raises 403 if unauthorized.
 
