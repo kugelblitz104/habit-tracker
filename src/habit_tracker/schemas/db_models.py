@@ -29,6 +29,7 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

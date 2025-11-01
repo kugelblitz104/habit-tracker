@@ -1,11 +1,11 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import get_db
+from habit_tracker.core.dependencies import get_current_user, get_db
 from habit_tracker.models import (
     Habit,
     HabitList,
@@ -22,7 +22,7 @@ router = APIRouter(
 )
 
 
-@router.post("/", status_code=201, summary="Create a new user")
+@router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a new user")
 async def create_user(
     user: UserCreate, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> UserRead:
@@ -44,16 +44,26 @@ async def create_user(
 
 @router.get("/{user_id}", summary="Get a user by ID")
 async def read_user(
-    user_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+    user_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserRead:
     """
     Retrieve a specific user by their ID.
 
     - **user_id**: The unique identifier of the user to retrieve
     """
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this user",
+        )
+
     user = await db.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     return UserRead.model_validate(user)
 
 
@@ -61,6 +71,7 @@ async def read_user(
 async def list_user_habits(
     user_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(
         default=5,
         ge=1,
@@ -74,9 +85,17 @@ async def list_user_habits(
     - **user_id**: The unique identifier of the user
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
     """
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this user's habits",
+        )
+
     user = await db.get(User, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     result = await db.execute(
         select(Habit).filter(Habit.user_id == user_id).limit(limit)
@@ -98,7 +117,10 @@ async def list_user_habits(
 
 @router.put("/{user_id}", summary="Replace a user (full update)")
 async def update_user(
-    user_id: int, user_update: UserUpdate, db: Annotated[AsyncSession, Depends(get_db)]
+    user_id: int,
+    user_update: UserUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserRead:
     """
     Replace all fields of an existing user. All fields must be provided.
@@ -108,9 +130,17 @@ async def update_user(
 
     - **user_id**: The unique identifier of the user to update
     """
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update this user",
+        )
+
     db_user = await db.get(User, user_id)
     if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     user_data = user_update.model_dump()
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -121,7 +151,10 @@ async def update_user(
 
 @router.patch("/{user_id}", summary="Update a user (partial update)")
 async def patch_user(
-    user_id: int, user_update: UserUpdate, db: Annotated[AsyncSession, Depends(get_db)]
+    user_id: int,
+    user_update: UserUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserRead:
     """
     Update specific fields of an existing user. Only provided fields will be updated.
@@ -138,9 +171,17 @@ async def patch_user(
     - **email**: User's email address
     - **password_hash**: Hashed password for authentication
     """
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to update this user",
+        )
+
     db_user = await db.get(User, user_id)
     if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     user_data = user_update.model_dump(exclude_unset=True)
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -151,7 +192,9 @@ async def patch_user(
 
 @router.delete("/{user_id}", summary="Delete a user")
 async def delete_user(
-    user_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+    user_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> JSONResponse:
     """
     Delete a user by their ID.
@@ -160,39 +203,44 @@ async def delete_user(
 
     This action cannot be undone.
     """
+    if user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to delete this user",
+        )
+
     db_user = await db.get(User, user_id)
     if not db_user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
     await db.delete(db_user)
     await db.commit()
     return JSONResponse(
-        content={"detail": "User deleted successfully"}, status_code=200
+        content={"detail": "User deleted successfully"}, status_code=status.HTTP_200_OK
     )
 
 
 @router.get("/", summary="List all users")
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(
         default=5, ge=1, le=100, description="Maximum number of users to return (1-100)"
     ),
 ) -> UserList:
     """
     Get a paginated list of all users in the system.
+    Users can only see their own account.
 
     - **limit**: Maximum number of users to return (default: 5, max: 100)
 
     Returns a list of users with pagination metadata including total count.
     """
-    result = await db.execute(select(User).limit(limit))
-    db_users = result.scalars().all()
-
-    count_result = await db.execute(select(User))
-    total = len(count_result.scalars().all())
-
+    # Users can only see themselves
     return UserList(
-        users=[UserRead.model_validate(u) for u in db_users],
-        total=total,
+        users=[UserRead.model_validate(current_user)],
+        total=1,
         limit=limit,
         offset=0,
     )

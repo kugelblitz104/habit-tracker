@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Habit Schemas
 class HabitBase(BaseModel):
-    user_id: int
     name: str
     question: str
     color: str
