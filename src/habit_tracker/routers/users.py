@@ -5,13 +5,16 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
+from habit_tracker.core.dependencies import (
+    authorize_resource_access,
+    get_current_user,
+    get_db,
+)
 from habit_tracker.models import (
     Habit,
     HabitList,
     HabitRead,
     User,
-    UserCreate,
     UserList,
     UserRead,
     UserUpdate,
@@ -20,26 +23,6 @@ from habit_tracker.models import (
 router = APIRouter(
     prefix="/users", tags=["users"], responses={404: {"description": "Not found"}}
 )
-
-
-@router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a new user")
-async def create_user(
-    user: UserCreate, db: Annotated[AsyncSession, Depends(get_db)]
-) -> UserRead:
-    """
-    Create a new user with the following information:
-
-    - **username**: Unique username for the user
-    - **first_name**: User's first name
-    - **last_name**: User's last name
-    - **email**: User's email address
-    - **password_hash**: Hashed password for authentication
-    """
-    db_user = User(**user.model_dump())
-    db.add(db_user)
-    await db.commit()
-    await db.refresh(db_user)
-    return UserRead.model_validate(db_user)
 
 
 @router.get("/{user_id}", summary="Get a user by ID")
