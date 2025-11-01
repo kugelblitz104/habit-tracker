@@ -59,11 +59,15 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user_id: int = payload.get("sub")
-    if user_id is None:
+    # Convert string user_id to integer for database query
+    try:
+        user_id: int = int(user_id_str)
+    except (ValueError, TypeError) as e:
+        logger.error(f"Invalid user ID format: {user_id_str}, error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     user = await db.execute(select(User).where(User.id == user_id))
