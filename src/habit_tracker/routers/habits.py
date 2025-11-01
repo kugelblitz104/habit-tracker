@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import get_current_user, get_db
+from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
 from habit_tracker.models import (
     Habit,
     HabitCreate,
@@ -67,11 +67,7 @@ async def read_habit(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
 
-    if habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this habit",
-        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
     return HabitRead.model_validate(habit)
 
 
@@ -100,11 +96,7 @@ async def list_habit_trackers(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
-    if habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this habit's trackers",
-        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
 
     result = await db.execute(
         select(Tracker)
@@ -284,11 +276,7 @@ async def update_habit(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
 
-    if db_habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this habit",
-        )
+    authorize_resource_access(current_user, db_habit.user_id, "habit")
     habit_data = habit_update.model_dump()
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
@@ -326,11 +314,7 @@ async def patch_habit(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
-    if db_habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this habit",
-        )
+    authorize_resource_access(current_user, db_habit.user_id, "habit")
     habit_data = habit_update.model_dump(exclude_unset=True)
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
@@ -357,11 +341,7 @@ async def delete_habit(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
-    if db_habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this habit",
-        )
+    authorize_resource_access(current_user, db_habit.user_id, "habit")
     await db.delete(db_habit)
     await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

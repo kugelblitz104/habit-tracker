@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import get_current_user, get_db
+from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
 from habit_tracker.models import (
     Habit,
     HabitList,
@@ -53,17 +53,12 @@ async def read_user(
 
     - **user_id**: The unique identifier of the user to retrieve
     """
-    if user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this user",
-        )
-
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+    authorize_resource_access(current_user, user.id, "user")
     return UserRead.model_validate(user)
 
 
@@ -85,17 +80,12 @@ async def list_user_habits(
     - **user_id**: The unique identifier of the user
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
     """
-    if user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this user's habits",
-        )
-
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+    authorize_resource_access(current_user, user.id, "user")
 
     result = await db.execute(
         select(Habit).filter(Habit.user_id == user_id).limit(limit)
@@ -130,17 +120,12 @@ async def update_user(
 
     - **user_id**: The unique identifier of the user to update
     """
-    if user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this user",
-        )
-
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+    authorize_resource_access(current_user, db_user.id, "user")
     user_data = user_update.model_dump()
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -171,17 +156,12 @@ async def patch_user(
     - **email**: User's email address
     - **password_hash**: Hashed password for authentication
     """
-    if user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this user",
-        )
-
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+    authorize_resource_access(current_user, db_user.id, "user")
     user_data = user_update.model_dump(exclude_unset=True)
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -203,17 +183,12 @@ async def delete_user(
 
     This action cannot be undone.
     """
-    if user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this user",
-        )
-
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
+    authorize_resource_access(current_user, db_user.id, "user")
     await db.delete(db_user)
     await db.commit()
     return JSONResponse(
@@ -231,16 +206,32 @@ async def list_users(
 ) -> UserList:
     """
     Get a paginated list of all users in the system.
-    Users can only see their own account.
+    Regular users can only see their own account.
+    Admins can see all users.
 
     - **limit**: Maximum number of users to return (default: 5, max: 100)
 
     Returns a list of users with pagination metadata including total count.
     """
-    # Users can only see themselves
-    return UserList(
-        users=[UserRead.model_validate(current_user)],
-        total=1,
-        limit=limit,
-        offset=0,
-    )
+    if current_user.is_admin:
+        # Admins can see all users
+        result = await db.execute(select(User).limit(limit))
+        db_users = result.scalars().all()
+
+        count_result = await db.execute(select(func.count()).select_from(User))
+        total = count_result.scalar() or 0
+
+        return UserList(
+            users=[UserRead.model_validate(u) for u in db_users],
+            total=total,
+            limit=limit,
+            offset=0,
+        )
+    else:
+        # Regular users can only see themselves
+        return UserList(
+            users=[UserRead.model_validate(current_user)],
+            total=1,
+            limit=limit,
+            offset=0,
+        )

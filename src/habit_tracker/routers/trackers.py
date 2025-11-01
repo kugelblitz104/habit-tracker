@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import get_current_user, get_db
+from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
 from habit_tracker.models import (
     Habit,
     Tracker,
@@ -42,11 +42,7 @@ async def create_tracker(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
-    if habit.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to create trackers for this habit",
-        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
 
     db_tracker = Tracker(**tracker.model_dump())
     db.add(db_tracker)
@@ -74,11 +70,11 @@ async def read_tracker(
 
     # Verify the tracker's habit belongs to the current user
     habit = await db.get(Habit, tracker.habit_id)
-    if not habit or habit.user_id != current_user.id:
+    if not habit:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to access this tracker",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
+    authorize_resource_access(current_user, habit.user_id, "tracker")
 
     return TrackerRead.model_validate(tracker)
 
@@ -106,11 +102,11 @@ async def update_tracker(
 
     # Verify the tracker's habit belongs to the current user
     habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit or habit.user_id != current_user.id:
+    if not habit:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this tracker",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
+    authorize_resource_access(current_user, habit.user_id, "tracker")
 
     tracker_data = tracker_update.model_dump()
     for key, value in tracker_data.items():
@@ -149,11 +145,11 @@ async def patch_tracker(
 
     # Verify the tracker's habit belongs to the current user
     habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit or habit.user_id != current_user.id:
+    if not habit:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update this tracker",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
+    authorize_resource_access(current_user, habit.user_id, "tracker")
 
     tracker_data = tracker_update.model_dump(exclude_unset=True)
     for key, value in tracker_data.items():
@@ -184,11 +180,11 @@ async def delete_tracker(
 
     # Verify the tracker's habit belongs to the current user
     habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit or habit.user_id != current_user.id:
+    if not habit:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to delete this tracker",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
+    authorize_resource_access(current_user, habit.user_id, "tracker")
 
     await db.delete(db_tracker)
     await db.commit()
