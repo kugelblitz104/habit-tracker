@@ -18,11 +18,11 @@ class TrackerCreate(TrackerBase):
 
 
 class TrackerRead(TrackerBase):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
     created_date: datetime
     updated_date: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TrackerUpdate(BaseModel):

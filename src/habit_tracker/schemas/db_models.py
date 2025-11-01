@@ -36,7 +36,7 @@ class User(Base):
 
     # Relationships
     habits: Mapped[List["Habit"]] = relationship(
-        "Habit", back_populates="user", cascade="all, delete-orphan"
+        "Habit", back_populates="user", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
@@ -60,9 +60,9 @@ class Habit(Base):
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="habits")
+    user: Mapped["User"] = relationship("User", back_populates="habits", lazy="selectin")
     trackers: Mapped[List["Tracker"]] = relationship(
-        "Tracker", back_populates="habit", cascade="all, delete-orphan"
+        "Tracker", back_populates="habit", cascade="all, delete-orphan", lazy="selectin"
     )
 
 
@@ -83,7 +83,7 @@ class Tracker(Base):
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    habit: Mapped["Habit"] = relationship("Habit", back_populates="trackers")
+    habit: Mapped["Habit"] = relationship("Habit", back_populates="trackers", lazy="selectin")
 
     # Constraints
     __table_args__ = (

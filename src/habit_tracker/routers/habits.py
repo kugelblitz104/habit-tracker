@@ -3,7 +3,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 
 from habit_tracker.core.dependencies import get_db
 from habit_tracker.models import (
@@ -24,8 +25,8 @@ router = APIRouter(
 
 
 @router.post("/", status_code=201, summary="Create a new habit")
-def create_habit(
-    habit: HabitCreate, db: Annotated[Session, Depends(get_db)]
+async def create_habit(
+    habit: HabitCreate, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> HabitRead:
     """
     Create a new habit with the following information:
@@ -41,28 +42,30 @@ def create_habit(
     """
     db_habit = Habit(**habit.model_dump())
     db.add(db_habit)
-    db.commit()
-    db.refresh(db_habit)
+    await db.commit()
+    await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
 
 
 @router.get("/{habit_id}", summary="Get a habit by ID")
-def read_habit(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitRead:
+async def read_habit(
+    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+) -> HabitRead:
     """
     Retrieve a specific habit by its ID.
 
     - **habit_id**: The unique identifier of the habit to retrieve
     """
-    habit = db.get(Habit, habit_id)
+    habit = await db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     return HabitRead.model_validate(habit)
 
 
 @router.get("/{habit_id}/trackers", summary="List all trackers for a habit")
-def list_habit_trackers(
+async def list_habit_trackers(
     habit_id: int,
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(
         default=5,
         ge=1,
@@ -78,16 +81,18 @@ def list_habit_trackers(
 
     Returns tracker entries showing completion/skip status for each date.
     """
-    habit = db.get(Habit, habit_id)
+    habit = await db.get(Habit, habit_id)
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
-    db_trackers = (
-        db.query(Tracker)
+
+    result = await db.execute(
+        select(Tracker)
         .filter(Tracker.habit_id == habit_id)
         .order_by(Tracker.dated.desc())
         .limit(limit if limit > 0 else None)
-        .all()
     )
+    db_trackers = result.scalars().all()
+
     return TrackerList(
         trackers=[TrackerRead.model_validate(t) for t in db_trackers],
         total=len(db_trackers),
@@ -97,7 +102,9 @@ def list_habit_trackers(
 
 
 @router.get("/{habit_id}/kpis", summary="Get habit KPIs and statistics")
-def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> HabitKPIs:
+async def get_habit_kpis(
+    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
+) -> HabitKPIs:
     """
     Get Key Performance Indicators (KPIs) for a specific habit.
 
@@ -111,31 +118,41 @@ def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> Ha
     - Overall completion rate since creation
     - Last completed date
     """
-    habit = read_habit(habit_id, db=db)
+    habit = await read_habit(habit_id, db=db)
 
     thirty_day_completions = (
-        db.query(Tracker)
-        .filter(
-            Tracker.habit_id == habit_id,
-            Tracker.dated >= datetime.now() - timedelta(days=30),
+        await db.execute(
+            select(func.count()).filter(
+                Tracker.habit_id == habit_id,
+                Tracker.dated >= datetime.now() - timedelta(days=30),
+            )
         )
-        .count()
-    )
+    ).scalar()
 
-    count_completions = db.query(Tracker).filter(Tracker.habit_id == habit_id).count()
+    result = await db.execute(select(func.count()).filter(Tracker.habit_id == habit_id))
+    count_completions = result.scalar()
+
     days_active = (datetime.now() - habit.created_date).days
 
     last_tracker = (
-        db.query(Tracker)
-        .filter(Tracker.habit_id == habit_id)
-        .order_by(Tracker.dated.desc())
-        .first()
-    )
+        await db.execute(
+            select(Tracker)
+            .filter(Tracker.habit_id == habit_id)
+            .order_by(Tracker.dated.desc())
+            .limit(1)
+        )
+    ).scalar()
 
-    streaks = get_habit_streaks(habit_id, db=db)
+    streaks = await get_habit_streaks(habit_id, db=db)
     if len(streaks) > 0:
         current_streak = streaks[-1].length()
         longest_streak = max((s.length() for s in streaks), default=0)
+
+    if not count_completions:
+        count_completions = 0
+
+    if not thirty_day_completions:
+        thirty_day_completions = 0
 
     kpis = HabitKPIs(
         id=habit.id,
@@ -155,8 +172,8 @@ def get_habit_kpis(habit_id: int, db: Annotated[Session, Depends(get_db)]) -> Ha
 
 
 @router.get("/{habit_id}/streaks", summary="Get habit streaks")
-def get_habit_streaks(
-    habit_id, db: Annotated[Session, Depends(get_db)]
+async def get_habit_streaks(
+    habit_id, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> list[Streak]:
     """
     Get all streak periods for a specific habit.
@@ -166,12 +183,13 @@ def get_habit_streaks(
     Returns a list of all streak periods with start and end dates.
     Streaks are calculated based on the habit's frequency and range settings.
     """
-    habit = read_habit(habit_id, db)
+    habit = await read_habit(habit_id, db)
     days_since_created = (datetime.now().date() - habit.created_date.date()).days
 
-    all_trackers = list_habit_trackers(
+    tracker_list = await list_habit_trackers(
         habit_id, db=db, limit=days_since_created + 1
-    ).trackers
+    )
+    all_trackers = tracker_list.trackers
     completed_dates = [x.dated for x in all_trackers if x.completed]
     skipped_dates = [x.dated for x in all_trackers if x.skipped]
 
@@ -221,8 +239,10 @@ def get_habit_streaks(
 
 
 @router.put("/{habit_id}", summary="Replace a habit (full update)")
-def update_habit(
-    habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]
+async def update_habit(
+    habit_id: int,
+    habit_update: HabitUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HabitRead:
     """
     Replace all fields of an existing habit. All fields must be provided.
@@ -232,20 +252,22 @@ def update_habit(
 
     - **habit_id**: The unique identifier of the habit to update
     """
-    db_habit = db.get(Habit, habit_id)
+    db_habit = await db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     habit_data = habit_update.model_dump()
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
-    db.commit()
-    db.refresh(db_habit)
+    await db.commit()
+    await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
 
 
 @router.patch("/{habit_id}", summary="Update a habit (partial update)")
-def patch_habit(
-    habit_id: int, habit_update: HabitUpdate, db: Annotated[Session, Depends(get_db)]
+async def patch_habit(
+    habit_id: int,
+    habit_update: HabitUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> HabitRead:
     """
     Update specific fields of an existing habit. Only provided fields will be updated.
@@ -264,20 +286,20 @@ def patch_habit(
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
     """
-    db_habit = db.get(Habit, habit_id)
+    db_habit = await db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
     habit_data = habit_update.model_dump(exclude_unset=True)
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
-    db.commit()
-    db.refresh(db_habit)
+    await db.commit()
+    await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
 
 
 @router.delete("/{habit_id}", summary="Delete a habit")
-def delete_habit(
-    habit_id: int, db: Annotated[Session, Depends(get_db)]
+async def delete_habit(
+    habit_id: int, db: Annotated[AsyncSession, Depends(get_db)]
 ) -> JSONResponse:
     """
     Delete a habit by its ID.
@@ -286,9 +308,9 @@ def delete_habit(
 
     This action cannot be undone. All associated tracker entries will also be deleted.
     """
-    db_habit = db.get(Habit, habit_id)
+    db_habit = await db.get(Habit, habit_id)
     if not db_habit:
         raise HTTPException(status_code=404, detail="Habit not found")
-    db.delete(db_habit)
-    db.commit()
+    await db.delete(db_habit)
+    await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

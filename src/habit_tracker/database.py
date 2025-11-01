@@ -1,54 +1,59 @@
 import os
 import random
+import subprocess
 from datetime import datetime, timedelta
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from habit_tracker.core.config import settings
 from habit_tracker.schemas.db_models import Base, Habit, Tracker, User
-from dotenv import load_dotenv
 
-load_dotenv()
+echo = settings.sqlalchemy_echo
 
-echo = os.getenv("SQLALCHEMY_ECHO", "true").lower() == "true"
-
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = settings.database_url
 
 # SQLite-specific configuration
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 
-engine = create_engine(DATABASE_URL, echo=echo, connect_args=connect_args)
+engine = create_async_engine(DATABASE_URL, echo=echo, connect_args=connect_args)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
 
 
-def fresh_start_db():
+async def fresh_start_db():
     """Drop all tables and recreate them"""
     print("Dropping and recreating all tables for a fresh start...")
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-    create_db_and_tables(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    await create_mock_data()
     print("✓ Fresh start database setup complete")
 
 
-def create_db_and_tables(engine):
-    Base.metadata.create_all(engine)
-    with SessionLocal() as session:
-        if session.query(User).count() == 0:
-            create_mock_data()
+async def create_db_and_tables(engine):
+    """Create tables if they don't exist and optionally seed with data"""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
-def create_mock_data():
-    users = create_mock_users(random.randint(1, 5))
+async def create_mock_data():
+    """Create mock data for testing"""
+    users = await create_mock_users(random.randint(1, 5))
     for user in users:
-        habits = create_mock_habits(user, random.randint(1, 3))
+        habits = await create_mock_habits(user, random.randint(1, 3))
         for habit in habits:
-            create_mock_trackers(habit, random.randint(1, 5))
+            await create_mock_trackers(habit, random.randint(1, 5))
 
 
-def create_mock_users(num_users: int = 1) -> list[User]:
+async def create_mock_users(num_users: int = 1) -> list[User]:
     users = [
         User(
             username="johndoe",
@@ -70,20 +75,19 @@ def create_mock_users(num_users: int = 1) -> list[User]:
             )
         )
 
-    with SessionLocal() as session:
+    async with SessionLocal() as session:
         session.add_all(users)
-        session.commit()
+        await session.commit()
         for user in users:
-            session.refresh(user)
+            await session.refresh(user)
             print(f"Created user: {user.username} with ID: {user.id}")
 
     return users
 
 
-def create_mock_habits(user: User, num_habits: int = 1):
+async def create_mock_habits(user: User, num_habits: int = 1):
     habits = [
         Habit(
-            user=user,
             user_id=user.id if user.id is not None else 1,
             name="Drink Water",
             question="Did you drink enough water today?",
@@ -109,11 +113,11 @@ def create_mock_habits(user: User, num_habits: int = 1):
             )
         )
 
-    with SessionLocal() as session:
+    async with SessionLocal() as session:
         session.add_all(habits)
-        session.commit()
+        await session.commit()
         for habit in habits:
-            session.refresh(habit)
+            await session.refresh(habit)
             print(
                 f"Created habit: {habit.name} with ID: {habit.id} for user ID: {habit.user_id}"
             )
@@ -121,10 +125,9 @@ def create_mock_habits(user: User, num_habits: int = 1):
     return habits
 
 
-def create_mock_trackers(habit: Habit, num_trackers: int = 1):
+async def create_mock_trackers(habit: Habit, num_trackers: int = 1):
     trackers = [
         Tracker(
-            habit=habit,
             habit_id=habit.id if habit.id is not None else 1,
             dated=datetime.now().date(),
             completed=True,
@@ -144,11 +147,11 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
             )
         )
 
-    with SessionLocal() as session:
+    async with SessionLocal() as session:
         session.add_all(trackers)
-        session.commit()
+        await session.commit()
         for tracker in trackers:
-            session.refresh(tracker)
+            await session.refresh(tracker)
             print(
                 f"Created tracker for habit ID: {tracker.habit_id} on date: {tracker.dated}"
             )
@@ -156,14 +159,15 @@ def create_mock_trackers(habit: Habit, num_trackers: int = 1):
     return trackers
 
 
-def init_db():
+async def init_db():
     """Initialize database tables"""
     print("Creating database tables...")
-    Base.metadata.create_all(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     print("✓ Database initialized successfully")
 
 
-def reset_db():
+async def reset_db():
     """Drop and recreate all tables"""
     response = input("⚠️  This will DELETE ALL DATA. Are you sure? (yes/no): ")
     if response.lower() != "yes":
@@ -171,24 +175,23 @@ def reset_db():
         return
 
     print("Dropping all tables...")
-    Base.metadata.drop_all(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     print("Creating tables...")
-    Base.metadata.create_all(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     print("✓ Database reset successfully")
 
 
-def seed_db():
+async def seed_db():
     """Add mock data to database"""
     print("Seeding database with mock data...")
-    create_db_and_tables(engine)
+    await create_db_and_tables(engine)
     print("✓ Database seeded successfully")
 
 
-def backup_db():
+async def backup_db():
     """Backup database (PostgreSQL only)"""
-    import subprocess
-    from datetime import datetime
-
     # Parse DATABASE_URL from environment
     db_url = os.getenv("DATABASE_URL")
     if not db_url or "postgresql" not in db_url:
