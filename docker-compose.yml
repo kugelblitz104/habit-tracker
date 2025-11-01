@@ -26,7 +26,7 @@ services:
             dockerfile: Dockerfile
         container_name: habit_tracker_api
         environment:
-            DATABASE_URL: postgresql://habit_tracker:dev_password@postgres:5432/habit_tracker_dev
+            DATABASE_URL: postgresql+asyncpg://habit_tracker:dev_password@postgres:5432/habit_tracker_dev
             CORS_ORIGINS: http://localhost:5173
         ports:
             - '8080:8080'

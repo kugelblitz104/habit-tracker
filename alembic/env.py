@@ -16,6 +16,11 @@ config = context.config
 
 # Get database URL from environment or fall back to SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "")
+
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    # Replace asyncpg (async driver) with psycopg2 (sync driver) for migrations
+    DATABASE_URL = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+
 config.set_main_option("sqlalchemy.url", DATABASE_URL)
 
 
