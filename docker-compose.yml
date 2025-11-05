@@ -35,6 +35,8 @@ services:
                 condition: service_healthy
         volumes:
             - ./src:/code/src
+            - ./alembic:/code/alembic
+            - ./alembic.ini:/code/alembic.ini
         command: >
             sh -c "uv run alembic upgrade head && 
             uv run uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080 --reload"
