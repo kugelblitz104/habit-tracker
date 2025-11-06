@@ -29,13 +29,11 @@ def create_access_token(
         {"exp": datetime.now(timezone.utc) + expires_delta, "type": "access"}
     )
 
-    logger.info(f"Creating access token with data: {data_to_encode}")
-    logger.info(f"Using algorithm: {settings.algorithm}")
+    logger.debug("Creating access token")
 
     token = jwt.encode(
         data_to_encode, settings.secret_key, algorithm=settings.algorithm
     )
-    logger.info(f"Created token (first 20 chars): {token[:20]}...")
     return token
 
 
@@ -53,20 +51,18 @@ def create_refresh_token(data: dict):
 
 def decode_token(token: str):
     try:
-        logger.info(f"Decoding token (first 20 chars): {token[:20]}...")
-        logger.info(f"Using algorithm: {settings.algorithm}")
+        logger.debug("Decoding token")
 
         payload = jwt.decode(
             token, settings.secret_key, algorithms=[settings.algorithm]
         )
-        logger.info(f"Successfully decoded payload: {payload}")
         return payload
     except jwt.ExpiredSignatureError:
-        logger.error("Token has expired")
+        logger.warning("Token has expired")
         return None
     except jwt.InvalidTokenError as e:
-        logger.error(f"Invalid token: {e}")
+        logger.warning(f"Invalid token: {str(e)}")
         return None
     except Exception as e:
-        logger.error(f"Token decoding failed: {e}")
+        logger.error(f"Token decoding failed: {str(e)}")
         return None
