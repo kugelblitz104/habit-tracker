@@ -36,12 +36,12 @@ async def read_user(
 
     - **user_id**: The unique identifier of the user to retrieve
     """
+    authorize_resource_access(current_user, user_id, "user")
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    authorize_resource_access(current_user, user.id, "user")
     return UserRead.model_validate(user)
 
 
@@ -63,12 +63,12 @@ async def list_user_habits(
     - **user_id**: The unique identifier of the user
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
     """
+    authorize_resource_access(current_user, user_id, "user")
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    authorize_resource_access(current_user, user.id, "user")
 
     result = await db.execute(
         select(Habit).filter(Habit.user_id == user_id).limit(limit)
@@ -103,12 +103,12 @@ async def update_user(
 
     - **user_id**: The unique identifier of the user to update
     """
+    authorize_resource_access(current_user, user_id, "user")
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    authorize_resource_access(current_user, db_user.id, "user")
     user_data = user_update.model_dump()
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -139,12 +139,12 @@ async def patch_user(
     - **email**: User's email address
     - **password_hash**: Hashed password for authentication
     """
+    authorize_resource_access(current_user, user_id, "user")
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    authorize_resource_access(current_user, db_user.id, "user")
     user_data = user_update.model_dump(exclude_unset=True)
     for key, value in user_data.items():
         setattr(db_user, key, value)
@@ -166,12 +166,12 @@ async def delete_user(
 
     This action cannot be undone.
     """
+    authorize_resource_access(current_user, user_id, "user")
     db_user = await db.get(User, user_id)
     if not db_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    authorize_resource_access(current_user, db_user.id, "user")
     await db.delete(db_user)
     await db.commit()
     return JSONResponse(
