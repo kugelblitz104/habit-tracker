@@ -57,6 +57,7 @@ class HabitUpdate(BaseModel):
     question: Optional[str] = None
     color: Optional[str] = None
     frequency: Optional[int] = None
+    range: Optional[int] = None
     reminder: Optional[bool] = None
     notes: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
