@@ -6,7 +6,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
+from habit_tracker.core.dependencies import (
+    authorize_resource_access,
+    get_current_user,
+    get_db,
+)
 from habit_tracker.models import (
     Habit,
     HabitCreate,
@@ -139,20 +143,24 @@ async def get_habit_kpis(
         await db.execute(
             select(func.count()).filter(
                 Tracker.habit_id == habit_id,
+                Tracker.completed,
                 Tracker.dated >= datetime.now() - timedelta(days=30),
             )
         )
     ).scalar()
 
-    result = await db.execute(select(func.count()).filter(Tracker.habit_id == habit_id))
-    count_completions = result.scalar()
+    count_completions = (
+        await db.execute(
+            select(func.count()).filter(Tracker.habit_id == habit_id, Tracker.completed)
+        )
+    ).scalar()
 
     days_active = (datetime.now() - habit.created_date).days
 
     last_tracker = (
         await db.execute(
             select(Tracker)
-            .filter(Tracker.habit_id == habit_id)
+            .filter(Tracker.habit_id == habit_id, Tracker.completed)
             .order_by(Tracker.dated.desc())
             .limit(1)
         )
@@ -160,7 +168,9 @@ async def get_habit_kpis(
 
     streaks = await get_habit_streaks(habit_id, db, current_user)
     if len(streaks) > 0:
-        current_streak = streaks[-1].length()
+        current_streak = (
+            streaks[-1].length() if streaks[-1].end_date >= datetime.now().date() else 0
+        )
         longest_streak = max((s.length() for s in streaks), default=0)
 
     if not count_completions:
@@ -175,10 +185,10 @@ async def get_habit_kpis(
         longest_streak=longest_streak if len(streaks) > 0 else 0,
         total_completions=count_completions,
         thirty_day_completion_rate=(
-            thirty_day_completions / 30 if thirty_day_completions > 0 else 0
+            (thirty_day_completions / 30) * 100 if thirty_day_completions > 0 else 0
         ),
-        overall_completion_rate=(
-            count_completions / days_active if days_active > 0 else 0
+        overall_completion_rate=min(
+            ((count_completions / days_active) * 100 if days_active > 0 else 0), 100
         ),
         last_completed_date=last_tracker.dated if last_tracker else None,
     )
@@ -188,7 +198,7 @@ async def get_habit_kpis(
 
 @router.get("/{habit_id}/streaks", summary="Get habit streaks")
 async def get_habit_streaks(
-    habit_id,
+    habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[Streak]:
