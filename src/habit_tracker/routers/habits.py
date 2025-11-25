@@ -83,7 +83,7 @@ async def list_habit_trackers(
     limit: int = Query(
         default=5,
         ge=1,
-        le=100,
+        le=1000,
         description="Maximum number of trackers to return (1-100)",
     ),
 ) -> TrackerList:
