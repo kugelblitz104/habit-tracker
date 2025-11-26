@@ -167,7 +167,7 @@ podman run -p 8080:8080 \
 
 ## Project Structure
 
-```
+```text
 src/habit_tracker/
 ├── main.py                 # FastAPI application entry point
 ├── database.py             # Database connection and session
