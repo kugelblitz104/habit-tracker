@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -14,6 +15,7 @@ from habit_tracker.models import (
     Habit,
     HabitList,
     HabitRead,
+    Tracker,
     User,
     UserList,
     UserRead,
@@ -80,8 +82,30 @@ async def list_user_habits(
     )
     total = count_result.scalar() or 0
 
+    today = datetime.now().date()
+    habit_ids = [h.id for h in db_habits]
+
+    today_trackers = {}
+    if habit_ids:
+        tracker_result = await db.execute(
+            select(Tracker).filter(
+                Tracker.habit_id.in_(habit_ids), Tracker.dated == today
+            )
+        )
+        for tracker in tracker_result.scalars().all():
+            today_trackers[tracker.habit_id] = tracker
+
+    # Build HabitRead objects with today's status
+    habits_read = []
+    for habit in db_habits:
+        habit_read = HabitRead.model_validate(habit)
+        tracker = today_trackers.get(habit.id)
+        habit_read.completed_today = tracker.completed if tracker else False
+        habit_read.skipped_today = tracker.skipped if tracker else False
+        habits_read.append(habit_read)
+
     return HabitList(
-        habits=[HabitRead.model_validate(h) for h in db_habits],
+        habits=habits_read,
         total=total,
         limit=limit,
         offset=0,
