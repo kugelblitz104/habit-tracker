@@ -46,6 +46,8 @@ async def create_habit(
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
+    - **archived**: Whether the habit is archived
+    - **sort_order**: The order in which the habit appears in lists (descending)
     """
     db_habit = Habit(**habit.model_dump(), user_id=current_user.id)
     db.add(db_habit)
@@ -72,7 +74,20 @@ async def read_habit(
         )
 
     authorize_resource_access(current_user, habit.user_id, "habit")
-    return HabitRead.model_validate(habit)
+    habit_read: HabitRead = HabitRead.model_validate(habit)
+    today = datetime.now().date()
+    today_tracker = (
+        await db.execute(
+            select(Tracker)
+            .filter(Tracker.habit_id == habit_id, Tracker.dated == today)
+            .limit(1)
+        )
+    ).scalar()
+
+    habit_read.completed_today = today_tracker.completed if today_tracker else False
+    habit_read.skipped_today = today_tracker.skipped if today_tracker else False
+
+    return habit_read
 
 
 @router.get("/{habit_id}/trackers", summary="List all trackers for a habit")
@@ -318,6 +333,9 @@ async def patch_habit(
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
+    - **archived**: Whether the habit is archived
+    - **sort_order**: The order in which the habit appears in lists (descending)
+
     """
     db_habit = await db.get(Habit, habit_id)
     if not db_habit:

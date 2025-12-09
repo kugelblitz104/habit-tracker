@@ -1,5 +1,5 @@
-from datetime import date, datetime
 import re
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,6 +14,8 @@ class HabitBase(BaseModel):
     range: int
     reminder: bool = False
     notes: Optional[str] = None
+    archived: bool = False
+    sort_order: int = 0
 
     @field_validator("color")
     @classmethod
@@ -40,6 +42,8 @@ class HabitRead(HabitBase):
     id: int
     created_date: datetime
     updated_date: Optional[datetime] = None
+    completed_today: bool = False
+    skipped_today: bool = False
 
 
 class HabitKPIs(BaseModel):
@@ -60,6 +64,8 @@ class HabitUpdate(BaseModel):
     range: Optional[int] = None
     reminder: Optional[bool] = None
     notes: Optional[str] = None
+    archived: Optional[bool] = None
+    sort_order: Optional[int] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
 

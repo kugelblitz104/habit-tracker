@@ -59,9 +59,13 @@ class Habit(Base):
         DateTime, default=datetime.now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="habits", lazy="selectin")
+    user: Mapped["User"] = relationship(
+        "User", back_populates="habits", lazy="selectin"
+    )
     trackers: Mapped[List["Tracker"]] = relationship(
         "Tracker", back_populates="habit", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -84,7 +88,9 @@ class Tracker(Base):
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    habit: Mapped["Habit"] = relationship("Habit", back_populates="trackers", lazy="selectin")
+    habit: Mapped["Habit"] = relationship(
+        "Habit", back_populates="trackers", lazy="selectin"
+    )
 
     # Constraints
     __table_args__ = (
