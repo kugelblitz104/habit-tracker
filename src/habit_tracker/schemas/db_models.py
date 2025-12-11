@@ -54,13 +54,15 @@ class Habit(Base):
     frequency: Mapped[int] = mapped_column(Integer, nullable=False)
     range: Mapped[int] = mapped_column(Integer, nullable=False)
     reminder: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    sort_order: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, index=True
+    )
 
     # Relationships
     user: Mapped["User"] = relationship(

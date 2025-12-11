@@ -1,10 +1,10 @@
 from typing import AsyncIterator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -16,129 +16,92 @@ from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
 from habit_tracker.main import app
 from habit_tracker.schemas.db_models import Base
+from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, UserFactory
 
 # Use same database but different schema for tests
 TEST_SCHEMA = "test"
 
-# Track if shared schema is initialized (per test file)
-_shared_schema_initialized = False
+
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    poolclass=NullPool,
+    connect_args={"server_settings": {"search_path": TEST_SCHEMA}},
+)
 
 
-async def _setup_test_schema(engine: AsyncEngine, clean: bool = True) -> None:
-    """Setup test schema, optionally cleaning all data.
+@pytest.fixture(scope="session", autouse=True)
+def fast_password_hashing():
+    """Mock password hashing to be faster in tests."""
+    from habit_tracker.core.security import pwd_context
 
-    Args:
-        engine: Database engine
-        clean: If True, drops and recreates schema (fresh state)
-               If False, only creates schema if missing (preserves data)
-    """
+    # Use md5_crypt for speed, but keep bcrypt for compatibility
+    pwd_context.update(
+        schemes=["md5_crypt", "bcrypt"], default="md5_crypt", deprecated="auto"
+    )
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def setup_db_schema():
+    """Create test schema once per session."""
     async with engine.begin() as conn:
-        if clean:
-            # Drop and recreate for complete isolation
-            await conn.execute(text(f"DROP SCHEMA IF EXISTS {TEST_SCHEMA} CASCADE"))
-            await conn.execute(CreateSchema(TEST_SCHEMA))
-        else:
-            # Only create if missing (preserves existing data)
-            schema_exists = await conn.execute(
-                text(f"SELECT 1 FROM pg_namespace WHERE nspname = '{TEST_SCHEMA}'")
-            )
-            if not schema_exists.scalar():
-                await conn.execute(CreateSchema(TEST_SCHEMA))
-
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {TEST_SCHEMA} CASCADE"))
+        await conn.execute(CreateSchema(TEST_SCHEMA))
         await conn.execute(text(f"SET search_path TO {TEST_SCHEMA}"))
         await conn.run_sync(Base.metadata.create_all)
 
+    yield
 
-@pytest_asyncio.fixture
-async def shared_db_session() -> AsyncIterator[AsyncSession]:
-    """Database session that shares data across tests in the same test run.
+    async with engine.begin() as conn:
+        await conn.execute(text(f"DROP SCHEMA IF EXISTS {TEST_SCHEMA} CASCADE"))
+    await engine.dispose()
 
-    The schema is created once on first use and preserved across all tests
-    using this fixture. Data created in one test will be visible in subsequent
-    tests. Great for workflow/integration tests.
 
-    Example:
-        async def test_01_create_user(shared_db_session):
-            user = User(username="test")
-            shared_db_session.add(user)
-            await shared_db_session.commit()
+async def _truncate_tables(session: AsyncSession):
+    """Truncate all tables in the test schema."""
+    # Get table names from metadata
+    tables = [table.name for table in Base.metadata.sorted_tables]
+    if not tables:
+        return
 
-        async def test_02_find_user(shared_db_session):
-            # User from test_01 still exists
-            result = await shared_db_session.execute(select(User))
-            assert result.scalar_one()
-    """
-    global _shared_schema_initialized
-
-    engine = create_async_engine(
-        settings.database_url,
-        echo=False,
-        poolclass=NullPool,
-    )
-
-    try:
-        # Only setup schema once for all shared tests
-        if not _shared_schema_initialized:
-            await _setup_test_schema(engine, clean=True)
-            _shared_schema_initialized = True
-
-        async_session = async_sessionmaker(
-            engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-
-        async with async_session() as session:
-            await session.execute(text(f"SET search_path TO {TEST_SCHEMA}"))
-            await session.commit()
-            yield session
-    finally:
-        await engine.dispose()
+    for table in tables:
+        await session.execute(text(f'DELETE FROM "{table}"'))
+    await session.commit()
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncIterator[AsyncSession]:
+async def db_session(setup_db_schema) -> AsyncIterator[AsyncSession]:
     """Database session with complete isolation - fresh schema for each test.
 
-    This is the default fixture that provides maximum test isolation. Each test
-    gets a completely clean database with no data from previous tests.
-
-    Use this fixture (default) when you want each test to be independent.
-
-    Example:
-        async def test_create_user(db_session):
-            # Always starts with empty database
-            user = User(username="test")
-            db_session.add(user)
-            await db_session.commit()
-
-        async def test_another(db_session):
-            # Fresh database again, no users exist
-            result = await db_session.execute(select(User))
-            assert result.scalars().all() == []
+    Optimized to use TRUNCATE instead of DROP/CREATE SCHEMA.
     """
-    engine = create_async_engine(
-        settings.database_url,
-        echo=False,
-        poolclass=NullPool,
+    async_session = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
     )
 
-    try:
-        # Drop and recreate schema for complete isolation
-        await _setup_test_schema(engine, clean=True)
+    async with async_session() as session:
+        # Truncate tables to ensure clean state
+        await _truncate_tables(session)
 
-        async_session = async_sessionmaker(
-            engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
+        yield session
 
-        async with async_session() as session:
-            await session.execute(text(f"SET search_path TO {TEST_SCHEMA}"))
-            await session.commit()
-            yield session
-    finally:
-        await engine.dispose()
+
+@pytest_asyncio.fixture
+async def shared_db_session(setup_db_schema) -> AsyncIterator[AsyncSession]:
+    """Database session that shares data across tests.
+
+    Does NOT truncate tables.
+    """
+    async_session = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with async_session() as session:
+        yield session
 
 
 @pytest_asyncio.fixture
@@ -180,3 +143,16 @@ async def shared_client(shared_db_session: AsyncSession) -> AsyncIterator[AsyncC
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def setup_factories(db_session: AsyncSession) -> None:
+    """Fixture to setup factories with the test database session."""
+
+    # Set the session for all factories
+    # type: ignore comments needed because Pylance doesn't recognize
+    # SQLAlchemyModelFactory's extended FactoryOptions attributes
+    UserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    AdminUserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    HabitFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    TrackerFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
