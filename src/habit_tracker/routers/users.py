@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,10 +11,12 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
 )
+from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
     Habit,
     HabitList,
     HabitRead,
+    Tracker,
     User,
     UserList,
     UserRead,
@@ -80,8 +83,30 @@ async def list_user_habits(
     )
     total = count_result.scalar() or 0
 
+    today = datetime.now().date()
+    habit_ids = [h.id for h in db_habits]
+
+    today_trackers = {}
+    if habit_ids:
+        tracker_result = await db.execute(
+            select(Tracker).filter(
+                Tracker.habit_id.in_(habit_ids), Tracker.dated == today
+            )
+        )
+        for tracker in tracker_result.scalars().all():
+            today_trackers[tracker.habit_id] = tracker
+
+    # Build HabitRead objects with today's status
+    habits_read = []
+    for habit in db_habits:
+        habit_read = HabitRead.model_validate(habit)
+        tracker = today_trackers.get(habit.id)
+        habit_read.completed_today = tracker.completed if tracker else False
+        habit_read.skipped_today = tracker.skipped if tracker else False
+        habits_read.append(habit_read)
+
     return HabitList(
-        habits=[HabitRead.model_validate(h) for h in db_habits],
+        habits=habits_read,
         total=total,
         limit=limit,
         offset=0,
@@ -110,6 +135,7 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     user_data = user_update.model_dump()
+    user_data["password_hash"] = get_password_hash(user_data.pop("plaintext_password"))
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()
@@ -137,7 +163,7 @@ async def patch_user(
     - **first_name**: User's first name
     - **last_name**: User's last name
     - **email**: User's email address
-    - **password_hash**: Hashed password for authentication
+    - **plaintext_password**: New password for the user
     """
     authorize_resource_access(current_user, user_id, "user")
     db_user = await db.get(User, user_id)
@@ -146,6 +172,10 @@ async def patch_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     user_data = user_update.model_dump(exclude_unset=True)
+    if "plaintext_password" in user_data:
+        user_data["password_hash"] = get_password_hash(
+            user_data.pop("plaintext_password")
+        )
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 # User Schemas
@@ -10,6 +10,13 @@ class UserBase(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Username cannot be empty or whitespace")
+        return v
 
 
 class UserCreate(UserBase):
@@ -29,7 +36,7 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     email: Optional[EmailStr] = None
-    password_hash: Optional[str] = None
+    plaintext_password: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
 

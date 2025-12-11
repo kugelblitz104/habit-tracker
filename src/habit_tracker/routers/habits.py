@@ -6,7 +6,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
+from habit_tracker.core.dependencies import (
+    authorize_resource_access,
+    get_current_user,
+    get_db,
+)
 from habit_tracker.models import (
     Habit,
     HabitCreate,
@@ -42,6 +46,8 @@ async def create_habit(
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
+    - **archived**: Whether the habit is archived
+    - **sort_order**: The order in which the habit appears in lists (descending)
     """
     db_habit = Habit(**habit.model_dump(), user_id=current_user.id)
     db.add(db_habit)
@@ -68,7 +74,20 @@ async def read_habit(
         )
 
     authorize_resource_access(current_user, habit.user_id, "habit")
-    return HabitRead.model_validate(habit)
+    habit_read: HabitRead = HabitRead.model_validate(habit)
+    today = datetime.now().date()
+    today_tracker = (
+        await db.execute(
+            select(Tracker)
+            .filter(Tracker.habit_id == habit_id, Tracker.dated == today)
+            .limit(1)
+        )
+    ).scalar()
+
+    habit_read.completed_today = today_tracker.completed if today_tracker else False
+    habit_read.skipped_today = today_tracker.skipped if today_tracker else False
+
+    return habit_read
 
 
 @router.get("/{habit_id}/trackers", summary="List all trackers for a habit")
@@ -79,7 +98,7 @@ async def list_habit_trackers(
     limit: int = Query(
         default=5,
         ge=1,
-        le=100,
+        le=1000,
         description="Maximum number of trackers to return (1-100)",
     ),
 ) -> TrackerList:
@@ -139,20 +158,24 @@ async def get_habit_kpis(
         await db.execute(
             select(func.count()).filter(
                 Tracker.habit_id == habit_id,
+                Tracker.completed,
                 Tracker.dated >= datetime.now() - timedelta(days=30),
             )
         )
     ).scalar()
 
-    result = await db.execute(select(func.count()).filter(Tracker.habit_id == habit_id))
-    count_completions = result.scalar()
+    count_completions = (
+        await db.execute(
+            select(func.count()).filter(Tracker.habit_id == habit_id, Tracker.completed)
+        )
+    ).scalar()
 
     days_active = (datetime.now() - habit.created_date).days
 
     last_tracker = (
         await db.execute(
             select(Tracker)
-            .filter(Tracker.habit_id == habit_id)
+            .filter(Tracker.habit_id == habit_id, Tracker.completed)
             .order_by(Tracker.dated.desc())
             .limit(1)
         )
@@ -160,7 +183,9 @@ async def get_habit_kpis(
 
     streaks = await get_habit_streaks(habit_id, db, current_user)
     if len(streaks) > 0:
-        current_streak = streaks[-1].length()
+        current_streak = (
+            streaks[-1].length() if streaks[-1].end_date >= datetime.now().date() else 0
+        )
         longest_streak = max((s.length() for s in streaks), default=0)
 
     if not count_completions:
@@ -175,10 +200,10 @@ async def get_habit_kpis(
         longest_streak=longest_streak if len(streaks) > 0 else 0,
         total_completions=count_completions,
         thirty_day_completion_rate=(
-            thirty_day_completions / 30 if thirty_day_completions > 0 else 0
+            (thirty_day_completions / 30) * 100 if thirty_day_completions > 0 else 0
         ),
-        overall_completion_rate=(
-            count_completions / days_active if days_active > 0 else 0
+        overall_completion_rate=min(
+            ((count_completions / days_active) * 100 if days_active > 0 else 0), 100
         ),
         last_completed_date=last_tracker.dated if last_tracker else None,
     )
@@ -188,7 +213,7 @@ async def get_habit_kpis(
 
 @router.get("/{habit_id}/streaks", summary="Get habit streaks")
 async def get_habit_streaks(
-    habit_id,
+    habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> list[Streak]:
@@ -308,6 +333,9 @@ async def patch_habit(
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
+    - **archived**: Whether the habit is archived
+    - **sort_order**: The order in which the habit appears in lists (descending)
+
     """
     db_habit = await db.get(Habit, habit_id)
     if not db_habit:
