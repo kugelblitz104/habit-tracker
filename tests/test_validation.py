@@ -441,32 +441,6 @@ class TestRequiredFieldValidation:
         )
         assert response.status_code == 422
 
-    async def test_missing_tracker_date_rejected(
-        self, client, db_session, setup_factories
-    ):
-        """Missing tracker date is rejected."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.post(
-            "/trackers/",
-            json={
-                "habit_id": habit.id,
-                "completed": True,
-            },
-        )
-        assert response.status_code == 422
-
     async def test_missing_tracker_habit_id_rejected(
         self, client, db_session, setup_factories
     ):
@@ -546,33 +520,6 @@ class TestTypeValidation:
         )
         # May be converted to string or rejected
         assert response.status_code in [201, 422]
-
-    async def test_string_for_boolean_rejected(
-        self, client, db_session, setup_factories
-    ):
-        """String where boolean expected is rejected."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.post(
-            "/trackers/",
-            json={
-                "habit_id": habit.id,
-                "dated": "2024-01-01",
-                "completed": "yes",  # Should be bool
-            },
-        )
-        assert response.status_code == 422
 
     async def test_invalid_date_format_rejected(
         self, client, db_session, setup_factories

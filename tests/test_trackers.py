@@ -268,7 +268,7 @@ class TestCreateTracker:
             },
         )
         # Should fail due to unique constraint
-        assert response.status_code in [400, 409, 500]
+        assert response.status_code == 409
 
 
 class TestGetTracker:

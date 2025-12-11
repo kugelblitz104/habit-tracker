@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 # Tracker Schemas
 class TrackerBase(BaseModel):
     habit_id: int
-    dated: date = date.today()
+    dated: date = Field(default_factory=date.today)
     completed: bool = True
     skipped: bool = False
     note: Optional[str] = None

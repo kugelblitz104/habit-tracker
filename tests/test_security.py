@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
-import pytest
 
 from habit_tracker.core.config import settings
 from habit_tracker.core.security import (
@@ -217,22 +216,32 @@ class TestTokenExpiry:
         )
 
         # Access token expiry should be around access_token_expiry_minutes from now
+        # Add 1 second tolerance for test execution time
         access_exp = datetime.fromtimestamp(access_payload["exp"], tz=timezone.utc)
-        expected_access_exp_min = before_creation + timedelta(
-            minutes=settings.access_token_expiry_minutes
+        expected_access_exp_min = (
+            before_creation
+            + timedelta(minutes=settings.access_token_expiry_minutes)
+            - timedelta(seconds=1)
         )
-        expected_access_exp_max = after_creation + timedelta(
-            minutes=settings.access_token_expiry_minutes
+        expected_access_exp_max = (
+            after_creation
+            + timedelta(minutes=settings.access_token_expiry_minutes)
+            + timedelta(seconds=1)
         )
         assert expected_access_exp_min <= access_exp <= expected_access_exp_max
 
         # Refresh token expiry should be around refresh_token_expiry_days from now
+        # Add 1 second tolerance for test execution time
         refresh_exp = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
-        expected_refresh_exp_min = before_creation + timedelta(
-            days=settings.refresh_token_expiry_days
+        expected_refresh_exp_min = (
+            before_creation
+            + timedelta(days=settings.refresh_token_expiry_days)
+            - timedelta(seconds=1)
         )
-        expected_refresh_exp_max = after_creation + timedelta(
-            days=settings.refresh_token_expiry_days
+        expected_refresh_exp_max = (
+            after_creation
+            + timedelta(days=settings.refresh_token_expiry_days)
+            + timedelta(seconds=1)
         )
         assert expected_refresh_exp_min <= refresh_exp <= expected_refresh_exp_max
 
@@ -260,6 +269,7 @@ class TestTokenTypes:
         token = create_access_token(data={"sub": "123"})
         payload = decode_token(token)
 
+        assert payload is not None
         assert payload["type"] == "access"
 
     def test_refresh_token_type(self):
@@ -267,6 +277,7 @@ class TestTokenTypes:
         token = create_refresh_token(data={"sub": "123"})
         payload = decode_token(token)
 
+        assert payload is not None
         assert payload["type"] == "refresh"
 
     def test_token_types_are_different(self):
@@ -277,4 +288,7 @@ class TestTokenTypes:
         access_payload = decode_token(access_token)
         refresh_payload = decode_token(refresh_token)
 
+        assert access_payload is not None
+        assert refresh_payload is not None
+        assert access_payload["type"] != refresh_payload["type"]
         assert access_payload["type"] != refresh_payload["type"]

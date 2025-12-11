@@ -70,7 +70,7 @@ class TestDatabaseDependency:
         response = await client.post(
             "/habits/",
             json={
-                "name": "",  # Invalid
+                # Invalid, no name
                 "question": "Test?",
                 "color": "#FF0000",
                 "frequency": 1,

@@ -302,7 +302,7 @@ class TestModelRelationships:
         await db_session.commit()
 
         for i in range(10):
-            TrackerFactory(habit=habit, dated=date.today() + timedelta(days=i))
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
         await db_session.commit()
 
         result = await db_session.execute(

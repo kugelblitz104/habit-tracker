@@ -717,6 +717,10 @@ class TestUpdateHabitPut:
                 "color": "#000000",
                 "frequency": 1,
                 "range": 1,
+                "notes": "",
+                "reminder": False,
+                "archived": False,
+                "sort_order": 0,
             },
         )
         assert response.status_code == 404

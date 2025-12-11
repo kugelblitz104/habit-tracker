@@ -31,6 +31,13 @@ class HabitBase(BaseModel):
             raise ValueError("Frequency and range must be positive integers")
         return v
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Name cannot be empty or whitespace")
+        return v
+
 
 class HabitCreate(HabitBase):
     pass

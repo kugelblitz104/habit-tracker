@@ -11,6 +11,7 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
 )
+from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
     Habit,
     HabitList,
@@ -134,6 +135,7 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     user_data = user_update.model_dump()
+    user_data["password_hash"] = get_password_hash(user_data.pop("plaintext_password"))
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()
@@ -161,7 +163,7 @@ async def patch_user(
     - **first_name**: User's first name
     - **last_name**: User's last name
     - **email**: User's email address
-    - **password_hash**: Hashed password for authentication
+    - **plaintext_password**: New password for the user
     """
     authorize_resource_access(current_user, user_id, "user")
     db_user = await db.get(User, user_id)
@@ -170,6 +172,10 @@ async def patch_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     user_data = user_update.model_dump(exclude_unset=True)
+    if "plaintext_password" in user_data:
+        user_data["password_hash"] = get_password_hash(
+            user_data.pop("plaintext_password")
+        )
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()

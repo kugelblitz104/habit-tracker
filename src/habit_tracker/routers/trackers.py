@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import authorize_resource_access, get_current_user, get_db
+from habit_tracker.core.dependencies import (
+    authorize_resource_access,
+    get_current_user,
+    get_db,
+)
 from habit_tracker.models import (
     Habit,
     Tracker,
@@ -42,11 +46,20 @@ async def create_tracker(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
+
     authorize_resource_access(current_user, habit.user_id, "habit")
 
     db_tracker = Tracker(**tracker.model_dump())
     db.add(db_tracker)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        if "unique constraint" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Tracker entry for this habit and date already exists",
+            )
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
 

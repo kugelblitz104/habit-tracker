@@ -245,6 +245,7 @@ class TestUpdateUserPut:
                 "first_name": "Updated",
                 "last_name": "User",
                 "email": "updated@example.com",
+                "plaintext_password": "newpassword123",
             },
         )
         assert response.status_code == 200
@@ -303,6 +304,7 @@ class TestUpdateUserPut:
                 "first_name": "Admin",
                 "last_name": "Updated",
                 "email": "adminupdated@example.com",
+                "plaintext_password": "adminnewpass",
             },
         )
         assert response.status_code == 200
@@ -336,6 +338,7 @@ class TestUpdateUserPut:
                 "first_name": "New",
                 "last_name": "Name",
                 "email": "new@example.com",
+                "plaintext_password": "newpassword456",
             },
         )
         assert response.status_code == 200
@@ -370,6 +373,39 @@ class TestUpdateUserPut:
             },
         )
         assert response.status_code == 404
+
+    async def test_update_user_password(self, client, db_session, setup_factories):
+        """Verify password is updated correctly."""
+        user = UserFactory()
+        await db_session.commit()
+
+        # Login
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        new_password = "updatedpassword789"
+        response = await client.put(
+            f"/users/{user.id}",
+            json={
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "plaintext_password": new_password,
+            },
+        )
+        assert response.status_code == 200
+
+        # Attempt to login with new password
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": new_password},
+        )
+        assert login_response.status_code == 200
 
 
 class TestUpdateUserPatch:
@@ -511,6 +547,35 @@ class TestUpdateUserPatch:
         data = response.json()
         assert data["first_name"] == "NewFirst"
         assert data["last_name"] == "NewLast"
+
+    async def test_update_user_password_patch(
+        self, client, db_session, setup_factories
+    ):
+        """Verify password can be updated via PATCH."""
+        user = UserFactory()
+        await db_session.commit()
+
+        # Login
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        new_password = "newpatchpassword789"
+        response = await client.patch(
+            f"/users/{user.id}",
+            json={"plaintext_password": new_password},
+        )
+        assert response.status_code == 200
+
+        # Attempt to login with new password
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": new_password},
+        )
+        assert login_response.status_code == 200
 
     async def test_update_other_user_as_regular_patch(
         self, client, db_session, setup_factories
