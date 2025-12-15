@@ -13,7 +13,7 @@ from habit_tracker.core.security import (
     get_password_hash,
     verify_password,
 )
-from habit_tracker.models.users import Token, UserCreate
+from habit_tracker.models.users import RefreshTokenRequest, Token, UserCreate
 from habit_tracker.schemas.db_models import User
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -99,9 +99,9 @@ async def login(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    refresh_token: str, db: Annotated[AsyncSession, Depends(get_db)]
+    request: RefreshTokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    payload = decode_token(refresh_token)
+    payload = decode_token(request.refresh_token)
 
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(
