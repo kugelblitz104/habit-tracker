@@ -257,8 +257,7 @@ class TestTokenRefresh:
 
         # Refresh token
         response = await client.post(
-            "/auth/refresh",
-            params={"refresh_token": tokens["refresh_token"]},
+            "/auth/refresh", json={"refresh_token": tokens["refresh_token"]}
         )
         assert response.status_code == 200
         data = response.json()
@@ -280,7 +279,7 @@ class TestTokenRefresh:
         # Try to refresh with access token instead of refresh token
         response = await client.post(
             "/auth/refresh",
-            params={"refresh_token": tokens["access_token"]},
+            json={"refresh_token": tokens["access_token"]},
         )
         assert response.status_code == 401
         assert "Invalid refresh token" in response.json()["detail"]
@@ -312,7 +311,7 @@ class TestTokenRefresh:
 
         response = await client.post(
             "/auth/refresh",
-            params={"refresh_token": expired_token},
+            json={"refresh_token": expired_token},
         )
         assert response.status_code == 401
 
@@ -320,7 +319,7 @@ class TestTokenRefresh:
         """Reject refresh with malformed token (401)."""
         response = await client.post(
             "/auth/refresh",
-            params={"refresh_token": "invalid.malformed.token"},
+            json={"refresh_token": "invalid.malformed.token"},
         )
         assert response.status_code == 401
         assert "Invalid refresh token" in response.json()["detail"]
