@@ -56,6 +56,76 @@ async def create_habit(
     return HabitRead.model_validate(db_habit)
 
 
+@router.put("/sort", summary="Reorder habits")
+async def sort_habits(
+    habit_ids: list[int],  # Just IDs in desired order
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> JSONResponse:
+    """
+    Reorder habits by providing their IDs in the desired display order.
+
+    - **habit_ids**: List of habit IDs in the order you want them displayed
+
+    The first ID gets the highest sort_order, last ID gets the lowest.
+    Habits are displayed in descending sort_order.
+    """
+    # Validate input
+    if not habit_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="habit_ids list cannot be empty",
+        )
+
+    if len(habit_ids) != len(set(habit_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate habit IDs in request",
+        )
+
+    # Fetch ALL user's habits
+    all_habits_result = await db.execute(
+        select(Habit).filter(Habit.user_id == current_user.id)
+    )
+    all_habits = {h.id: h for h in all_habits_result.scalars().all()}
+
+    # Check if all requested habits exist and belong to user
+    missing_habits = set(habit_ids) - set(all_habits.keys())
+    if missing_habits:
+        # Check if they exist at all (404) or just don't belong to user (403)
+        exists_check = await db.execute(
+            select(Habit.id).filter(Habit.id.in_(missing_habits))
+        )
+        if exists_check.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to sort one or more of these habits",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="One or more habits not found"
+        )
+
+    # Collect sort_order values of archived habits not being sorted
+    archived_sort_orders = {
+        h.sort_order
+        for h in all_habits.values()
+        if h.archived and h.id not in habit_ids
+    }
+
+    # Assign sort_order (first item gets highest value)
+    current_sort_order = len(all_habits) - 1
+    for habit_id in habit_ids:
+        if not all_habits[habit_id].archived:
+            # Skip any sort_order values taken by archived habits
+            while current_sort_order in archived_sort_orders:
+                current_sort_order -= 1
+            all_habits[habit_id].sort_order = current_sort_order
+            current_sort_order -= 1
+
+    await db.commit()
+    return JSONResponse(content={"detail": "Habits sorted successfully"})
+
+
 @router.get("/{habit_id}", summary="Get a habit by ID")
 async def read_habit(
     habit_id: int,

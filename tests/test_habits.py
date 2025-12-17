@@ -1508,3 +1508,261 @@ class TestGetHabitStreaks:
 
         response = await client.get(f"/habits/{habit.id}/streaks")
         assert response.status_code == 403
+
+
+class TestSortHabits:
+    """Tests for PUT /habits/sort endpoint."""
+
+    async def test_sort_habits_basic(self, client, db_session, setup_factories):
+        """Successfully reorder multiple habits."""
+        user = UserFactory()
+        await db_session.commit()
+
+        # Create habits with initial sort orders
+        habit1 = HabitFactory(user=user, name="Habit 1")
+        habit2 = HabitFactory(user=user, name="Habit 2")
+        habit3 = HabitFactory(user=user, name="Habit 3")
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        # Reorder: habit3, habit1, habit2
+        response = await client.put(
+            "/habits/sort",
+            json=[habit3.id, habit1.id, habit2.id],
+        )
+        assert response.status_code == 200
+        assert response.json()["detail"] == "Habits sorted successfully"
+
+        # Verify sort_order was updated correctly
+        await db_session.refresh(habit1)
+        await db_session.refresh(habit2)
+        await db_session.refresh(habit3)
+
+        # habit3 sent first gets sort_order 2, habit1 gets 1, habit2 gets 0
+        assert habit3.sort_order == 2
+        assert habit1.sort_order == 1
+        assert habit2.sort_order == 0
+
+    async def test_sort_habits_archived(self, client, db_session, setup_factories):
+        """Archived habits preserve their sort_order when sorting is applied."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit1 = HabitFactory(user=user, name="Active Habit", archived=False)
+        habit2 = HabitFactory(
+            user=user, name="Archived Habit", archived=True, sort_order=0
+        )
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put(
+            "/habits/sort",
+            json=[habit2.id, habit1.id],
+        )
+        assert response.status_code == 200
+
+        await db_session.refresh(habit1)
+        await db_session.refresh(habit2)
+
+        # Active habit gets sort_order: total(2) - 1 = 1, but 0 is taken by archived, so stays 1
+        assert habit1.sort_order == 1
+        # Archived habit preserves its original sort_order
+        assert habit2.sort_order == 0
+
+    async def test_sort_habits_archived_preserves_position(
+        self, client, db_session, setup_factories
+    ):
+        """Archived habits should slot back into their original position when unarchived."""
+        user = UserFactory()
+        await db_session.commit()
+
+        # Create 4 habits: A, B, C, D with sort_order 3, 2, 1, 0
+        habit_a = HabitFactory(user=user, name="A", sort_order=3)
+        habit_b = HabitFactory(user=user, name="B", sort_order=2, archived=True)
+        habit_c = HabitFactory(user=user, name="C", sort_order=1)
+        habit_d = HabitFactory(user=user, name="D", sort_order=0)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        # Sort only active habits A, C, D (B is archived)
+        response = await client.put(
+            "/habits/sort",
+            json=[habit_a.id, habit_c.id, habit_d.id],
+        )
+        assert response.status_code == 200
+
+        await db_session.refresh(habit_a)
+        await db_session.refresh(habit_b)
+        await db_session.refresh(habit_c)
+        await db_session.refresh(habit_d)
+
+        # Active habits get sort_order starting from total(4) - 1 = 3
+        # Skipping 2 because B (archived, not in request) has sort_order=2
+        # A: 3, C: 1 (skip 2), D: 0
+        # When B is unarchived, order by sort_order desc: A(3), B(2), C(1), D(0)
+        assert habit_a.sort_order == 3
+        assert habit_b.sort_order == 2  # Preserved
+        assert habit_c.sort_order == 1  # Skipped 2
+        assert habit_d.sort_order == 0
+
+    async def test_sort_habits_single_habit(self, client, db_session, setup_factories):
+        """Sorting a single habit should work."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, sort_order=5)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put(
+            "/habits/sort",
+            json=[habit.id],
+        )
+        assert response.status_code == 200
+
+        await db_session.refresh(habit)
+        assert habit.sort_order == 0
+
+    async def test_sort_habits_empty_list(self, client, db_session, setup_factories):
+        """Sorting empty list returns 400 Bad Request."""
+        user = UserFactory()
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put("/habits/sort", json=[])
+        assert response.status_code == 400
+        assert "cannot be empty" in response.json()["detail"].lower()
+
+    async def test_sort_habits_duplicate_ids(self, client, db_session, setup_factories):
+        """Sorting with duplicate habit IDs returns 400 Bad Request."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put("/habits/sort", json=[habit.id, habit.id])
+        assert response.status_code == 400
+        assert "duplicate" in response.json()["detail"].lower()
+
+    async def test_sort_habits_not_found(self, client, db_session, setup_factories):
+        """Cannot sort non-existent habit (404)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put("/habits/sort", json=[99999])
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    async def test_sort_habits_unauthorized(self, client, db_session, setup_factories):
+        """User cannot sort other user's habits (403)."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user2)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user1.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put(
+            "/habits/sort",
+            json=[habit.id],
+        )
+        assert response.status_code == 403
+
+    async def test_sort_habits_mixed_ownership(
+        self, client, db_session, setup_factories
+    ):
+        """Cannot sort habits when some belong to other users (403)."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        await db_session.commit()
+
+        habit1 = HabitFactory(user=user1)
+        habit2 = HabitFactory(user=user2)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user1.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.put(
+            "/habits/sort",
+            json=[
+                habit1.id,
+                habit2.id,
+            ],
+        )
+        assert response.status_code == 403
+
+    async def test_sort_habits_unauthenticated(
+        self, client, db_session, setup_factories
+    ):
+        """Unauthenticated users cannot sort habits (401)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        response = await client.put(
+            "/habits/sort",
+            json=[habit.id],
+        )
+        assert response.status_code == 401
