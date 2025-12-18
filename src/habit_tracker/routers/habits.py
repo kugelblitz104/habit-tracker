@@ -47,7 +47,7 @@ async def create_habit(
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
-    - **sort_order**: The order in which the habit appears in lists (descending)
+    - **sort_order**: The order in which the habit appears in lists (ascending)
     """
     db_habit = Habit(**habit.model_dump(), user_id=current_user.id)
     db.add(db_habit)
@@ -67,8 +67,8 @@ async def sort_habits(
 
     - **habit_ids**: List of habit IDs in the order you want them displayed
 
-    The first ID gets the highest sort_order, last ID gets the lowest.
-    Habits are displayed in descending sort_order.
+    The first ID gets the lowest sort_order, last ID gets the highest.
+    Habits are displayed in ascending sort_order.
     """
     # Validate input
     if not habit_ids:
@@ -112,15 +112,15 @@ async def sort_habits(
         if h.archived and h.id not in habit_ids
     }
 
-    # Assign sort_order (first item gets highest value)
-    current_sort_order = len(all_habits) - 1
+    # Assign sort_order (first item gets lowest value)
+    current_sort_order = 0
     for habit_id in habit_ids:
         if not all_habits[habit_id].archived:
             # Skip any sort_order values taken by archived habits
             while current_sort_order in archived_sort_orders:
-                current_sort_order -= 1
+                current_sort_order += 1
             all_habits[habit_id].sort_order = current_sort_order
-            current_sort_order -= 1
+            current_sort_order += 1
 
     await db.commit()
     return JSONResponse(content={"detail": "Habits sorted successfully"})
@@ -404,7 +404,7 @@ async def patch_habit(
     - **reminder**: Whether to enable reminders for this habit
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
-    - **sort_order**: The order in which the habit appears in lists (descending)
+    - **sort_order**: The order in which the habit appears in lists (ascending)
 
     """
     db_habit = await db.get(Habit, habit_id)
