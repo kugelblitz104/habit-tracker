@@ -203,7 +203,9 @@ async def list_habit_trackers(
     )
 
 
-@router.get("/{habit_id}/kpis", summary="Get habit KPIs and statistics")
+@router.get(
+    "/{habit_id}/kpis", summary="Get habit KPIs and statistics", deprecated=True
+)
 async def get_habit_kpis(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -281,7 +283,7 @@ async def get_habit_kpis(
     return HabitKPIs.model_validate(kpis)
 
 
-@router.get("/{habit_id}/streaks", summary="Get habit streaks")
+@router.get("/{habit_id}/streaks", summary="Get habit streaks", deprecated=True)
 async def get_habit_streaks(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],

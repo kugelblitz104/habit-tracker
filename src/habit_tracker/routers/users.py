@@ -18,6 +18,7 @@ from habit_tracker.models import (
     HabitRead,
     Tracker,
     User,
+    UserCreate,
     UserList,
     UserRead,
     UserUpdate,
@@ -116,7 +117,7 @@ async def list_user_habits(
 @router.put("/{user_id}", summary="Replace a user (full update)")
 async def update_user(
     user_id: int,
-    user_update: UserUpdate,
+    user_update: UserCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> UserRead:

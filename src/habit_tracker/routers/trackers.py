@@ -60,6 +60,11 @@ async def create_tracker(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Tracker entry for this habit and date already exists",
             )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create tracker entry",
+            )
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
 
