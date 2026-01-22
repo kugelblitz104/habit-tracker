@@ -37,7 +37,7 @@ class User(Base):
 
     # Relationships
     habits: Mapped[List["Habit"]] = relationship(
-        "Habit", back_populates="user", cascade="all, delete-orphan", lazy="selectin"
+        "Habit", back_populates="user", cascade="all, delete-orphan", lazy="select"
     )
 
 
@@ -65,11 +65,9 @@ class Habit(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship(
-        "User", back_populates="habits", lazy="selectin"
-    )
+    user: Mapped["User"] = relationship("User", back_populates="habits", lazy="select")
     trackers: Mapped[List["Tracker"]] = relationship(
-        "Tracker", back_populates="habit", cascade="all, delete-orphan", lazy="selectin"
+        "Tracker", back_populates="habit", cascade="all, delete-orphan", lazy="select"
     )
 
 
@@ -91,7 +89,7 @@ class Tracker(Base):
 
     # Relationships
     habit: Mapped["Habit"] = relationship(
-        "Habit", back_populates="trackers", lazy="selectin"
+        "Habit", back_populates="trackers", lazy="select"
     )
 
     # Constraints

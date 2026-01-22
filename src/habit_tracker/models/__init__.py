@@ -18,6 +18,10 @@ from habit_tracker.models.users import (
     UserRead,
     UserUpdate,
 )
+from habit_tracker.models.imports import (
+    ImportResult,
+    ImportedHabitSummary,
+)
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 
 __all__ = [
@@ -40,4 +44,6 @@ __all__ = [
     "TrackerUpdate",
     "TrackerList",
     "Streak",
+    "ImportResult",
+    "ImportedHabitSummary",
 ]

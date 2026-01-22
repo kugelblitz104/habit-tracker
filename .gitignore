@@ -283,3 +283,5 @@ database.db
 # Alembic
 *.pyc
 __pycache__/
+
+data

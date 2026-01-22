@@ -29,6 +29,58 @@ router = APIRouter(
 )
 
 
+@router.get("/", summary="List all users")
+async def list_users(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: int = Query(
+        default=5, ge=1, le=100, description="Maximum number of users to return (1-100)"
+    ),
+) -> UserList:
+    """
+    Get a paginated list of all users in the system.
+    Regular users can only see their own account.
+    Admins can see all users.
+
+    - **limit**: Maximum number of users to return (default: 5, max: 100)
+
+    Returns a list of users with pagination metadata including total count.
+    """
+    if current_user.is_admin:
+        # Admins can see all users
+        result = await db.execute(select(User).limit(limit))
+        db_users = result.scalars().all()
+
+        count_result = await db.execute(select(func.count()).select_from(User))
+        total = count_result.scalar() or 0
+
+        return UserList(
+            users=[UserRead.model_validate(u) for u in db_users],
+            total=total,
+            limit=limit,
+            offset=0,
+        )
+    else:
+        # Regular users can only see themselves
+        return UserList(
+            users=[UserRead.model_validate(current_user)],
+            total=1,
+            limit=limit,
+            offset=0,
+        )
+
+
+@router.get("/me", summary="Get current authenticated user")
+async def read_current_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserRead:
+    """
+    Retrieve the currently authenticated user's details.
+    """
+
+    return UserRead.model_validate(current_user)
+
+
 @router.get("/{user_id}", summary="Get a user by ID")
 async def read_user(
     user_id: int,
@@ -208,44 +260,3 @@ async def delete_user(
     return JSONResponse(
         content={"detail": "User deleted successfully"}, status_code=status.HTTP_200_OK
     )
-
-
-@router.get("/", summary="List all users")
-async def list_users(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    limit: int = Query(
-        default=5, ge=1, le=100, description="Maximum number of users to return (1-100)"
-    ),
-) -> UserList:
-    """
-    Get a paginated list of all users in the system.
-    Regular users can only see their own account.
-    Admins can see all users.
-
-    - **limit**: Maximum number of users to return (default: 5, max: 100)
-
-    Returns a list of users with pagination metadata including total count.
-    """
-    if current_user.is_admin:
-        # Admins can see all users
-        result = await db.execute(select(User).limit(limit))
-        db_users = result.scalars().all()
-
-        count_result = await db.execute(select(func.count()).select_from(User))
-        total = count_result.scalar() or 0
-
-        return UserList(
-            users=[UserRead.model_validate(u) for u in db_users],
-            total=total,
-            limit=limit,
-            offset=0,
-        )
-    else:
-        # Regular users can only see themselves
-        return UserList(
-            users=[UserRead.model_validate(current_user)],
-            total=1,
-            limit=limit,
-            offset=0,
-        )
