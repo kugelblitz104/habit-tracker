@@ -225,14 +225,10 @@ async def import_from_loop_habit_tracker(
                             trackers_skipped += 1
                             continue
 
-                        completed = value >= 2
-                        skipped = value == 1
-
                         new_tracker = Tracker(
                             habit_id=new_habit.id,
                             dated=rep_date,
-                            completed=completed,
-                            skipped=skipped,
+                            status=value,
                             note=notes,
                         )
                         db.add(new_tracker)
@@ -437,10 +433,8 @@ async def export_to_loop_habit_tracker(
                 # 0 = not done
                 # 1 = skipped
                 # 2 = done
-                if tracker.skipped:
-                    value = 1
-                elif tracker.completed:
-                    value = 2
+                if tracker.status > 0 or tracker.note is not None:
+                    value = tracker.status
                 else:
                     # Not completed and not skipped - skip export
                     continue

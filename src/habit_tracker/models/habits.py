@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime
+from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -51,16 +51,6 @@ class HabitRead(HabitBase):
     updated_date: Optional[datetime] = None
     completed_today: bool = False
     skipped_today: bool = False
-
-
-class HabitKPIs(BaseModel):
-    id: int
-    current_streak: int | None
-    longest_streak: int | None
-    total_completions: int
-    thirty_day_completion_rate: float
-    overall_completion_rate: float
-    last_completed_date: Optional[date] = None
 
 
 class HabitUpdate(BaseModel):

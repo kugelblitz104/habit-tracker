@@ -8,8 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class TrackerBase(BaseModel):
     habit_id: int
     dated: date = Field(default_factory=date.today)
-    completed: bool = True
-    skipped: bool = False
+    status: int = Field()
     note: Optional[str] = None
 
 
@@ -25,10 +24,20 @@ class TrackerRead(TrackerBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TrackerLite(BaseModel):
+    """Lightweight tracker schema for efficient data fetching."""
+
+    id: int
+    dated: date
+    status: int  # 0=not completed, 1=skipped, 2=completed
+    has_note: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TrackerUpdate(BaseModel):
     dated: Optional[date] = None
-    completed: Optional[bool] = None
-    skipped: Optional[bool] = None
+    status: Optional[int] = None  # 0=not completed, 1=skipped, 2=completed
     note: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
@@ -40,13 +49,10 @@ class TrackerList(BaseModel):
     offset: int
 
 
-class Streak(BaseModel):
-    start_date: date
-    end_date: date
+class TrackerLiteList(BaseModel):
+    """Lightweight tracker list for efficient data fetching."""
 
-    @classmethod
-    def from_date(cls, start: date) -> "Streak":
-        return cls(start_date=start, end_date=start)
-
-    def length(self) -> int:
-        return (self.end_date - self.start_date).days + 1
+    trackers: List[TrackerLite] = []
+    total: int
+    limit: int
+    offset: int

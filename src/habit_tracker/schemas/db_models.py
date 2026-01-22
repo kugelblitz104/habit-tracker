@@ -12,6 +12,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from habit_tracker.constants import TrackerStatus
 
 
 class Base(DeclarativeBase):
@@ -79,8 +80,9 @@ class Tracker(Base):
         Integer, ForeignKey("habit.id", ondelete="CASCADE"), nullable=False
     )
     dated: Mapped[date] = mapped_column(Date, default=date.today, nullable=False)
-    completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    skipped: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[int] = mapped_column(
+        Integer, default=TrackerStatus.COMPLETED, nullable=False
+    )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False

@@ -154,8 +154,10 @@ async def list_user_habits(
     for habit in db_habits:
         habit_read = HabitRead.model_validate(habit)
         tracker = today_trackers.get(habit.id)
-        habit_read.completed_today = tracker.completed if tracker else False
-        habit_read.skipped_today = tracker.skipped if tracker else False
+        habit_read.completed_today = (
+            tracker.status == 2 if tracker else False
+        )  # completed
+        habit_read.skipped_today = tracker.status == 1 if tracker else False  # skipped
         habits_read.append(habit_read)
 
     return HabitList(
