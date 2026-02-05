@@ -1238,6 +1238,267 @@ class TestListHabitTrackers:
         assert data["total"] == 3  # Note: current impl returns len of returned items
 
 
+class TestListHabitTrackersLite:
+    """Tests for GET /habits/{habit_id}/trackers/lite endpoint with date-based pagination."""
+
+    async def test_list_trackers_lite_default_params(
+        self, client, db_session, setup_factories
+    ):
+        """List trackers with default parameters (today as end_date, 42 days)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create trackers for last 10 days
+        for i in range(10):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 10
+        assert data["days"] == 42
+        assert data["end_date"] == date.today().isoformat()
+        assert data["has_previous"] is False
+
+    async def test_list_trackers_lite_with_end_date(
+        self, client, db_session, setup_factories
+    ):
+        """List trackers with specific end_date."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create trackers for specific dates
+        target_date = date.today() - timedelta(days=10)
+        for i in range(5):
+            TrackerFactory(habit=habit, dated=target_date - timedelta(days=i))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}/trackers/lite?end_date={target_date.isoformat()}&days=7"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["end_date"] == target_date.isoformat()
+        assert data["days"] == 7
+        # Should include trackers from target_date to target_date - 6 days
+        assert data["total"] == 5
+
+    async def test_list_trackers_lite_has_previous_true(
+        self, client, db_session, setup_factories
+    ):
+        """has_previous is True when older trackers exist."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create recent trackers
+        for i in range(5):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        # Create older tracker outside the range
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=50))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=7")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_previous"] is True
+        assert data["total"] == 5  # Only recent 5 within the 7-day window
+
+    async def test_list_trackers_lite_has_previous_false(
+        self, client, db_session, setup_factories
+    ):
+        """has_previous is False when no older trackers exist."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create only recent trackers within the range
+        for i in range(3):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=42")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["has_previous"] is False
+
+    async def test_list_trackers_lite_pagination(
+        self, client, db_session, setup_factories
+    ):
+        """Test paginating through trackers with different end_dates."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create trackers spanning 60 days
+        for i in range(60):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        # First page (most recent 30 days)
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=30")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 30
+        assert data["has_previous"] is True
+
+        # Second page (next 30 days)
+        prev_end_date = date.today() - timedelta(days=30)
+        response = await client.get(
+            f"/habits/{habit.id}/trackers/lite?end_date={prev_end_date.isoformat()}&days=30"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 30
+        assert data["has_previous"] is False
+
+    async def test_list_trackers_lite_empty_range(
+        self, client, db_session, setup_factories
+    ):
+        """Returns empty list when no trackers in date range."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        # Create tracker outside the range
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=100))
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=7")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert len(data["trackers"]) == 0
+        assert data["has_previous"] is True  # There is an older tracker
+
+    async def test_list_trackers_lite_unauthorized(
+        self, client, db_session, setup_factories
+    ):
+        """User cannot list other user's trackers (403)."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user2)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user1.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite")
+        assert response.status_code == 403
+
+    async def test_list_trackers_lite_nonexistent_habit(
+        self, client, db_session, setup_factories
+    ):
+        """Return 404 for non-existent habit."""
+        user = UserFactory()
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get("/habits/99999/trackers/lite")
+        assert response.status_code == 404
+
+    async def test_list_trackers_lite_has_note_flag(
+        self, client, db_session, setup_factories
+    ):
+        """Verify has_note flag is correctly set."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today(), note="Has a note")
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1), note="")
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=2), note=None)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite")
+        assert response.status_code == 200
+        data = response.json()
+        trackers = data["trackers"]
+        assert len(trackers) == 3
+        # Ordered by date descending
+        assert trackers[0]["has_note"] is True  # today - has note
+        assert trackers[1]["has_note"] is False  # yesterday - empty string
+        assert trackers[2]["has_note"] is False  # 2 days ago - None
+
+
 class TestGetHabitKPIs:
     """Tests for GET /habits/{habit_id}/kpis endpoint."""
 

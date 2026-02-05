@@ -9,6 +9,7 @@ from factory.faker import Faker
 from factory.helpers import post_generation
 from passlib.context import CryptContext
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 
@@ -27,7 +28,7 @@ def get_fast_password_hash(password: str) -> str:
 
 class BaseFactory(SQLAlchemyModelFactory):
     """Base factory with session management.
-    
+
     Note: For async sessions, factories build objects but don't auto-persist.
     You must manually add to session and commit/flush in your tests.
     """
@@ -94,30 +95,24 @@ class TrackerFactory(BaseFactory):
 
     habit = SubFactory(HabitFactory)
     dated = LazyFunction(date.today)
-    completed = True
-    skipped = False
+    status = TrackerStatus.COMPLETED
     note = Faker("sentence")
     created_date = LazyFunction(datetime.now)
-    completed = True
-    skipped = False
 
 
 class CompletedTrackerFactory(TrackerFactory):
     """Factory for completed trackers."""
 
-    completed = True
-    skipped = False
+    status = TrackerStatus.COMPLETED
 
 
 class IncompleteTrackerFactory(TrackerFactory):
     """Factory for creating incomplete tracker (neither completed nor skipped)."""
 
-    completed = False
-    skipped = False
+    status = TrackerStatus.NOT_COMPLETED
 
 
 class SkippedTrackerFactory(TrackerFactory):
     """Factory for skipped trackers."""
 
-    completed = False
-    skipped = True
+    status = TrackerStatus.SKIPPED

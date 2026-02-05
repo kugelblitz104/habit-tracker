@@ -50,9 +50,10 @@ class TrackerList(BaseModel):
 
 
 class TrackerLiteList(BaseModel):
-    """Lightweight tracker list for efficient data fetching."""
+    """Lightweight tracker list for efficient data fetching with date-based pagination."""
 
     trackers: List[TrackerLite] = []
     total: int
-    limit: int
-    offset: int
+    end_date: date
+    days: int
+    has_previous: bool = False  # Indicates if there are older trackers

@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Annotated
+from datetime import date, datetime, timedelta
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -208,15 +208,19 @@ async def list_habit_trackers_lite(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    limit: int = Query(
-        default=70,
+    end_date: Optional[date] = Query(
+        default=None,
+        description="End date for the date range (defaults to today). Format: YYYY-MM-DD",
+    ),
+    days: int = Query(
+        default=42,
         ge=1,
-        le=10000,
-        description="Maximum number of trackers to return (1-10000)",
+        le=365,
+        description="Number of days to fetch (1-365, default: 42 = 6 weeks)",
     ),
 ) -> TrackerLiteList:
     """
-    Get tracker entries in a lightweight format for efficient data fetching.
+    Get tracker entries in a lightweight format with date-based pagination.
 
     This endpoint returns only the essential fields:
     - id: Tracker ID (for fetching full details if needed)
@@ -228,7 +232,8 @@ async def list_habit_trackers_lite(
     endpoint or fetch individual trackers when you need notes or timestamps.
 
     - **habit_id**: The unique identifier of the habit
-    - **limit**: Maximum number of trackers to return (default: 70, max: 10000)
+    - **end_date**: End date for the range (defaults to today)
+    - **days**: Number of days to fetch (default: 42 = 6 weeks)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -237,13 +242,31 @@ async def list_habit_trackers_lite(
         )
     authorize_resource_access(current_user, habit.user_id, "habit")
 
+    # Default end_date to today if not provided
+    if end_date is None:
+        end_date = date.today()
+
+    # Calculate start date
+    start_date = end_date - timedelta(days=days - 1)
+
+    # Query trackers within the date range
     result = await db.execute(
         select(Tracker)
         .filter(Tracker.habit_id == habit_id)
+        .filter(Tracker.dated >= start_date)
+        .filter(Tracker.dated <= end_date)
         .order_by(Tracker.dated.desc())
-        .limit(limit if limit > 0 else None)
     )
     db_trackers = result.scalars().all()
+
+    # Check if there are older trackers (for has_previous flag)
+    older_result = await db.execute(
+        select(Tracker.id)
+        .filter(Tracker.habit_id == habit_id)
+        .filter(Tracker.dated < start_date)
+        .limit(1)
+    )
+    has_previous = older_result.scalar() is not None
 
     # Convert to lite format with has_note flag
     trackers_lite = [
@@ -259,8 +282,9 @@ async def list_habit_trackers_lite(
     return TrackerLiteList(
         trackers=trackers_lite,
         total=len(trackers_lite),
-        limit=limit,
-        offset=0,
+        end_date=end_date,
+        days=days,
+        has_previous=has_previous,
     )
 
 
