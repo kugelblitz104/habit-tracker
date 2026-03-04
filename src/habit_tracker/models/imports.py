@@ -22,3 +22,11 @@ class ImportResult(BaseModel):
     trackers_skipped: int
     details: List[ImportedHabitSummary] = []
     errors: List[str] = []
+
+
+class ExportResult(BaseModel):
+    """Result of a database export operation containing the file as base64"""
+
+    filename: str
+    data: str  # base64-encoded SQLite .db file
+    content_type: str = "application/x-sqlite3"

@@ -1,3 +1,4 @@
+import base64
 import os
 import sqlite3
 import tempfile
@@ -6,13 +7,16 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import get_current_user, get_db
 from habit_tracker.models.habits import loopHabitColors
-from habit_tracker.models.imports import ImportedHabitSummary, ImportResult
+from habit_tracker.models.imports import (
+    ExportResult,
+    ImportedHabitSummary,
+    ImportResult,
+)
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 
 router = APIRouter(
@@ -295,13 +299,12 @@ async def import_from_loop_habit_tracker(
 @router.get(
     "/loop-habit-tracker",
     summary="Export habits to Loop Habit Tracker format",
-    response_class=FileResponse,
 )
 async def export_to_loop_habit_tracker(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     include_archived: bool = False,
-) -> FileResponse:
+) -> ExportResult:
     """
     Export habits and their tracking history to a Loop Habit Tracker compatible database file.
 
@@ -457,18 +460,21 @@ async def export_to_loop_habit_tracker(
         # Generate filename with timestamp
         export_filename = f"habits_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
-        return FileResponse(
-            path=temp_file.name,
+        # Read the file and encode as base64 for JSON transport
+        with open(temp_file.name, "rb") as f:
+            encoded_data = base64.b64encode(f.read()).decode("ascii")
+
+        return ExportResult(
             filename=export_filename,
-            media_type="application/x-sqlite3",
-            background=None,  # Don't delete immediately, let cleanup handle it
+            data=encoded_data,
         )
 
     except Exception as e:
-        # Clean up on error
-        if temp_file and os.path.exists(temp_file.name):
-            os.unlink(temp_file.name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Export failed: {str(e)}",
         )
+
+    finally:
+        if temp_file and os.path.exists(temp_file.name):
+            os.unlink(temp_file.name)
