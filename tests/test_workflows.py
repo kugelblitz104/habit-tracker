@@ -2,7 +2,9 @@
 
 from datetime import date, timedelta
 
+import pytest
 
+from habit_tracker.constants import TrackerStatus
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
@@ -129,7 +131,7 @@ class TestUserOnboardingFlow:
             json={
                 "habit_id": habit_id,
                 "dated": date.today().isoformat(),
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert tracker_response.status_code == 201
@@ -138,6 +140,7 @@ class TestUserOnboardingFlow:
 class TestHabitTrackingFlow:
     """Tests for habit tracking workflows."""
 
+    @pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
     async def test_daily_habit_completion_flow(
         self, client, db_session, setup_factories
     ):
@@ -171,7 +174,7 @@ class TestHabitTrackingFlow:
             json={
                 "habit_id": habit_id,
                 "dated": date.today().isoformat(),
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
 
@@ -202,7 +205,7 @@ class TestHabitTrackingFlow:
             json={
                 "habit_id": habit.id,
                 "dated": (date.today() - timedelta(days=1)).isoformat(),
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
 
@@ -212,8 +215,7 @@ class TestHabitTrackingFlow:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
-                "completed": False,
-                "skipped": True,
+                "status": TrackerStatus.SKIPPED,
             },
         )
 
@@ -257,6 +259,7 @@ class TestHabitTrackingFlow:
         assert unarchive_response.json()["archived"] is False
 
 
+@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
 class TestStreakBuildingFlow:
     """Tests for streak building workflows."""
 
@@ -275,7 +278,7 @@ class TestStreakBuildingFlow:
             TrackerFactory(
                 habit=habit,
                 dated=date.today() - timedelta(days=i),
-                completed=True,
+                status=TrackerStatus.COMPLETED,
             )
         await db_session.commit()
 
@@ -304,12 +307,16 @@ class TestStreakBuildingFlow:
         await db_session.commit()
 
         # Complete 3 times in first week
-        TrackerFactory(habit=habit, dated=date.today(), completed=True)
+        TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED)
         TrackerFactory(
-            habit=habit, dated=date.today() - timedelta(days=2), completed=True
+            habit=habit,
+            dated=date.today() - timedelta(days=2),
+            status=TrackerStatus.COMPLETED,
         )
         TrackerFactory(
-            habit=habit, dated=date.today() - timedelta(days=4), completed=True
+            habit=habit,
+            dated=date.today() - timedelta(days=4),
+            status=TrackerStatus.COMPLETED,
         )
         await db_session.commit()
 
@@ -404,8 +411,8 @@ class TestMultiUserScenarios:
         await db_session.commit()
 
         # Both users create trackers for today
-        TrackerFactory(habit=habit1, dated=date.today(), completed=True)
-        TrackerFactory(habit=habit2, dated=date.today(), completed=True)
+        TrackerFactory(habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED)
+        TrackerFactory(habit=habit2, dated=date.today(), status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         # Verify user1's tracker

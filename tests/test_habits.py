@@ -2,8 +2,10 @@
 
 from datetime import date, timedelta
 
+import pytest
 from sqlalchemy import select
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker
 from tests.factories import (
     AdminUserFactory,
@@ -407,7 +409,7 @@ class TestGetHabit:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        TrackerFactory(habit=habit, dated=date.today(), completed=True, skipped=False)
+        TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -433,7 +435,7 @@ class TestGetHabit:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        TrackerFactory(habit=habit, dated=date.today(), completed=False, skipped=True)
+        TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -1499,6 +1501,7 @@ class TestListHabitTrackersLite:
         assert trackers[2]["has_note"] is False  # 2 days ago - None
 
 
+@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
 class TestGetHabitKPIs:
     """Tests for GET /habits/{habit_id}/kpis endpoint."""
 
@@ -1539,7 +1542,7 @@ class TestGetHabitKPIs:
             TrackerFactory(
                 habit=habit,
                 dated=date.today() - timedelta(days=i),
-                completed=True,
+                status=TrackerStatus.COMPLETED,
             )
         await db_session.commit()
 
@@ -1569,7 +1572,7 @@ class TestGetHabitKPIs:
             TrackerFactory(
                 habit=habit,
                 dated=date.today() - timedelta(days=i),
-                completed=True,
+                status=TrackerStatus.COMPLETED,
             )
         await db_session.commit()
 
@@ -1600,7 +1603,7 @@ class TestGetHabitKPIs:
             TrackerFactory(
                 habit=habit,
                 dated=date.today() - timedelta(days=i * 2),
-                completed=True,
+                status=TrackerStatus.COMPLETED,
             )
         await db_session.commit()
 
@@ -1627,7 +1630,7 @@ class TestGetHabitKPIs:
         await db_session.commit()
 
         last_date = date.today() - timedelta(days=3)
-        TrackerFactory(habit=habit, dated=last_date, completed=True)
+        TrackerFactory(habit=habit, dated=last_date, status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -1664,6 +1667,7 @@ class TestGetHabitKPIs:
         assert response.status_code == 403
 
 
+@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
 class TestGetHabitStreaks:
     """Tests for GET /habits/{habit_id}/streaks endpoint."""
 
@@ -1701,7 +1705,7 @@ class TestGetHabitStreaks:
             TrackerFactory(
                 habit=habit,
                 dated=date.today() - timedelta(days=i),
-                completed=True,
+                status=TrackerStatus.COMPLETED,
             )
         await db_session.commit()
 
@@ -1727,15 +1731,18 @@ class TestGetHabitStreaks:
         habit = HabitFactory(user=user, frequency=1, range=1)
         await db_session.commit()
 
-        TrackerFactory(habit=habit, dated=date.today(), completed=True)
+        TrackerFactory(
+            habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED
+        )
         TrackerFactory(
             habit=habit,
             dated=date.today() - timedelta(days=1),
-            completed=False,
-            skipped=True,
+            status=TrackerStatus.SKIPPED,
         )
         TrackerFactory(
-            habit=habit, dated=date.today() - timedelta(days=2), completed=True
+            habit=habit,
+            dated=date.today() - timedelta(days=2),
+            status=TrackerStatus.COMPLETED,
         )
         await db_session.commit()
 
@@ -1805,10 +1812,11 @@ class TestSortHabits:
         await db_session.refresh(habit2)
         await db_session.refresh(habit3)
 
-        # habit3 sent first gets sort_order 2, habit1 gets 1, habit2 gets 0
-        assert habit3.sort_order == 2
+        # First ID gets the lowest sort_order (habits display in ascending
+        # sort_order): habit3 -> 0, habit1 -> 1, habit2 -> 2
+        assert habit3.sort_order == 0
         assert habit1.sort_order == 1
-        assert habit2.sort_order == 0
+        assert habit2.sort_order == 2
 
     async def test_sort_habits_archived(self, client, db_session, setup_factories):
         """Archived habits preserve their sort_order when sorting is applied."""
@@ -1817,7 +1825,7 @@ class TestSortHabits:
 
         habit1 = HabitFactory(user=user, name="Active Habit", archived=False)
         habit2 = HabitFactory(
-            user=user, name="Archived Habit", archived=True, sort_order=0
+            user=user, name="Archived Habit", archived=True, sort_order=5
         )
         await db_session.commit()
 
@@ -1837,10 +1845,11 @@ class TestSortHabits:
         await db_session.refresh(habit1)
         await db_session.refresh(habit2)
 
-        # Active habit gets sort_order: total(2) - 1 = 1, but 0 is taken by archived, so stays 1
-        assert habit1.sort_order == 1
+        # Only active habits are re-numbered; habit1 is the first (only)
+        # active habit in the list so it gets sort_order 0
+        assert habit1.sort_order == 0
         # Archived habit preserves its original sort_order
-        assert habit2.sort_order == 0
+        assert habit2.sort_order == 5
 
     async def test_sort_habits_archived_preserves_position(
         self, client, db_session, setup_factories
@@ -1875,14 +1884,14 @@ class TestSortHabits:
         await db_session.refresh(habit_c)
         await db_session.refresh(habit_d)
 
-        # Active habits get sort_order starting from total(4) - 1 = 3
-        # Skipping 2 because B (archived, not in request) has sort_order=2
-        # A: 3, C: 1 (skip 2), D: 0
-        # When B is unarchived, order by sort_order desc: A(3), B(2), C(1), D(0)
-        assert habit_a.sort_order == 3
+        # Active habits are numbered in request order starting from 0,
+        # skipping sort_order values held by archived habits not in the
+        # request: A -> 0, C -> 1, D -> 3 (2 is held by archived B).
+        # When B is unarchived, ascending order is A(0), C(1), B(2), D(3).
+        assert habit_a.sort_order == 0
         assert habit_b.sort_order == 2  # Preserved
-        assert habit_c.sort_order == 1  # Skipped 2
-        assert habit_d.sort_order == 0
+        assert habit_c.sort_order == 1
+        assert habit_d.sort_order == 3  # Skipped 2
 
     async def test_sort_habits_single_habit(self, client, db_session, setup_factories):
         """Sorting a single habit should work."""

@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import select
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Tracker
 from tests.factories import (
     AdminUserFactory,
@@ -17,7 +18,7 @@ class TestCreateTracker:
     """Tests for POST /trackers/ endpoint."""
 
     async def test_create_tracker_basic(self, client, db_session, setup_factories):
-        """Create tracker with default values."""
+        """Create tracker with minimal payload."""
         user = UserFactory()
         habit = HabitFactory(user=user)
         await db_session.commit()
@@ -34,13 +35,14 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 201
         data = response.json()
         assert data["habit_id"] == habit.id
-        assert data["completed"] is True  # Default
-        assert data["skipped"] is False  # Default
+        assert data["status"] == TrackerStatus.COMPLETED
+        assert data["note"] is None  # Default
 
     async def test_create_tracker_completed(self, client, db_session, setup_factories):
         """Create tracker marked as completed."""
@@ -62,14 +64,12 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
-                "completed": True,
-                "skipped": False,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["completed"] is True
-        assert data["skipped"] is False
+        assert data["status"] == TrackerStatus.COMPLETED
 
     async def test_create_tracker_skipped(self, client, db_session, setup_factories):
         """Create tracker marked as skipped."""
@@ -91,14 +91,12 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
-                "completed": False,
-                "skipped": True,
+                "status": TrackerStatus.SKIPPED,
             },
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["completed"] is False
-        assert data["skipped"] is True
+        assert data["status"] == TrackerStatus.SKIPPED
 
     async def test_create_tracker_with_note(self, client, db_session, setup_factories):
         """Create tracker with note."""
@@ -120,6 +118,7 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
+                "status": TrackerStatus.COMPLETED,
                 "note": "Felt great today!",
             },
         )
@@ -151,6 +150,7 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": custom_date.isoformat(),
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 201
@@ -180,6 +180,7 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 403
@@ -203,14 +204,15 @@ class TestCreateTracker:
             json={
                 "habit_id": 99999,
                 "dated": date.today().isoformat(),
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 404
 
-    async def test_create_tracker_both_completed_and_skipped(
+    async def test_create_tracker_out_of_range_status(
         self, client, db_session, setup_factories
     ):
-        """Test validation for conflicting flags."""
+        """Test validation for out-of-range status values."""
         user = UserFactory()
         await db_session.commit()
 
@@ -230,12 +232,11 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
-                "completed": True,
-                "skipped": True,
+                "status": 99,
             },
         )
         # Depending on implementation, this could be 422 or 201
-        # Currently the API accepts this (no validation)
+        # Currently the API accepts any integer (no validation)
         assert response.status_code in [201, 422]
 
     async def test_create_tracker_duplicate_date(
@@ -265,6 +266,7 @@ class TestCreateTracker:
             json={
                 "habit_id": habit.id,
                 "dated": date.today().isoformat(),
+                "status": TrackerStatus.COMPLETED,
             },
         )
         # Should fail due to unique constraint
@@ -369,7 +371,7 @@ class TestUpdateTrackerPut:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=True, skipped=False)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -384,15 +386,13 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": new_date.isoformat(),
-                "completed": False,
-                "skipped": True,
+                "status": TrackerStatus.SKIPPED,
                 "note": "Updated note",
             },
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["completed"] is False
-        assert data["skipped"] is True
+        assert data["status"] == TrackerStatus.SKIPPED
         assert data["note"] == "Updated note"
 
     async def test_update_other_user_tracker_put(
@@ -420,8 +420,7 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": date.today().isoformat(),
-                "completed": True,
-                "skipped": False,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 403
@@ -436,7 +435,7 @@ class TestUpdateTrackerPut:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=False, skipped=True)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -450,12 +449,11 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": tracker.dated.isoformat(),
-                "completed": True,
-                "skipped": False,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 200
-        assert response.json()["completed"] is True
+        assert response.json()["status"] == TrackerStatus.COMPLETED
 
     async def test_update_tracker_skip_status_put(
         self, client, db_session, setup_factories
@@ -467,7 +465,7 @@ class TestUpdateTrackerPut:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=True, skipped=False)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -481,12 +479,11 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": tracker.dated.isoformat(),
-                "completed": False,
-                "skipped": True,
+                "status": TrackerStatus.SKIPPED,
             },
         )
         assert response.status_code == 200
-        assert response.json()["skipped"] is True
+        assert response.json()["status"] == TrackerStatus.SKIPPED
 
     async def test_update_tracker_date_put(self, client, db_session, setup_factories):
         """Update tracker date."""
@@ -511,8 +508,7 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": new_date.isoformat(),
-                "completed": tracker.completed,
-                "skipped": tracker.skipped,
+                "status": tracker.status,
             },
         )
         assert response.status_code == 200
@@ -540,8 +536,7 @@ class TestUpdateTrackerPut:
             f"/trackers/{tracker.id}",
             json={
                 "dated": tracker.dated.isoformat(),
-                "completed": tracker.completed,
-                "skipped": tracker.skipped,
+                "status": tracker.status,
                 "note": "Updated note",
             },
         )
@@ -566,8 +561,7 @@ class TestUpdateTrackerPut:
             "/trackers/99999",
             json={
                 "dated": date.today().isoformat(),
-                "completed": True,
-                "skipped": False,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 404
@@ -613,7 +607,7 @@ class TestUpdateTrackerPatch:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=False)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.NOT_COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -625,10 +619,10 @@ class TestUpdateTrackerPatch:
 
         response = await client.patch(
             f"/trackers/{tracker.id}",
-            json={"completed": True},
+            json={"status": TrackerStatus.COMPLETED},
         )
         assert response.status_code == 200
-        assert response.json()["completed"] is True
+        assert response.json()["status"] == TrackerStatus.COMPLETED
 
     async def test_update_tracker_toggle_skipped_patch(
         self, client, db_session, setup_factories
@@ -640,7 +634,7 @@ class TestUpdateTrackerPatch:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, skipped=False)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.NOT_COMPLETED)
         await db_session.commit()
 
         login_response = await client.post(
@@ -652,10 +646,10 @@ class TestUpdateTrackerPatch:
 
         response = await client.patch(
             f"/trackers/{tracker.id}",
-            json={"skipped": True},
+            json={"status": TrackerStatus.SKIPPED},
         )
         assert response.status_code == 200
-        assert response.json()["skipped"] is True
+        assert response.json()["status"] == TrackerStatus.SKIPPED
 
     async def test_update_tracker_add_note_patch(
         self, client, db_session, setup_factories
@@ -721,7 +715,9 @@ class TestUpdateTrackerPatch:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=True, note="Original")
+        tracker = TrackerFactory(
+            habit=habit, status=TrackerStatus.COMPLETED, note="Original"
+        )
         await db_session.commit()
 
         login_response = await client.post(
@@ -733,11 +729,11 @@ class TestUpdateTrackerPatch:
 
         response = await client.patch(
             f"/trackers/{tracker.id}",
-            json={"completed": False, "note": "Updated"},
+            json={"status": TrackerStatus.NOT_COMPLETED, "note": "Updated"},
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["completed"] is False
+        assert data["status"] == TrackerStatus.NOT_COMPLETED
         assert data["note"] == "Updated"
 
     async def test_update_other_user_tracker_patch(

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.config import settings
 from habit_tracker.schemas.db_models import Base, Habit, Tracker, User
 
@@ -130,8 +131,7 @@ async def create_mock_trackers(habit: Habit, num_trackers: int = 1):
         Tracker(
             habit_id=habit.id if habit.id is not None else 1,
             dated=datetime.now().date(),
-            completed=True,
-            skipped=False,
+            status=TrackerStatus.COMPLETED,
             note="Initial tracker note",
         )
     ]
@@ -141,8 +141,8 @@ async def create_mock_trackers(habit: Habit, num_trackers: int = 1):
             Tracker(
                 habit_id=habit.id if habit.id is not None else 1,
                 dated=datetime.now().date() - timedelta(days=num_trackers - i),
-                completed=True,
-                skipped=(i % 2 == 0),  # Alternate between True and False
+                # Alternate between skipped and completed
+                status=TrackerStatus.SKIPPED if i % 2 == 0 else TrackerStatus.COMPLETED,
                 note=f"Tracker note {i}",
             )
         )

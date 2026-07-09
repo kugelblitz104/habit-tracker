@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 from sqlalchemy import select
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 from tests.factories import (
     AdminUserFactory,
@@ -204,39 +205,39 @@ class TestTrackerModel:
         fetched_tracker = result.scalar_one()
         assert fetched_tracker.dated == today
 
-    async def test_tracker_completed_field(self, db_session, setup_factories):
-        """Tracker has completed field."""
+    async def test_tracker_completed_status(self, db_session, setup_factories):
+        """Tracker stores a completed status."""
         user = UserFactory()
         await db_session.commit()
 
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, completed=True)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
         result = await db_session.execute(
             select(Tracker).where(Tracker.id == tracker.id)
         )
         fetched_tracker = result.scalar_one()
-        assert fetched_tracker.completed is True
+        assert fetched_tracker.status == TrackerStatus.COMPLETED
 
-    async def test_tracker_skipped_field(self, db_session, setup_factories):
-        """Tracker has skipped field."""
+    async def test_tracker_skipped_status(self, db_session, setup_factories):
+        """Tracker stores a skipped status."""
         user = UserFactory()
         await db_session.commit()
 
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        tracker = TrackerFactory(habit=habit, skipped=True)
+        tracker = TrackerFactory(habit=habit, status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
         result = await db_session.execute(
             select(Tracker).where(Tracker.id == tracker.id)
         )
         fetched_tracker = result.scalar_one()
-        assert fetched_tracker.skipped is True
+        assert fetched_tracker.status == TrackerStatus.SKIPPED
 
 
 class TestModelRelationships:
@@ -353,7 +354,7 @@ class TestModelConstraints:
         tracker = Tracker(
             habit_id=99999,  # Non-existent habit
             dated=date.today(),
-            completed=True,
+            status=TrackerStatus.COMPLETED,
         )
         db_session.add(tracker)
         with pytest.raises(Exception):

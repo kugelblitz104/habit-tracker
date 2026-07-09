@@ -10,15 +10,18 @@ from factory.helpers import post_generation
 from passlib.context import CryptContext
 
 from habit_tracker.constants import TaskStatus, TrackerStatus
-from habit_tracker.core.security import get_password_hash
 from habit_tracker.schemas.db_models import Habit, Profile, Project, Task, Tracker, User
-
-cached_password_hash = get_password_hash("password123")
-
 
 _test_pwd_context = CryptContext(
     schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4
 )
+
+# Hash once with the cheap 4-round context. The previous version used the
+# production context (bcrypt, 12 rounds) at import time, which made every
+# /auth/login in tests pay a ~300ms full-cost bcrypt verify - the verify cost
+# is encoded in the hash itself, so the fast_password_hashing fixture could
+# not help.
+cached_password_hash = _test_pwd_context.hash("password123")
 
 
 def get_fast_password_hash(password: str) -> str:

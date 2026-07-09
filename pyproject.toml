@@ -31,6 +31,7 @@ test = [
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
     "pytest-env>=1.2.0",
+    "pytest-xdist>=3.6.0",
     "factory-boy>=3.3.3",
 ]
 
@@ -39,7 +40,11 @@ habit-tracker = "habit_tracker.main:app"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
+# One event loop per test session (per xdist worker): lets the SQLAlchemy
+# engine reuse pooled asyncpg connections across tests instead of paying
+# connection setup for every test.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

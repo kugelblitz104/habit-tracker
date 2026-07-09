@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, UserFactory
 
@@ -279,6 +280,7 @@ class TestUpdateUserPut:
                 "first_name": "Hacked",
                 "last_name": "User",
                 "email": "hacked@example.com",
+                "plaintext_password": "hackedpassword123",
             },
         )
         assert response.status_code == 403
@@ -370,6 +372,7 @@ class TestUpdateUserPut:
                 "first_name": "Non",
                 "last_name": "Existent",
                 "email": "nonexistent@example.com",
+                "plaintext_password": "password123",
             },
         )
         assert response.status_code == 404
@@ -855,8 +858,10 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Create trackers for today
-        TrackerFactory(habit=habit1, dated=date.today(), completed=True, skipped=False)
-        TrackerFactory(habit=habit2, dated=date.today(), completed=False, skipped=True)
+        TrackerFactory(
+            habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED
+        )
+        TrackerFactory(habit=habit2, dated=date.today(), status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
         # Login

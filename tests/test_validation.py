@@ -1,5 +1,6 @@
 """Input validation tests."""
 
+from habit_tracker.constants import TrackerStatus
 from tests.factories import AdminUserFactory, HabitFactory, UserFactory
 
 
@@ -459,7 +460,7 @@ class TestRequiredFieldValidation:
             "/trackers/",
             json={
                 "dated": "2024-01-01",
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 422
@@ -543,7 +544,7 @@ class TestTypeValidation:
             json={
                 "habit_id": habit.id,
                 "dated": "01-01-2024",  # Wrong format
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 422

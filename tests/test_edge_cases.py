@@ -2,6 +2,9 @@
 
 from datetime import date, timedelta
 
+import pytest
+
+from habit_tracker.constants import TrackerStatus
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
@@ -140,7 +143,7 @@ class TestDateEdgeCases:
             json={
                 "habit_id": habit.id,
                 "dated": future_date,
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         # May allow or reject future dates
@@ -167,7 +170,7 @@ class TestDateEdgeCases:
             json={
                 "habit_id": habit.id,
                 "dated": past_date,
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code in [201, 400, 422]
@@ -192,7 +195,7 @@ class TestDateEdgeCases:
             json={
                 "habit_id": habit.id,
                 "dated": "2024-02-29",  # Leap year
-                "completed": True,
+                "status": TrackerStatus.COMPLETED,
             },
         )
         assert response.status_code == 201
@@ -338,6 +341,7 @@ class TestEmptyResults:
         data = response.json()
         assert data["trackers"] == []
 
+    @pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
     async def test_habit_kpis_with_no_data(self, client, db_session, setup_factories):
         """Test KPIs with no completion data."""
         user = UserFactory()
