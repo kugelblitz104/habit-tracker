@@ -14,7 +14,7 @@ from habit_tracker.core.security import (
     verify_password,
 )
 from habit_tracker.models.users import RefreshTokenRequest, Token, UserCreate
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Profile, User
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -51,6 +51,13 @@ async def register(user_data: UserCreate, db: Annotated[AsyncSession, Depends(ge
     )
 
     db.add(new_user)
+    await db.flush()  # assign new_user.id before creating the default profile
+
+    # Every user needs at least one profile - create the default "Personal"
+    # profile in the same transaction (mirrors the migration backfill)
+    default_profile = Profile(user_id=new_user.id, name="Personal")
+    db.add(default_profile)
+
     await db.commit()
     await db.refresh(new_user)
 

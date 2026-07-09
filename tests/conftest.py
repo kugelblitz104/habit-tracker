@@ -16,7 +16,16 @@ from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
 from habit_tracker.main import app
 from habit_tracker.schemas.db_models import Base
-from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, UserFactory
+from tests.factories import (
+    AdminUserFactory,
+    DoneTaskFactory,
+    HabitFactory,
+    ProfileFactory,
+    ProjectFactory,
+    TaskFactory,
+    TrackerFactory,
+    UserFactory,
+)
 
 # Use same database but different schema for tests
 TEST_SCHEMA = "test"
@@ -154,5 +163,9 @@ def setup_factories(db_session: AsyncSession) -> None:
     # SQLAlchemyModelFactory's extended FactoryOptions attributes
     UserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     AdminUserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    ProfileFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     HabitFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    ProjectFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    TaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    DoneTaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     TrackerFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]

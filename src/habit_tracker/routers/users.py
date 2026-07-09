@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -16,6 +16,7 @@ from habit_tracker.models import (
     Habit,
     HabitList,
     HabitRead,
+    Profile,
     Tracker,
     User,
     UserCreate,
@@ -171,12 +172,18 @@ async def list_user_habits(
         le=100,
         description="Maximum number of habits to return (1-100)",
     ),
+    profile_id: Optional[int] = Query(
+        default=None,
+        description="Only habits belonging to this profile",
+    ),
 ) -> HabitList:
     """
     Get a paginated list of all habits belonging to a specific user.
 
     - **user_id**: The unique identifier of the user
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
+    - **profile_id**: Optional. Only habits belonging to this profile (must
+      belong to the user)
     """
     authorize_resource_access(current_user, user_id, "user")
     user = await db.get(User, user_id)
@@ -185,14 +192,21 @@ async def list_user_habits(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    result = await db.execute(
-        select(Habit).filter(Habit.user_id == user_id).limit(limit)
-    )
+    query = select(Habit).filter(Habit.user_id == user_id)
+    count_query = select(func.count()).filter(Habit.user_id == user_id)
+    if profile_id is not None:
+        profile = await db.get(Profile, profile_id)
+        if not profile or profile.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
+            )
+        query = query.filter(Habit.profile_id == profile_id)
+        count_query = count_query.filter(Habit.profile_id == profile_id)
+
+    result = await db.execute(query.limit(limit))
     db_habits = result.scalars().all()
 
-    count_result = await db.execute(
-        select(func.count()).filter(Habit.user_id == user_id)
-    )
+    count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
     today = datetime.now().date()

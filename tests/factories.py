@@ -4,14 +4,14 @@ import random
 from datetime import date, datetime
 
 from factory.alchemy import SQLAlchemyModelFactory
-from factory.declarations import LazyFunction, SubFactory
+from factory.declarations import LazyAttribute, LazyFunction, Sequence, SubFactory
 from factory.faker import Faker
 from factory.helpers import post_generation
 from passlib.context import CryptContext
 
-from habit_tracker.constants import TrackerStatus
+from habit_tracker.constants import TaskStatus, TrackerStatus
 from habit_tracker.core.security import get_password_hash
-from habit_tracker.schemas.db_models import Habit, Tracker, User
+from habit_tracker.schemas.db_models import Habit, Profile, Project, Task, Tracker, User
 
 cached_password_hash = get_password_hash("password123")
 
@@ -61,11 +61,43 @@ class UserFactory(BaseFactory):
         if extracted:
             obj.password_hash = get_fast_password_hash(extracted)
 
+    @post_generation
+    def default_profile(obj, create, extracted, **kwargs):
+        """Give every new user a default profile.
+
+        Habit creation resolves a profile for the habit and returns 400 for
+        profile-less users, so API tests need users that own at least one
+        profile (mirrors the register endpoint and the migration backfill).
+        Pass ``default_profile=False`` to create a bare, profile-less user.
+        """
+        if extracted is False:
+            return
+        ProfileFactory(user=obj)
+
 
 class AdminUserFactory(UserFactory):
     """Factory for creating admin users."""
 
     is_admin = True
+
+
+class ProfileFactory(BaseFactory):
+    """Factory for creating test profiles."""
+
+    class Meta:
+        model = Profile
+
+    # Profile names are unique per user - a Sequence avoids the collisions
+    # that Faker("word") produced
+    name = Sequence(lambda n: f"Profile {n}")
+    color_start = "#e0763f"
+    color_end = "#c14e6a"
+    habits_enabled = True
+    calendar_enabled = True
+    publish_to_azure = False
+    default_landing = "today"
+    user = SubFactory(UserFactory)
+    created_date = LazyFunction(datetime.now)
 
 
 class HabitFactory(BaseFactory):
@@ -83,8 +115,52 @@ class HabitFactory(BaseFactory):
     notes = Faker("paragraph", nb_sentences=3, variable_nb_sentences=True)
     archived = False
     sort_order = 0
+    category = None
     user = SubFactory(UserFactory)
+    # A habit's profile must belong to the same user as the habit itself.
+    # Reuse the user's existing (default) profile so a user's habits share
+    # one profile; only create a profile if the user somehow has none.
+    profile = LazyAttribute(
+        lambda habit: habit.user.profiles[0]
+        if habit.user.profiles
+        else ProfileFactory(user=habit.user)
+    )
     created_date = LazyFunction(datetime.now)
+
+
+class ProjectFactory(BaseFactory):
+    """Factory for creating test projects."""
+
+    class Meta:
+        model = Project
+
+    name = Faker("text", max_nb_chars=50)
+    color = Faker("color")
+    notes = Faker("paragraph", nb_sentences=3, variable_nb_sentences=True)
+    archived = False
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+
+
+class TaskFactory(BaseFactory):
+    """Factory for creating test tasks."""
+
+    class Meta:
+        model = Task
+
+    title = Faker("sentence", nb_words=4, variable_nb_words=True)
+    notes = None
+    priority = 0
+    status = TaskStatus.OPEN
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+
+
+class DoneTaskFactory(TaskFactory):
+    """Factory for completed tasks."""
+
+    status = TaskStatus.DONE
+    closed_date = LazyFunction(datetime.now)
 
 
 class TrackerFactory(BaseFactory):

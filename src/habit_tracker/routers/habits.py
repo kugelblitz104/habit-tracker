@@ -16,6 +16,7 @@ from habit_tracker.models import (
     HabitCreate,
     HabitRead,
     HabitUpdate,
+    Profile,
     Tracker,
     TrackerList,
     TrackerLite,
@@ -27,6 +28,41 @@ from habit_tracker.schemas.db_models import User
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
 )
+
+
+async def _resolve_habit_profile_id(
+    db: AsyncSession, owner_user_id: int, profile_id: Optional[int]
+) -> int:
+    """Resolve the profile a habit should belong to.
+
+    owner_user_id is the id of the user who owns (or will own) the habit. If
+    profile_id is given, it must exist and belong to that owner (400
+    otherwise) - this keeps the habit's user_id/profile_id invariant intact
+    even when an admin edits another user's habit. If omitted, the owner's
+    oldest profile is used for back-compat.
+    """
+    if profile_id is not None:
+        profile = await db.get(Profile, profile_id)
+        if not profile or profile.user_id != owner_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Profile not found or does not belong to the habit's owner",
+            )
+        return profile_id
+
+    result = await db.execute(
+        select(Profile)
+        .filter(Profile.user_id == owner_user_id)
+        .order_by(Profile.created_date, Profile.id)
+        .limit(1)
+    )
+    default_profile = result.scalar_one_or_none()
+    if not default_profile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User has no profiles; create a profile first",
+        )
+    return default_profile.id
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a new habit")
@@ -48,8 +84,16 @@ async def create_habit(
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
     - **sort_order**: The order in which the habit appears in lists (ascending)
+    - **category**: Optional free-text group label (e.g. "Hygiene")
+    - **profile_id**: Optional profile for this habit. Must belong to the
+      current user; defaults to the user's oldest profile if omitted
     """
-    db_habit = Habit(**habit.model_dump(), user_id=current_user.id)
+    profile_id = await _resolve_habit_profile_id(db, current_user.id, habit.profile_id)
+    db_habit = Habit(
+        **habit.model_dump(exclude={"profile_id"}),
+        profile_id=profile_id,
+        user_id=current_user.id,
+    )
     db.add(db_habit)
     await db.commit()
     await db.refresh(db_habit)
@@ -311,6 +355,15 @@ async def update_habit(
 
     authorize_resource_access(current_user, db_habit.user_id, "habit")
     habit_data = habit_update.model_dump()
+    if habit_data.get("profile_id") is None:
+        # Keep the habit's current profile - profile_id is never nulled
+        habit_data.pop("profile_id", None)
+    else:
+        # Validate against the habit's owner, not the caller: an admin editing
+        # another user's habit may only use that user's profiles
+        habit_data["profile_id"] = await _resolve_habit_profile_id(
+            db, db_habit.user_id, habit_data["profile_id"]
+        )
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
     await db.commit()
@@ -343,6 +396,9 @@ async def patch_habit(
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
     - **sort_order**: The order in which the habit appears in lists (ascending)
+    - **category**: Optional free-text group label (e.g. "Hygiene")
+    - **profile_id**: Move the habit to another profile (must belong to the
+      habit's owner)
 
     """
     db_habit = await db.get(Habit, habit_id)
@@ -352,6 +408,15 @@ async def patch_habit(
         )
     authorize_resource_access(current_user, db_habit.user_id, "habit")
     habit_data = habit_update.model_dump(exclude_unset=True)
+    if habit_data.get("profile_id") is None:
+        # Keep the habit's current profile - profile_id is never nulled
+        habit_data.pop("profile_id", None)
+    else:
+        # Validate against the habit's owner, not the caller: an admin editing
+        # another user's habit may only use that user's profiles
+        habit_data["profile_id"] = await _resolve_habit_profile_id(
+            db, db_habit.user_id, habit_data["profile_id"]
+        )
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
     await db.commit()

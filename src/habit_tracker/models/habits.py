@@ -16,6 +16,9 @@ class HabitBase(BaseModel):
     notes: Optional[str] = None
     archived: bool = False
     sort_order: int = 0
+    category: Optional[str] = None
+    # Optional for back-compat - routers resolve the user's default profile
+    profile_id: Optional[int] = None
 
     @field_validator("color")
     @classmethod
@@ -63,6 +66,8 @@ class HabitUpdate(BaseModel):
     notes: Optional[str] = None
     archived: Optional[bool] = None
     sort_order: Optional[int] = None
+    category: Optional[str] = None
+    profile_id: Optional[int] = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
 
