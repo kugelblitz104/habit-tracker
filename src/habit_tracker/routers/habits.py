@@ -14,7 +14,9 @@ from habit_tracker.core.dependencies import (
 from habit_tracker.models import (
     Habit,
     HabitCreate,
+    HabitKPIs,
     HabitRead,
+    HabitStreak,
     HabitUpdate,
     Profile,
     Tracker,
@@ -24,6 +26,7 @@ from habit_tracker.models import (
     TrackerRead,
 )
 from habit_tracker.schemas.db_models import User
+from habit_tracker.services.habit_stats import calculate_kpis, calculate_streaks
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -259,8 +262,8 @@ async def list_habit_trackers_lite(
     days: int = Query(
         default=42,
         ge=1,
-        le=365,
-        description="Number of days to fetch (1-365, default: 42 = 6 weeks)",
+        le=3660,
+        description="Number of days to fetch (1-3660, default: 42 = 6 weeks)",
     ),
 ) -> TrackerLiteList:
     """
@@ -277,7 +280,7 @@ async def list_habit_trackers_lite(
 
     - **habit_id**: The unique identifier of the habit
     - **end_date**: End date for the range (defaults to today)
-    - **days**: Number of days to fetch (default: 42 = 6 weeks)
+    - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -329,6 +332,71 @@ async def list_habit_trackers_lite(
         end_date=end_date,
         days=days,
         has_previous=has_previous,
+    )
+
+
+@router.get("/{habit_id}/kpis", summary="Get computed KPIs for a habit")
+async def read_habit_kpis(
+    habit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> HabitKPIs:
+    """
+    Retrieve computed statistics for a habit.
+
+    KPIs (streaks, completion rates, last completion, etc.) are derived from
+    the habit's trackers on the fly - nothing is persisted. The computation
+    mirrors the frontend so client and server agree.
+
+    - **habit_id**: The unique identifier of the habit
+    """
+    habit = await db.get(Habit, habit_id)
+    if not habit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
+
+    result = await db.execute(
+        select(Tracker).filter(Tracker.habit_id == habit_id)
+    )
+    trackers = result.scalars().all()
+
+    today = datetime.now().date()
+    return calculate_kpis(habit, trackers, today)
+
+
+@router.get("/{habit_id}/streaks", summary="List computed streaks for a habit")
+async def read_habit_streaks(
+    habit_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> list[HabitStreak]:
+    """
+    Retrieve every streak for a habit, oldest first.
+
+    A streak is an unbroken run of days that count toward the habit: days with
+    an explicit completion or skip, or days that are auto-skipped (the
+    frequency goal was already met within the range window). Derived from the
+    habit's trackers on the fly - nothing is persisted.
+
+    - **habit_id**: The unique identifier of the habit
+    """
+    habit = await db.get(Habit, habit_id)
+    if not habit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
+
+    result = await db.execute(
+        select(Tracker).filter(Tracker.habit_id == habit_id)
+    )
+    trackers = result.scalars().all()
+
+    today = datetime.now().date()
+    return calculate_streaks(
+        trackers, habit.frequency, habit.range, habit.created_date, today
     )
 
 

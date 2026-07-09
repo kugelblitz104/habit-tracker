@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -76,6 +76,59 @@ class HabitList(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class HabitStreak(BaseModel):
+    """A single unbroken run of days that count toward a habit's streak.
+
+    A day counts when it has an explicit completion or skip, or when it is
+    auto-skipped (the frequency goal was already met within the range window).
+    """
+
+    start_date: date
+    end_date: date
+    length: int
+
+
+class HabitKPIs(BaseModel):
+    """Computed statistics for a single habit.
+
+    All values are derived from the habit's trackers on the fly - nothing here
+    is persisted. Mirrors the frontend's client-side computation so the two
+    agree.
+    """
+
+    total_completions: int = Field(
+        ..., description="Count of trackers with status COMPLETED"
+    )
+    current_streak: int = Field(
+        ..., description="Length of the ongoing streak (0 unless it includes today)"
+    )
+    longest_streak: int = Field(
+        ..., description="Length of the longest streak on record"
+    )
+    longest_streak_end_date: Optional[date] = Field(
+        None,
+        description="End date of the longest streak (for a 'days · Mon' sublabel); "
+        "None if there is no streak",
+    )
+    thirty_day_completion_rate: float = Field(
+        ...,
+        description="Completion rate (0.0-1.0) over the trailing 30 days",
+    )
+    overall_completion_rate: float = Field(
+        ...,
+        description="Completion rate (0.0-1.0) since the habit's effective start date",
+    )
+    last_completed_date: Optional[date] = Field(
+        None, description="Date of the most recent completion, or None"
+    )
+    weekday_completion_rates: List[float] = Field(
+        ...,
+        description="Length-7 list of completion rates (0.0-1.0), one per weekday, "
+        "indexed by Python date.weekday(): index 0 = Monday ... 6 = Sunday. "
+        "The frontend reorders these for display.",
+    )
 
 
 loopHabitColors = [

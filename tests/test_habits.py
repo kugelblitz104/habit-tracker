@@ -1500,8 +1500,32 @@ class TestListHabitTrackersLite:
         assert trackers[1]["has_note"] is False  # yesterday - empty string
         assert trackers[2]["has_note"] is False  # 2 days ago - None
 
+    async def test_list_trackers_lite_large_days_value(
+        self, client, db_session, setup_factories
+    ):
+        """A large days value (full history for an old habit) is accepted."""
+        user = UserFactory()
+        await db_session.commit()
 
-@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today())
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=1000")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["days"] == 1000
+
+
 class TestGetHabitKPIs:
     """Tests for GET /habits/{habit_id}/kpis endpoint."""
 
@@ -1667,7 +1691,6 @@ class TestGetHabitKPIs:
         assert response.status_code == 403
 
 
-@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
 class TestGetHabitStreaks:
     """Tests for GET /habits/{habit_id}/streaks endpoint."""
 

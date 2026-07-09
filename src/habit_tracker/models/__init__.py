@@ -1,7 +1,9 @@
 from habit_tracker.models.habits import (
     HabitCreate,
+    HabitKPIs,
     HabitList,
     HabitRead,
+    HabitStreak,
     HabitUpdate,
 )
 from habit_tracker.models.profiles import (
@@ -72,6 +74,8 @@ __all__ = [
     "HabitRead",
     "HabitUpdate",
     "HabitList",
+    "HabitKPIs",
+    "HabitStreak",
     "TrackerCreate",
     "TrackerRead",
     "TrackerUpdate",
