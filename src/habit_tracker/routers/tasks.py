@@ -34,7 +34,13 @@ CLOSED_STATUSES = (TaskStatus.DONE.value, TaskStatus.CANCELLED.value)
 def _task_to_read(task: Task, today: date | None = None) -> TaskRead:
     """Build a TaskRead with its computed urgency band."""
     task_read = TaskRead.model_validate(task)
-    task_read.band = compute_band(task.status, task.priority, task.due_date, today)
+    task_read.band = compute_band(
+        task.status,
+        task.priority,
+        task.due_date,
+        scheduled_date=task.scheduled_date,
+        today=today,
+    )
     return task_read
 
 
@@ -155,11 +161,17 @@ async def create_task(
     - **priority**: 0 none / 1 low / 2 medium / 3 high (default: 0)
     - **due_date**: Optional due date
     - **due_time**: Optional due time
+    - **scheduled_date**: Optional date the task is scheduled for
+    - **scheduled_time**: Optional time the task is scheduled for
     - **status**: Task status value (default: 0 = open)
     - **block_reason**: Optional free-text reason when blocked
     - **external_ref**: Optional external reference (e.g. "ADO-2841")
     - **external_url**: Optional external URL
     - **project_id**: Optional project (must belong to the same profile)
+
+    Scheduled data only lives on SCHEDULED tasks: if the created status is
+    anything other than SCHEDULED, scheduled_date/scheduled_time are forced to
+    null even when supplied (prevents orphaned scheduled data).
     """
     profile = await db.get(Profile, task.profile_id)
     if not profile:
@@ -179,6 +191,11 @@ async def create_task(
     db_task = Task(**task.model_dump())
     if db_task.status in CLOSED_STATUSES:
         db_task.closed_date = datetime.now()
+    # Scheduled data only lives on SCHEDULED tasks; any other status forces the
+    # scheduled fields null (prevents orphaned scheduled data)
+    if db_task.status != TaskStatus.SCHEDULED:
+        db_task.scheduled_date = None
+        db_task.scheduled_time = None
     db.add(db_task)
     await db.commit()
     await db.refresh(db_task)
@@ -228,12 +245,20 @@ async def patch_task(
     - **priority**: 0 none / 1 low / 2 medium / 3 high
     - **due_date**: Optional due date
     - **due_time**: Optional due time
+    - **scheduled_date**: Optional date the task is scheduled for
+    - **scheduled_time**: Optional time the task is scheduled for
     - **status**: Task status value. Entering done/cancelled stamps the
       closed date; reopening to any active status clears it
     - **block_reason**: Optional free-text reason when blocked
     - **external_ref**: Optional external reference (e.g. "ADO-2841")
     - **external_url**: Optional external URL
     - **project_id**: Optional project (must belong to the task's profile)
+
+    Scheduled data only lives on SCHEDULED tasks: if the resulting status (the
+    new status if provided, else the existing one) is anything other than
+    SCHEDULED, scheduled_date/scheduled_time are forced to null - even when the
+    scheduled fields themselves were not part of this update (prevents orphaned
+    scheduled data).
     """
     db_task = await db.get(Task, task_id)
     if not db_task:
@@ -284,6 +309,16 @@ async def patch_task(
 
     for key, value in task_data.items():
         setattr(db_task, key, value)
+
+    # Scheduled data only lives on SCHEDULED tasks; any other resulting status
+    # forces the scheduled fields null (prevents orphaned scheduled data). This
+    # fires both when status changes away from SCHEDULED and when the task was
+    # never scheduled, regardless of whether the scheduled fields were sent
+    resulting_status = task_data.get("status", db_task.status)
+    if resulting_status != TaskStatus.SCHEDULED:
+        db_task.scheduled_date = None
+        db_task.scheduled_time = None
+
     db_task.updated_date = datetime.now()  # server-stamped, never client-set
     try:
         await db.commit()

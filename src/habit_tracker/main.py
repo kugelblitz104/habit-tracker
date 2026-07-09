@@ -18,18 +18,23 @@ from habit_tracker.routers import (
 
 load_dotenv()
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
+# Explicit allowed origins (e.g. the deployed frontend) come from the env var.
+# Filter out empty strings so an unset/blank CORS_ORIGINS doesn't become [""],
+# which matches no origin and silently blocks every browser request.
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-origins = CORS_ORIGINS
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=CORS_ORIGINS,
+    # Allow any localhost / 127.0.0.1 port in development so the Vite dev server
+    # works regardless of which port it lands on (5173, 5174, ...). Production
+    # origins are still pinned via CORS_ORIGINS above.
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

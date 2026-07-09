@@ -53,22 +53,36 @@ def compute_band(
     status: int,
     priority: int,
     due_date: date | None,
+    scheduled_date: date | None = None,
     today: date | None = None,
 ) -> TaskBand:
     """Compute the urgency band for a task. First match wins:
 
     - hidden: status is DONE or CANCELLED
-    - now: overdue, due today, or priority == 3
-    - soon: due within the next 7 days, or priority == 2
+    - deferred: status is DEFERRED -> whenever (still active, never hidden;
+      overrides urgency from priority / due date / scheduled date)
+    - now: effective date is today or past, or priority == 3
+    - soon: effective date within the next 7 days, or priority == 2
     - whenever: everything else
+
+    The "effective date" is the earliest non-null of the task's due date and
+    scheduled date (None if both are unset), so a scheduled date bands a task
+    the same way a due date does.
     """
     if today is None:
         today = date.today()
 
+    candidate_dates = [d for d in (due_date, scheduled_date) if d is not None]
+    effective_date = min(candidate_dates) if candidate_dates else None
+
     if status in (TaskStatus.DONE, TaskStatus.CANCELLED):
         return TaskBand.HIDDEN
-    if (due_date is not None and due_date <= today) or priority == 3:
+    if status == TaskStatus.DEFERRED:
+        return TaskBand.WHENEVER
+    if (effective_date is not None and effective_date <= today) or priority == 3:
         return TaskBand.NOW
-    if (due_date is not None and due_date <= today + timedelta(days=7)) or priority == 2:
+    if (
+        effective_date is not None and effective_date <= today + timedelta(days=7)
+    ) or priority == 2:
         return TaskBand.SOON
     return TaskBand.WHENEVER

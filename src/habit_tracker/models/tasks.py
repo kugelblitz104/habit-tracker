@@ -14,6 +14,8 @@ class TaskBase(BaseModel):
     priority: int = 0
     due_date: Optional[date] = None
     due_time: Optional[time] = None
+    scheduled_date: Optional[date] = None
+    scheduled_time: Optional[time] = None
     status: int = TaskStatus.OPEN
     block_reason: Optional[str] = None
     external_ref: Optional[str] = None
@@ -63,6 +65,8 @@ class TaskUpdate(BaseModel):
     priority: Optional[int] = None
     due_date: Optional[date] = None
     due_time: Optional[time] = None
+    scheduled_date: Optional[date] = None
+    scheduled_time: Optional[time] = None
     status: Optional[int] = None
     block_reason: Optional[str] = None
     external_ref: Optional[str] = None

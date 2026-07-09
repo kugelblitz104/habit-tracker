@@ -190,6 +190,8 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     due_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    scheduled_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     status: Mapped[int] = mapped_column(
         Integer, default=TaskStatus.OPEN, nullable=False
     )

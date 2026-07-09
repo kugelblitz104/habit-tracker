@@ -97,6 +97,112 @@ class TestCreateTask:
         assert data["project_id"] == project.id
         assert data["band"] == "now"  # priority 3
 
+    async def test_create_task_with_scheduled_date_time(
+        self, client, db_session, setup_factories
+    ):
+        """scheduled_date/scheduled_time persist and round-trip in TaskRead."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        scheduled = date.today() + timedelta(days=3)
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Dentist",
+                "status": TaskStatus.SCHEDULED.value,
+                "scheduled_date": scheduled.isoformat(),
+                "scheduled_time": "09:15:00",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["scheduled_date"] == scheduled.isoformat()
+        assert data["scheduled_time"] == "09:15:00"
+        # A scheduled date 3 days out bands the task as "soon" (no due date)
+        assert data["band"] == "soon"
+
+        # Round-trips on a fresh GET too
+        response = await client.get(f"/tasks/{data['id']}")
+        assert response.status_code == 200
+        got = response.json()
+        assert got["scheduled_date"] == scheduled.isoformat()
+        assert got["scheduled_time"] == "09:15:00"
+
+    async def test_create_non_scheduled_task_clears_scheduled_data(
+        self, client, db_session, setup_factories
+    ):
+        """A non-SCHEDULED status forces scheduled_date/time null even if sent."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        scheduled = date.today() + timedelta(days=3)
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Buy milk",
+                "status": TaskStatus.OPEN.value,
+                "scheduled_date": scheduled.isoformat(),
+                "scheduled_time": "09:15:00",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == TaskStatus.OPEN
+        assert data["scheduled_date"] is None
+        assert data["scheduled_time"] is None
+        # No due date + priority 0 + cleared scheduled date -> whenever
+        assert data["band"] == "whenever"
+
+        # Confirm it was persisted as null, not just scrubbed in the response
+        db_task = await db_session.get(Task, data["id"])
+        await db_session.refresh(db_task)
+        assert db_task.scheduled_date is None
+        assert db_task.scheduled_time is None
+
+    async def test_create_scheduled_task_keeps_scheduled_data(
+        self, client, db_session, setup_factories
+    ):
+        """A SCHEDULED status keeps supplied scheduled_date/time."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        scheduled = date.today() + timedelta(days=3)
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Dentist",
+                "status": TaskStatus.SCHEDULED.value,
+                "scheduled_date": scheduled.isoformat(),
+                "scheduled_time": "09:15:00",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == TaskStatus.SCHEDULED
+        assert data["scheduled_date"] == scheduled.isoformat()
+        assert data["scheduled_time"] == "09:15:00"
+
     async def test_create_task_project_in_other_profile(
         self, client, db_session, setup_factories
     ):
@@ -577,6 +683,170 @@ class TestPatchTask:
         data = response.json()
         assert data["priority"] == 3
         assert data["band"] == "now"
+
+    async def test_patch_task_scheduled_date_moves_band(
+        self, client, db_session, setup_factories
+    ):
+        """Setting a near-future scheduled_date moves the task into 'soon'."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        task = TaskFactory(profile=profile, priority=0)  # starts "whenever"
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        # Scheduled data only lives on SCHEDULED tasks, so schedule + set status
+        scheduled = date.today() + timedelta(days=2)
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={
+                "status": TaskStatus.SCHEDULED.value,
+                "scheduled_date": scheduled.isoformat(),
+                "scheduled_time": "13:00:00",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scheduled_date"] == scheduled.isoformat()
+        assert data["scheduled_time"] == "13:00:00"
+        assert data["band"] == "soon"
+
+    async def test_patch_task_clear_scheduled_date(
+        self, client, db_session, setup_factories
+    ):
+        """scheduled_date is nullable - PATCH scheduled_date=null clears it."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        scheduled = date.today() + timedelta(days=2)
+        task = TaskFactory(
+            profile=profile, priority=0, scheduled_date=scheduled
+        )
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"scheduled_date": None}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scheduled_date"] is None
+        # With no due or scheduled date and priority 0, band falls back to whenever
+        assert data["band"] == "whenever"
+
+    async def test_patch_status_away_from_scheduled_clears_scheduled_data(
+        self, client, db_session, setup_factories
+    ):
+        """Changing status off SCHEDULED clears scheduled data without sending it.
+
+        The scheduled date was the only reason the task was 'soon'; once the
+        status leaves SCHEDULED and clears it, the task drops to 'whenever'.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        scheduled = date.today() + timedelta(days=2)
+        task = TaskFactory(
+            profile=profile,
+            priority=0,
+            status=TaskStatus.SCHEDULED,
+            scheduled_date=scheduled,
+            scheduled_time=None,
+        )
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        # Only the status changes - the scheduled fields are NOT part of the body
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"status": TaskStatus.OPEN.value}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == TaskStatus.OPEN
+        assert data["scheduled_date"] is None
+        assert data["scheduled_time"] is None
+        # Banding reflects the cleared date: soon -> whenever
+        assert data["band"] == "whenever"
+
+        # Persisted as null, not just scrubbed in the response
+        db_task = await db_session.get(Task, task.id)
+        await db_session.refresh(db_task)
+        assert db_task.scheduled_date is None
+        assert db_task.scheduled_time is None
+
+    async def test_patch_scheduled_task_keeps_scheduled_date(
+        self, client, db_session, setup_factories
+    ):
+        """Patching scheduled_date while status stays SCHEDULED keeps it."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        task = TaskFactory(
+            profile=profile,
+            priority=0,
+            status=TaskStatus.SCHEDULED,
+            scheduled_date=date.today() + timedelta(days=10),
+        )
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        new_scheduled = date.today() + timedelta(days=2)
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"scheduled_date": new_scheduled.isoformat()},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == TaskStatus.SCHEDULED
+        assert data["scheduled_date"] == new_scheduled.isoformat()
+        assert data["band"] == "soon"
+
+    async def test_patch_non_scheduled_task_to_scheduled_keeps_scheduled_date(
+        self, client, db_session, setup_factories
+    ):
+        """Setting status to SCHEDULED + scheduled_date in one PATCH keeps it."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        task = TaskFactory(profile=profile, priority=0, status=TaskStatus.OPEN)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        scheduled = date.today() + timedelta(days=2)
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={
+                "status": TaskStatus.SCHEDULED.value,
+                "scheduled_date": scheduled.isoformat(),
+                "scheduled_time": "13:00:00",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == TaskStatus.SCHEDULED
+        assert data["scheduled_date"] == scheduled.isoformat()
+        assert data["scheduled_time"] == "13:00:00"
+        assert data["band"] == "soon"
 
     async def test_patch_task_done_sets_closed_date(
         self, client, db_session, setup_factories
