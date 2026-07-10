@@ -278,6 +278,12 @@ http-client.private.env.json
 
 database.db
 
+# Certificates: corp CA bundles live outside the repo, never commit certs
+certs/
+*.pem
+*.crt
+*.cer
+
 .hintrc
 
 # Alembic

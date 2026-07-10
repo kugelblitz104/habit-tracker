@@ -9,9 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TaskStatus
 from habit_tracker.core.dependencies import (
-    authorize_resource_access,
+    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_profile,
 )
 from habit_tracker.models import (
     Profile,
@@ -74,6 +75,22 @@ def _project_to_read(
     return project_read
 
 
+async def _get_project_and_profile(
+    db: AsyncSession, project_id: int, current_user: User
+) -> tuple[Project, Profile]:
+    """Fetch a project by ID (404 if missing) and authorize the caller against
+    the owning profile. Returns the project with its (FK-guaranteed) profile."""
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+    profile = await authorize_parent_profile(
+        db, project.profile_id, current_user, "project"
+    )
+    return project, profile
+
+
 @router.get("/", summary="List projects for a profile")
 async def list_projects(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -101,12 +118,7 @@ async def list_projects(
     - **limit**: Maximum number of projects to return (default: 100, max: 100)
     - **offset**: Number of projects to skip (default: 0)
     """
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "project")
+    await get_owned_profile(db, profile_id, current_user, "project")
 
     query = select(Project).filter(Project.profile_id == profile_id)
     count_query = select(func.count()).filter(Project.profile_id == profile_id)
@@ -147,12 +159,7 @@ async def create_project(
     - **notes**: Optional markdown notes about the project
     - **archived**: Whether the project is archived
     """
-    profile = await db.get(Profile, project.profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "project")
+    await get_owned_profile(db, project.profile_id, current_user, "project")
 
     db_project = Project(**project.model_dump())
     db.add(db_project)
@@ -173,14 +180,7 @@ async def read_project(
 
     - **project_id**: The unique identifier of the project to retrieve
     """
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-        )
-
-    profile = await db.get(Profile, project.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "project")
+    project, _ = await _get_project_and_profile(db, project_id, current_user)
 
     counts = await _get_task_counts(db, [project.id])
     return _project_to_read(project, counts)
@@ -206,14 +206,7 @@ async def patch_project(
     - **notes**: Optional markdown notes about the project
     - **archived**: Whether the project is archived
     """
-    db_project = await db.get(Project, project_id)
-    if not db_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-        )
-
-    profile = await db.get(Profile, db_project.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "project")
+    db_project, profile = await _get_project_and_profile(db, project_id, current_user)
 
     project_data = project_update.model_dump(exclude_unset=True)
 
@@ -264,14 +257,7 @@ async def delete_project(
     This action cannot be undone. Tasks in the project are NOT deleted -
     they are kept and their project association is cleared.
     """
-    db_project = await db.get(Project, project_id)
-    if not db_project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-        )
-
-    profile = await db.get(Profile, db_project.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "project")
+    db_project, _ = await _get_project_and_profile(db, project_id, current_user)
 
     await db.delete(db_project)  # tasks are kept; DB sets task.project_id to NULL
     await db.commit()

@@ -1,4 +1,5 @@
 import logging
+from datetime import date, datetime
 from typing import Annotated, Optional
 from zoneinfo import ZoneInfo
 
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from habit_tracker.database import SessionLocal
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Habit, Profile, User
 from habit_tracker.core.security import decode_token
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,96 @@ def authorize_resource_access(
         )
 
 
+async def get_owned_profile(
+    db: AsyncSession, profile_id: int, current_user: User, resource_name: str
+) -> Profile:
+    """
+    Fetch a profile by ID and authorize the caller against its owner.
+
+    Shared by every endpoint that receives an explicit profile_id (the
+    profiles CRUD itself plus the profile-scoped task/project/calendar
+    endpoints).
+
+    Args:
+        db: The database session
+        profile_id: The ID of the profile to fetch
+        current_user: The authenticated user
+        resource_name: Name of the resource for the 403 error message
+
+    Returns:
+        The profile
+
+    Raises:
+        HTTPException: 404 if the profile does not exist, 403 if the caller
+        is neither the profile's owner nor an admin
+    """
+    profile = await db.get(Profile, profile_id)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
+        )
+    authorize_resource_access(current_user, profile.user_id, resource_name)
+    return profile
+
+
+async def authorize_parent_profile(
+    db: AsyncSession, profile_id: int, current_user: User, resource_name: str
+) -> Profile:
+    """
+    Load the profile that owns a child resource (task/project/calendar
+    connection) and authorize the caller against it.
+
+    The child row's foreign key guarantees the profile exists, so unlike
+    get_owned_profile there is no 404 check here.
+
+    Args:
+        db: The database session
+        profile_id: The child resource's profile_id
+        current_user: The authenticated user
+        resource_name: Name of the resource for the 403 error message
+
+    Returns:
+        The parent profile
+
+    Raises:
+        HTTPException: 403 if the caller is neither the profile's owner nor
+        an admin
+    """
+    profile = await db.get(Profile, profile_id)
+    authorize_resource_access(current_user, profile.user_id, resource_name)
+    return profile
+
+
+async def get_owned_habit(
+    db: AsyncSession, habit_id: int, current_user: User
+) -> Habit:
+    """
+    Fetch a habit by ID and authorize the caller against its owner.
+
+    Habits carry their owner's user_id directly (unlike the profile-scoped
+    resources), so no profile lookup is needed.
+
+    Args:
+        db: The database session
+        habit_id: The ID of the habit to fetch
+        current_user: The authenticated user
+
+    Returns:
+        The habit
+
+    Raises:
+        HTTPException: 404 if the habit does not exist, 403 if the caller is
+        neither the habit's owner nor an admin
+    """
+    habit = await db.get(Habit, habit_id)
+    if not habit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    authorize_resource_access(current_user, habit.user_id, "habit")
+    return habit
+
+
 def resolve_timezone(tz: Optional[str]) -> Optional[ZoneInfo]:
     """
     Resolve an optional IANA timezone name (e.g. "America/New_York") from a
@@ -160,3 +251,17 @@ def resolve_timezone(tz: Optional[str]) -> Optional[ZoneInfo]:
                 "name, e.g. 'America/New_York'"
             ),
         )
+
+
+def resolve_today(tz: Optional[str]) -> date:
+    """
+    Return "today" for an optional IANA timezone query parameter.
+
+    datetime.now(None) is server-local time, so a missing tz keeps the
+    legacy server-local behavior.
+
+    Raises:
+        HTTPException: 422 if the name is not a valid IANA timezone (see
+        resolve_timezone)
+    """
+    return datetime.now(resolve_timezone(tz)).date()

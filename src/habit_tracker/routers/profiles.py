@@ -11,6 +11,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
+    get_owned_profile,
 )
 from habit_tracker.models import (
     Profile,
@@ -135,13 +136,7 @@ async def read_profile(
 
     - **profile_id**: The unique identifier of the profile to retrieve
     """
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-
-    authorize_resource_access(current_user, profile.user_id, "profile")
+    profile = await get_owned_profile(db, profile_id, current_user, "profile")
     return ProfileRead.model_validate(profile)
 
 
@@ -168,12 +163,7 @@ async def patch_profile(
     - **week_start_monday**: Whether calendars/weekday charts start on Monday
     - **use_habit_color_accent**: Whether the habit detail view uses the habit's own color as its accent
     """
-    db_profile = await db.get(Profile, profile_id)
-    if not db_profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, db_profile.user_id, "profile")
+    db_profile = await get_owned_profile(db, profile_id, current_user, "profile")
 
     profile_data = profile_update.model_dump(exclude_unset=True)
     for key, value in profile_data.items():
@@ -203,12 +193,7 @@ async def delete_profile(
     to the profile are cascade deleted. A user's last remaining profile
     cannot be deleted.
     """
-    db_profile = await db.get(Profile, profile_id)
-    if not db_profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, db_profile.user_id, "profile")
+    db_profile = await get_owned_profile(db, profile_id, current_user, "profile")
 
     count_result = await db.execute(
         select(func.count()).filter(Profile.user_id == db_profile.user_id)

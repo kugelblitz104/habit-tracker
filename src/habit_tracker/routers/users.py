@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -10,7 +9,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
-    resolve_timezone,
+    resolve_today,
 )
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
@@ -219,9 +218,7 @@ async def list_user_habits(
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
-    # datetime.now(None) is server-local time, so a missing tz keeps the
-    # legacy behavior
-    today = datetime.now(resolve_timezone(tz)).date()
+    today = resolve_today(tz)
     habit_ids = [h.id for h in db_habits]
 
     today_trackers = {}

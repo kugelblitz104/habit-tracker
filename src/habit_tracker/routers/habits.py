@@ -7,10 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
-    authorize_resource_access,
     get_current_user,
     get_db,
+    get_owned_habit,
     resolve_timezone,
+    resolve_today,
 )
 from habit_tracker.models import (
     Habit,
@@ -194,17 +195,9 @@ async def read_habit(
     - **habit_id**: The unique identifier of the habit to retrieve
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    habit = await get_owned_habit(db, habit_id, current_user)
     habit_read: HabitRead = HabitRead.model_validate(habit)
-    # datetime.now(None) is server-local time, so a missing tz keeps the
-    # legacy behavior
-    today = datetime.now(resolve_timezone(tz)).date()
+    today = resolve_today(tz)
     today_tracker = (
         await db.execute(
             select(Tracker)
@@ -228,29 +221,24 @@ async def list_habit_trackers(
         default=5,
         ge=1,
         le=1000,
-        description="Maximum number of trackers to return (1-100)",
+        description="Maximum number of trackers to return (1-1000)",
     ),
 ) -> TrackerList:
     """
     Get all tracker entries for a specific habit, ordered by date (most recent first).
 
     - **habit_id**: The unique identifier of the habit
-    - **limit**: Maximum number of trackers to return (default: 5, max: 100)
+    - **limit**: Maximum number of trackers to return (default: 5, max: 1000)
 
     Returns tracker entries showing completion/skip status for each date.
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    await get_owned_habit(db, habit_id, current_user)
 
     result = await db.execute(
         select(Tracker)
         .filter(Tracker.habit_id == habit_id)
         .order_by(Tracker.dated.desc())
-        .limit(limit if limit > 0 else None)
+        .limit(limit)  # ge=1 validation guarantees a positive limit
     )
     db_trackers = result.scalars().all()
 
@@ -303,12 +291,7 @@ async def list_habit_trackers_lite(
     - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
     - **tz**: Optional IANA timezone for the default end_date (invalid name -> 422)
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    await get_owned_habit(db, habit_id, current_user)
 
     # Validate tz even when end_date is explicit so a typo never passes
     # silently
@@ -385,21 +368,14 @@ async def read_habit_kpis(
     - **habit_id**: The unique identifier of the habit
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    habit = await get_owned_habit(db, habit_id, current_user)
 
     result = await db.execute(
         select(Tracker).filter(Tracker.habit_id == habit_id)
     )
     trackers = result.scalars().all()
 
-    # datetime.now(None) is server-local time, so a missing tz keeps the
-    # legacy behavior
-    today = datetime.now(resolve_timezone(tz)).date()
+    today = resolve_today(tz)
     return calculate_kpis(habit, trackers, today)
 
 
@@ -428,21 +404,14 @@ async def read_habit_streaks(
     - **habit_id**: The unique identifier of the habit
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    habit = await get_owned_habit(db, habit_id, current_user)
 
     result = await db.execute(
         select(Tracker).filter(Tracker.habit_id == habit_id)
     )
     trackers = result.scalars().all()
 
-    # datetime.now(None) is server-local time, so a missing tz keeps the
-    # legacy behavior
-    today = datetime.now(resolve_timezone(tz)).date()
+    today = resolve_today(tz)
     return calculate_streaks(
         trackers, habit.frequency, habit.range, habit.created_date, today
     )
@@ -463,13 +432,7 @@ async def update_habit(
 
     - **habit_id**: The unique identifier of the habit to update
     """
-    db_habit = await db.get(Habit, habit_id)
-    if not db_habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-
-    authorize_resource_access(current_user, db_habit.user_id, "habit")
+    db_habit = await get_owned_habit(db, habit_id, current_user)
     habit_data = habit_update.model_dump()
     if habit_data.get("profile_id") is None:
         # Keep the habit's current profile - profile_id is never nulled
@@ -517,12 +480,7 @@ async def patch_habit(
       habit's owner)
 
     """
-    db_habit = await db.get(Habit, habit_id)
-    if not db_habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, db_habit.user_id, "habit")
+    db_habit = await get_owned_habit(db, habit_id, current_user)
     habit_data = habit_update.model_dump(exclude_unset=True)
     if habit_data.get("profile_id") is None:
         # Keep the habit's current profile - profile_id is never nulled
@@ -553,12 +511,7 @@ async def delete_habit(
 
     This action cannot be undone. All associated tracker entries will also be deleted.
     """
-    db_habit = await db.get(Habit, habit_id)
-    if not db_habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, db_habit.user_id, "habit")
+    db_habit = await get_owned_habit(db, habit_id, current_user)
     await db.delete(db_habit)
     await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

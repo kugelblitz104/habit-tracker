@@ -8,6 +8,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
+    get_owned_habit,
 )
 from habit_tracker.models import (
     Habit,
@@ -23,6 +24,25 @@ router = APIRouter(
 )
 
 
+async def _get_owned_tracker(
+    db: AsyncSession, tracker_id: int, current_user: User
+) -> Tracker:
+    """Fetch a tracker by ID (404 if missing) and verify its habit exists
+    (404) and belongs to the caller (403)."""
+    tracker = await db.get(Tracker, tracker_id)
+    if not tracker:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Tracker not found"
+        )
+    habit = await db.get(Habit, tracker.habit_id)
+    if not habit:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+    authorize_resource_access(current_user, habit.user_id, "tracker")
+    return tracker
+
+
 @router.post(
     "/", status_code=status.HTTP_201_CREATED, summary="Create a new tracker entry"
 )
@@ -36,18 +56,11 @@ async def create_tracker(
 
     - **habit_id**: The ID of the habit being tracked
     - **dated**: The date for this tracker entry
-    - **completed**: Whether the habit was completed on this date
-    - **skipped**: Whether the habit was skipped on this date
+    - **status**: 0=not completed, 1=skipped, 2=completed
     - **note**: Optional note about this entry
     """
     # Verify the habit belongs to the current user
-    habit = await db.get(Habit, tracker.habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-
-    authorize_resource_access(current_user, habit.user_id, "habit")
+    await get_owned_habit(db, tracker.habit_id, current_user)
 
     db_tracker = Tracker(**tracker.model_dump())
     db.add(db_tracker)
@@ -80,20 +93,7 @@ async def read_tracker(
 
     - **tracker_id**: The unique identifier of the tracker entry to retrieve
     """
-    tracker = await db.get(Tracker, tracker_id)
-    if not tracker:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tracker not found"
-        )
-
-    # Verify the tracker's habit belongs to the current user
-    habit = await db.get(Habit, tracker.habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "tracker")
-
+    tracker = await _get_owned_tracker(db, tracker_id, current_user)
     return TrackerRead.model_validate(tracker)
 
 
@@ -112,19 +112,7 @@ async def update_tracker(
 
     - **tracker_id**: The unique identifier of the tracker entry to update
     """
-    db_tracker = await db.get(Tracker, tracker_id)
-    if not db_tracker:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tracker not found"
-        )
-
-    # Verify the tracker's habit belongs to the current user
-    habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "tracker")
+    db_tracker = await _get_owned_tracker(db, tracker_id, current_user)
 
     tracker_data = tracker_update.model_dump()
     for key, value in tracker_data.items():
@@ -151,23 +139,10 @@ async def patch_tracker(
 
     You can update any combination of these fields:
     - **dated**: The date for this tracker entry
-    - **completed**: Whether the habit was completed on this date
-    - **skipped**: Whether the habit was skipped on this date
+    - **status**: 0=not completed, 1=skipped, 2=completed
     - **note**: Optional note about this entry
     """
-    db_tracker = await db.get(Tracker, tracker_id)
-    if not db_tracker:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tracker not found"
-        )
-
-    # Verify the tracker's habit belongs to the current user
-    habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "tracker")
+    db_tracker = await _get_owned_tracker(db, tracker_id, current_user)
 
     tracker_data = tracker_update.model_dump(exclude_unset=True)
     for key, value in tracker_data.items():
@@ -190,19 +165,7 @@ async def delete_tracker(
 
     This action cannot be undone.
     """
-    db_tracker = await db.get(Tracker, tracker_id)
-    if not db_tracker:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Tracker not found"
-        )
-
-    # Verify the tracker's habit belongs to the current user
-    habit = await db.get(Habit, db_tracker.habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "tracker")
+    db_tracker = await _get_owned_tracker(db, tracker_id, current_user)
 
     await db.delete(db_tracker)
     await db.commit()

@@ -2,16 +2,17 @@ from datetime import date, datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TaskBand, TaskStatus, compute_band
 from habit_tracker.core.dependencies import (
-    authorize_resource_access,
+    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_profile,
 )
 from habit_tracker.models import (
     Profile,
@@ -23,6 +24,7 @@ from habit_tracker.models import (
     TaskUpdate,
 )
 from habit_tracker.schemas.db_models import User
+from habit_tracker.services.task_export import render_tasks_markdown
 
 router = APIRouter(
     prefix="/tasks", tags=["tasks"], responses={404: {"description": "Not found"}}
@@ -42,6 +44,20 @@ def _task_to_read(task: Task, today: date | None = None) -> TaskRead:
         today=today,
     )
     return task_read
+
+
+async def _get_task_and_profile(
+    db: AsyncSession, task_id: int, current_user: User
+) -> tuple[Task, Profile]:
+    """Fetch a task by ID (404 if missing) and authorize the caller against
+    the owning profile. Returns the task with its (FK-guaranteed) profile."""
+    task = await db.get(Task, task_id)
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+    profile = await authorize_parent_profile(db, task.profile_id, current_user, "task")
+    return task, profile
 
 
 @router.get("/", summary="List tasks for a profile")
@@ -100,12 +116,7 @@ async def list_tasks(
             detail="Status must be a valid TaskStatus value",
         )
 
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "task")
+    await get_owned_profile(db, profile_id, current_user, "task")
 
     query = select(Task).filter(Task.profile_id == profile_id)
     if project_id is not None:
@@ -173,12 +184,7 @@ async def create_task(
     anything other than SCHEDULED, scheduled_date/scheduled_time are forced to
     null even when supplied (prevents orphaned scheduled data).
     """
-    profile = await db.get(Profile, task.profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "task")
+    await get_owned_profile(db, task.profile_id, current_user, "task")
 
     if task.project_id is not None:
         project = await db.get(Project, task.project_id)
@@ -202,6 +208,47 @@ async def create_task(
     return _task_to_read(db_task)
 
 
+# NOTE: must stay declared before GET /{task_id} so "/export" is not
+# captured by the task_id path parameter
+@router.get(
+    "/export",
+    response_class=PlainTextResponse,
+    summary="Export a profile's tasks as Markdown",
+)
+async def export_tasks_markdown(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose tasks to export"),
+) -> PlainTextResponse:
+    """
+    Export all of a profile's tasks as a Markdown document (`text/markdown`).
+    The response body is the raw document - not JSON-wrapped - so the client
+    can save it directly as a `.md` file.
+
+    - **profile_id**: The profile whose tasks to export (required)
+
+    Tasks are grouped by computed urgency band (Now / Soon / Whenever, plus a
+    "Completed & cancelled" section for done/cancelled tasks); empty sections
+    are omitted. Each task is a checklist line (`- [x]` when done) with
+    indented detail bullets for the fields that are set. Ordering matches the
+    tasks list endpoint: active bands by priority (desc), due date (asc, no
+    due date last), then creation date; the closed section by closed date
+    (most recent first).
+    """
+    profile = await get_owned_profile(db, profile_id, current_user, "task")
+
+    result = await db.execute(select(Task).filter(Task.profile_id == profile_id))
+    tasks = result.scalars().all()
+
+    project_result = await db.execute(
+        select(Project).filter(Project.profile_id == profile_id)
+    )
+    project_names = {p.id: p.name for p in project_result.scalars().all()}
+
+    markdown = render_tasks_markdown(profile.name, tasks, project_names)
+    return PlainTextResponse(content=markdown, media_type="text/markdown")
+
+
 @router.get("/{task_id}", summary="Get a task by ID")
 async def read_task(
     task_id: int,
@@ -213,15 +260,7 @@ async def read_task(
 
     - **task_id**: The unique identifier of the task to retrieve
     """
-    task = await db.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
-        )
-
-    profile = await db.get(Profile, task.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "task")
-
+    task, _ = await _get_task_and_profile(db, task_id, current_user)
     return _task_to_read(task)
 
 
@@ -260,14 +299,7 @@ async def patch_task(
     scheduled fields themselves were not part of this update (prevents orphaned
     scheduled data).
     """
-    db_task = await db.get(Task, task_id)
-    if not db_task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
-        )
-
-    profile = await db.get(Profile, db_task.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "task")
+    db_task, profile = await _get_task_and_profile(db, task_id, current_user)
 
     task_data = task_update.model_dump(exclude_unset=True)
 
@@ -345,14 +377,7 @@ async def delete_task(
 
     This action cannot be undone.
     """
-    db_task = await db.get(Task, task_id)
-    if not db_task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
-        )
-
-    profile = await db.get(Profile, db_task.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "task")
+    db_task, _ = await _get_task_and_profile(db, task_id, current_user)
 
     await db.delete(db_task)
     await db.commit()

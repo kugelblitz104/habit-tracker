@@ -8,9 +8,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
-    authorize_resource_access,
+    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_profile,
     resolve_timezone,
 )
 from habit_tracker.models import (
@@ -21,7 +22,6 @@ from habit_tracker.models import (
     CalendarConnectionUpdate,
     CalendarEventList,
     CalendarEventRead,
-    Profile,
 )
 from habit_tracker.schemas.db_models import User
 from habit_tracker.services.calendar_events import (
@@ -36,6 +36,23 @@ router = APIRouter(
     tags=["calendar-connections"],
     responses={404: {"description": "Not found"}},
 )
+
+
+async def _get_connection_and_authorize(
+    db: AsyncSession, connection_id: int, current_user: User
+) -> CalendarConnection:
+    """Fetch a calendar connection by ID (404 if missing) and authorize the
+    caller against the owning profile."""
+    connection = await db.get(CalendarConnection, connection_id)
+    if not connection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar connection not found",
+        )
+    await authorize_parent_profile(
+        db, connection.profile_id, current_user, "calendar connection"
+    )
+    return connection
 
 
 @router.get("/", summary="List calendar connections for a profile")
@@ -59,12 +76,7 @@ async def list_calendar_connections(
     - **limit**: Maximum number of connections to return (default: 100, max: 100)
     - **offset**: Number of connections to skip (default: 0)
     """
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
+    await get_owned_profile(db, profile_id, current_user, "calendar connection")
 
     result = await db.execute(
         select(CalendarConnection)
@@ -110,12 +122,7 @@ async def create_calendar_connection(
     - **provider**: Optional free-form label ("Google", "iCloud", ...)
     - **enabled**: Whether the calendar's events are included (default: true)
     """
-    profile = await db.get(Profile, connection.profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
+    await get_owned_profile(db, connection.profile_id, current_user, "calendar connection")
 
     db_connection = CalendarConnection(**connection.model_dump())
     db.add(db_connection)
@@ -171,12 +178,7 @@ async def list_calendar_events(
     - **days**: Number of days in the window starting at target_date (default: 1, max: 14)
     - **tz**: Optional IANA timezone for day boundaries (invalid name -> 422)
     """
-    profile = await db.get(Profile, profile_id)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-        )
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
+    await get_owned_profile(db, profile_id, current_user, "calendar connection")
 
     zone = resolve_timezone(tz)
 
@@ -240,16 +242,7 @@ async def read_calendar_connection(
 
     - **connection_id**: The unique identifier of the connection to retrieve
     """
-    connection = await db.get(CalendarConnection, connection_id)
-    if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar connection not found",
-        )
-
-    profile = await db.get(Profile, connection.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
-
+    connection = await _get_connection_and_authorize(db, connection_id, current_user)
     return CalendarConnectionRead.model_validate(connection)
 
 
@@ -274,15 +267,7 @@ async def patch_calendar_connection(
     - **provider**: Optional free-form label
     - **enabled**: Whether the calendar's events are included
     """
-    db_connection = await db.get(CalendarConnection, connection_id)
-    if not db_connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar connection not found",
-        )
-
-    profile = await db.get(Profile, db_connection.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
+    db_connection = await _get_connection_and_authorize(db, connection_id, current_user)
 
     connection_data = connection_update.model_dump(exclude_unset=True)
 
@@ -323,15 +308,7 @@ async def delete_calendar_connection(
 
     - **connection_id**: The unique identifier of the connection to delete
     """
-    db_connection = await db.get(CalendarConnection, connection_id)
-    if not db_connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar connection not found",
-        )
-
-    profile = await db.get(Profile, db_connection.profile_id)
-    authorize_resource_access(current_user, profile.user_id, "calendar connection")
+    db_connection = await _get_connection_and_authorize(db, connection_id, current_user)
 
     await db.delete(db_connection)
     await db.commit()

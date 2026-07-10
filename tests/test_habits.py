@@ -3,7 +3,6 @@
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import pytest
 from sqlalchemy import select
 
 from habit_tracker.constants import TrackerStatus

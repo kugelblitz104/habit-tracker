@@ -25,9 +25,6 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Mapping from Loop Habit Tracker color indices to hex colors
-# The external app uses integer indices 0-19 to represent colors
-
 
 def map_color(color_index: int) -> str:
     """Map Loop Habit Tracker color index to hex color code."""
@@ -86,8 +83,7 @@ async def import_from_loop_habit_tracker(
     - `freq_den` → `range`
     - `archived` → `archived`
     - `position` → `sort_order`
-    - Repetitions with `value >= 2` → Tracker with `completed=True`
-    - Repetitions with `value == 1` → Tracker with `skipped=True`
+    - Repetitions `value` → Tracker `status` (1 = skipped, 2 = completed)
     - Repetitions `notes` → Tracker `note`
     """
     # Validate file extension
@@ -156,7 +152,6 @@ async def import_from_loop_habit_tracker(
         trackers_skipped = 0
         details: list[ImportedHabitSummary] = []
         errors: list[str] = []
-        habit_id_mapping: dict[int, int] = {}  # old_id -> new_id
 
         for habit_row in imported_habits:
             try:
@@ -184,8 +179,6 @@ async def import_from_loop_habit_tracker(
                 )
                 db.add(new_habit)
                 await db.flush()  # Get the new ID
-
-                habit_id_mapping[old_habit_id] = new_habit.id
 
                 # Import repetitions (trackers) for this habit
                 cursor.execute(
@@ -322,8 +315,7 @@ async def export_to_loop_habit_tracker(
     - `archived` → `archived`
     - `sort_order` → `position`
     - `notes` → `description`
-    - Tracker with `completed=True` → Repetition with `value=2`
-    - Tracker with `skipped=True` → Repetition with `value=1`
+    - Tracker `status` → Repetition `value` (1 = skipped, 2 = completed)
     - Tracker `note` → Repetition `notes`
     """
     temp_file = None
@@ -380,8 +372,6 @@ async def export_to_loop_habit_tracker(
         result = await db.execute(query)
         habits = result.scalars().all()
 
-        habit_id_mapping: dict[int, int] = {}  # our_id -> loop_id
-
         for position, habit in enumerate(habits):
             # Generate a UUID for the habit
             habit_uuid = str(uuid.uuid4())
@@ -420,7 +410,6 @@ async def export_to_loop_habit_tracker(
             loop_habit_id = cursor.lastrowid
             if loop_habit_id is None:
                 continue
-            habit_id_mapping[habit.id] = loop_habit_id
 
             # Fetch trackers for this habit
             tracker_result = await db.execute(
