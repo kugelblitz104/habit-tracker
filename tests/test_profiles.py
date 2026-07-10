@@ -136,6 +136,8 @@ class TestCreateProfile:
         assert data["calendar_enabled"] is True
         assert data["publish_to_azure"] is False
         assert data["default_landing"] == "today"
+        assert data["week_start_monday"] is True
+        assert data["use_habit_color_accent"] is False
 
     async def test_create_profile_all_fields(self, client, db_session, setup_factories):
         """Create profile with all fields and get them echoed back."""
@@ -154,6 +156,8 @@ class TestCreateProfile:
                 "calendar_enabled": False,
                 "publish_to_azure": True,
                 "default_landing": "habits",
+                "week_start_monday": False,
+                "use_habit_color_accent": True,
             },
         )
         assert response.status_code == 201
@@ -165,6 +169,8 @@ class TestCreateProfile:
         assert data["calendar_enabled"] is False
         assert data["publish_to_azure"] is True
         assert data["default_landing"] == "habits"
+        assert data["week_start_monday"] is False
+        assert data["use_habit_color_accent"] is True
 
     async def test_create_profile_duplicate_name(
         self, client, db_session, setup_factories
@@ -388,6 +394,74 @@ class TestPatchProfile:
         assert data["habits_enabled"] is False
         assert data["calendar_enabled"] is False
         assert data["publish_to_azure"] is True
+
+    async def test_patch_profile_week_start_monday(
+        self, client, db_session, setup_factories
+    ):
+        """week_start_monday can be flipped off and persists on read."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/profiles/{profile.id}", json={"week_start_monday": False}
+        )
+        assert response.status_code == 200
+        assert response.json()["week_start_monday"] is False
+
+        # Persists on a subsequent read
+        response = await client.get(f"/profiles/{profile.id}")
+        assert response.status_code == 200
+        assert response.json()["week_start_monday"] is False
+
+    async def test_patch_profile_use_habit_color_accent(
+        self, client, db_session, setup_factories
+    ):
+        """use_habit_color_accent can be opted into and persists on read."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/profiles/{profile.id}", json={"use_habit_color_accent": True}
+        )
+        assert response.status_code == 200
+        assert response.json()["use_habit_color_accent"] is True
+
+        # Persists on a subsequent read
+        response = await client.get(f"/profiles/{profile.id}")
+        assert response.status_code == 200
+        assert response.json()["use_habit_color_accent"] is True
+
+    async def test_patch_profile_null_preference_flag(
+        self, client, db_session, setup_factories
+    ):
+        """An explicit null for a non-nullable preference flag is rejected (422)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/profiles/{profile.id}", json={"week_start_monday": None}
+        )
+        assert response.status_code == 422
+
+        response = await client.patch(
+            f"/profiles/{profile.id}", json={"use_habit_color_accent": None}
+        )
+        assert response.status_code == 422
 
     async def test_patch_profile_invalid_default_landing(
         self, client, db_session, setup_factories

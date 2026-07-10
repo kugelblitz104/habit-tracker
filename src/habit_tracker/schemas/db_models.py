@@ -70,6 +70,12 @@ class Profile(Base):
     default_landing: Mapped[str] = mapped_column(
         String, default="today", nullable=False
     )
+    week_start_monday: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    use_habit_color_accent: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

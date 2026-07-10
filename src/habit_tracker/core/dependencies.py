@@ -1,5 +1,7 @@
 import logging
-from typing import Annotated
+from typing import Annotated, Optional
+from zoneinfo import ZoneInfo
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,4 +129,34 @@ def authorize_resource_access(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access this {resource_name}",
+        )
+
+
+def resolve_timezone(tz: Optional[str]) -> Optional[ZoneInfo]:
+    """
+    Resolve an optional IANA timezone name (e.g. "America/New_York") from a
+    query parameter into a ZoneInfo.
+
+    Args:
+        tz: The IANA timezone name, or None if the client did not send one
+
+    Returns:
+        The resolved ZoneInfo, or None when tz is None (callers keep their
+        legacy server-local behavior)
+
+    Raises:
+        HTTPException: 422 if the name is not a valid IANA timezone, so a
+        client typo surfaces as a validation error rather than a 500
+    """
+    if tz is None:
+        return None
+    try:
+        return ZoneInfo(tz)
+    except (KeyError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Invalid timezone '{tz}': must be a valid IANA timezone "
+                "name, e.g. 'America/New_York'"
+            ),
         )

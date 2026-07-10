@@ -14,6 +14,8 @@ class ProfileBase(BaseModel):
     calendar_enabled: bool = True
     publish_to_azure: bool = False
     default_landing: str = "today"
+    week_start_monday: bool = True
+    use_habit_color_accent: bool = False
 
     @field_validator("name")
     @classmethod
@@ -57,6 +59,8 @@ class ProfileUpdate(BaseModel):
     calendar_enabled: Optional[bool] = None
     publish_to_azure: Optional[bool] = None
     default_landing: Optional[str] = None
+    week_start_monday: Optional[bool] = None
+    use_habit_color_accent: Optional[bool] = None
 
     @field_validator(
         "name",
@@ -66,6 +70,8 @@ class ProfileUpdate(BaseModel):
         "calendar_enabled",
         "publish_to_azure",
         "default_landing",
+        "week_start_monday",
+        "use_habit_color_accent",
     )
     @classmethod
     def reject_null(cls, v: object, info: ValidationInfo) -> object:

@@ -1,5 +1,8 @@
 """Tests for user management endpoints."""
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import select
 
 from habit_tracker.constants import TrackerStatus
@@ -886,6 +889,68 @@ class TestListUserHabits:
 
         assert habits_by_name["No Tracker Habit"]["completed_today"] is False
         assert habits_by_name["No Tracker Habit"]["skipped_today"] is False
+
+    async def test_list_user_habits_today_status_honors_tz(
+        self, client, db_session, setup_factories
+    ):
+        """completed_today is computed against "today" in the requested zone.
+
+        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
+        their calendar dates always differ. A tracker dated "today" in one
+        zone is therefore completed_today only for that zone, regardless of
+        when the test runs.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, name="TZ Habit")
+        await db_session.commit()
+
+        tz_name, other_tz_name = "Etc/GMT+12", "Etc/GMT-14"
+        expected_today = datetime.now(ZoneInfo(tz_name)).date()
+        TrackerFactory(
+            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
+        )
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/users/{user.id}/habits", params={"tz": tz_name}
+        )
+        assert response.status_code == 200
+        assert response.json()["habits"][0]["completed_today"] is True
+
+        response = await client.get(
+            f"/users/{user.id}/habits", params={"tz": other_tz_name}
+        )
+        assert response.status_code == 200
+        assert response.json()["habits"][0]["completed_today"] is False
+
+    async def test_list_user_habits_invalid_tz(
+        self, client, db_session, setup_factories
+    ):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/users/{user.id}/habits", params={"tz": "Not/AZone"}
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
 
     async def test_list_user_habits_returns_total_count(
         self, client, db_session, setup_factories

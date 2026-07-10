@@ -1234,3 +1234,140 @@ class TestCalendarEvents:
         assert data["events"] == []
         assert data["errors"] == []
         assert fetcher.calls == 0
+
+    async def test_events_multi_day_window(
+        self, client, db_session, setup_factories
+    ):
+        """days=2 returns both days' events, each stamped with the event_date
+        it belongs to, ordered by (event_date, all-day first, start); the feed
+        is still fetched only once per connection."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        CalendarConnectionFactory(profile=profile, name="Work")
+        await db_session.commit()
+
+        fetcher = FakeFetcher()
+        override_fetcher(fetcher)
+
+        await login_as(client, user)
+
+        response = await client.get(
+            "/calendar-connections/events",
+            params={
+                "profile_id": profile.id,
+                "target_date": TARGET_DATE.isoformat(),
+                "days": 2,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["errors"] == []
+        assert fetcher.calls == 1  # one fetch per connection, not per day
+
+        # Day-first ordering, all-day first within a day, then by start
+        assert [(e["title"], e["event_date"]) for e in data["events"]] == [
+            ("All day thing", "2026-07-09"),
+            ("Weekly standup", "2026-07-09"),
+            ("Timed meeting", "2026-07-09"),
+            ("Tomorrow only", "2026-07-10"),
+        ]
+
+    async def test_events_multi_day_recurring_no_duplicates(
+        self, client, db_session, setup_factories
+    ):
+        """A weekly RRULE event expands to one occurrence per matching day of
+        the window - never duplicated within a day."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        CalendarConnectionFactory(profile=profile)
+        await db_session.commit()
+
+        override_fetcher(FakeFetcher())
+
+        await login_as(client, user)
+
+        # 8-day window 2026-07-09..2026-07-16 covers exactly two Thursdays
+        response = await client.get(
+            "/calendar-connections/events",
+            params={
+                "profile_id": profile.id,
+                "target_date": TARGET_DATE.isoformat(),
+                "days": 8,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        standups = [
+            e["event_date"] for e in data["events"] if e["title"] == "Weekly standup"
+        ]
+        assert standups == ["2026-07-09", "2026-07-16"]
+
+        # The non-recurring events appear exactly once across the window
+        titles = [e["title"] for e in data["events"]]
+        assert titles.count("All day thing") == 1
+        assert titles.count("Timed meeting") == 1
+        assert titles.count("Tomorrow only") == 1
+
+    async def test_events_days_bounds(self, client, db_session, setup_factories):
+        """days outside 1..14 is rejected (422)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        override_fetcher(FakeFetcher())
+        await login_as(client, user)
+
+        base = {"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()}
+
+        response = await client.get(
+            "/calendar-connections/events", params={**base, "days": 0}
+        )
+        assert response.status_code == 422
+
+        response = await client.get(
+            "/calendar-connections/events", params={**base, "days": 15}
+        )
+        assert response.status_code == 422
+
+    async def test_events_default_days_single_day(
+        self, client, db_session, setup_factories
+    ):
+        """Without days the endpoint returns exactly the single-day events as
+        before, each stamped with event_date == target_date."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        CalendarConnectionFactory(profile=profile)
+        await db_session.commit()
+
+        override_fetcher(FakeFetcher())
+
+        await login_as(client, user)
+
+        response = await client.get(
+            "/calendar-connections/events",
+            params={"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        titles = [e["title"] for e in data["events"]]
+        assert titles == ["All day thing", "Weekly standup", "Timed meeting"]
+        assert "Tomorrow only" not in titles
+        assert all(
+            e["event_date"] == TARGET_DATE.isoformat() for e in data["events"]
+        )

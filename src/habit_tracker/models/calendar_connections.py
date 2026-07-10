@@ -122,6 +122,7 @@ class CalendarEventRead(BaseModel):
     title: str
     location: Optional[str] = None
     all_day: bool
+    event_date: date
     start: datetime
     end: Optional[datetime] = None
 

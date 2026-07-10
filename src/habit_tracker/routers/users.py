@@ -10,6 +10,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
+    resolve_timezone,
 )
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
@@ -176,6 +177,14 @@ async def list_user_habits(
         default=None,
         description="Only habits belonging to this profile",
     ),
+    tz: Optional[str] = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "'today' for completed_today/skipped_today is today in this "
+            "zone; when omitted, the server's local date is used."
+        ),
+    ),
 ) -> HabitList:
     """
     Get a paginated list of all habits belonging to a specific user.
@@ -184,6 +193,7 @@ async def list_user_habits(
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
     - **profile_id**: Optional. Only habits belonging to this profile (must
       belong to the user)
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
     authorize_resource_access(current_user, user_id, "user")
     user = await db.get(User, user_id)
@@ -209,7 +219,9 @@ async def list_user_habits(
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
-    today = datetime.now().date()
+    # datetime.now(None) is server-local time, so a missing tz keeps the
+    # legacy behavior
+    today = datetime.now(resolve_timezone(tz)).date()
     habit_ids = [h.id for h in db_habits]
 
     today_trackers = {}

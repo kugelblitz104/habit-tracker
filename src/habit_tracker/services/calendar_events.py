@@ -90,7 +90,8 @@ def parse_events(
 ) -> list[CalendarEventRead]:
     """Parse an ICS body into the normalized events of a single day.
 
-    Expands recurring events (RRULE et al.) for ``target_date`` only. All-day
+    Expands recurring events (RRULE et al.) for ``target_date`` only; every
+    returned event is stamped with ``event_date=target_date``. All-day
     events (DTSTART is a date, not a datetime) are represented as naive
     midnight with ``all_day=True``; timed events keep whatever timezone offset
     the feed provides.
@@ -143,6 +144,7 @@ def parse_events(
                 title=str(summary) if summary else "(untitled)",
                 location=str(location) if location else None,
                 all_day=all_day,
+                event_date=target_date,
                 start=start,
                 end=end,
             )

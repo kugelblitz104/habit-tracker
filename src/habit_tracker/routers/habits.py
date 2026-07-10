@@ -10,6 +10,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
+    resolve_timezone,
 )
 from habit_tracker.models import (
     Habit,
@@ -178,11 +179,20 @@ async def read_habit(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    tz: Optional[str] = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "'today' for completed_today/skipped_today is today in this "
+            "zone; when omitted, the server's local date is used."
+        ),
+    ),
 ) -> HabitRead:
     """
     Retrieve a specific habit by its ID.
 
     - **habit_id**: The unique identifier of the habit to retrieve
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -192,7 +202,9 @@ async def read_habit(
 
     authorize_resource_access(current_user, habit.user_id, "habit")
     habit_read: HabitRead = HabitRead.model_validate(habit)
-    today = datetime.now().date()
+    # datetime.now(None) is server-local time, so a missing tz keeps the
+    # legacy behavior
+    today = datetime.now(resolve_timezone(tz)).date()
     today_tracker = (
         await db.execute(
             select(Tracker)
@@ -265,6 +277,14 @@ async def list_habit_trackers_lite(
         le=3660,
         description="Number of days to fetch (1-3660, default: 42 = 6 weeks)",
     ),
+    tz: Optional[str] = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "the default end_date is today in this zone; when omitted, the "
+            "server's local date is used."
+        ),
+    ),
 ) -> TrackerLiteList:
     """
     Get tracker entries in a lightweight format with date-based pagination.
@@ -281,6 +301,7 @@ async def list_habit_trackers_lite(
     - **habit_id**: The unique identifier of the habit
     - **end_date**: End date for the range (defaults to today)
     - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
+    - **tz**: Optional IANA timezone for the default end_date (invalid name -> 422)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -289,9 +310,14 @@ async def list_habit_trackers_lite(
         )
     authorize_resource_access(current_user, habit.user_id, "habit")
 
-    # Default end_date to today if not provided
+    # Validate tz even when end_date is explicit so a typo never passes
+    # silently
+    zone = resolve_timezone(tz)
+
+    # Default end_date to today if not provided; datetime.now(None) is
+    # server-local time, so a missing tz keeps the legacy behavior
     if end_date is None:
-        end_date = date.today()
+        end_date = datetime.now(zone).date()
 
     # Calculate start date
     start_date = end_date - timedelta(days=days - 1)
@@ -340,6 +366,14 @@ async def read_habit_kpis(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    tz: Optional[str] = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "KPIs are computed against today in this zone; when omitted, "
+            "the server's local date is used."
+        ),
+    ),
 ) -> HabitKPIs:
     """
     Retrieve computed statistics for a habit.
@@ -349,6 +383,7 @@ async def read_habit_kpis(
     mirrors the frontend so client and server agree.
 
     - **habit_id**: The unique identifier of the habit
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -362,7 +397,9 @@ async def read_habit_kpis(
     )
     trackers = result.scalars().all()
 
-    today = datetime.now().date()
+    # datetime.now(None) is server-local time, so a missing tz keeps the
+    # legacy behavior
+    today = datetime.now(resolve_timezone(tz)).date()
     return calculate_kpis(habit, trackers, today)
 
 
@@ -371,6 +408,14 @@ async def read_habit_streaks(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
+    tz: Optional[str] = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "streaks are computed against today in this zone; when omitted, "
+            "the server's local date is used."
+        ),
+    ),
 ) -> list[HabitStreak]:
     """
     Retrieve every streak for a habit, oldest first.
@@ -381,6 +426,7 @@ async def read_habit_streaks(
     habit's trackers on the fly - nothing is persisted.
 
     - **habit_id**: The unique identifier of the habit
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
     habit = await db.get(Habit, habit_id)
     if not habit:
@@ -394,7 +440,9 @@ async def read_habit_streaks(
     )
     trackers = result.scalars().all()
 
-    today = datetime.now().date()
+    # datetime.now(None) is server-local time, so a missing tz keeps the
+    # legacy behavior
+    today = datetime.now(resolve_timezone(tz)).date()
     return calculate_streaks(
         trackers, habit.frequency, habit.range, habit.created_date, today
     )

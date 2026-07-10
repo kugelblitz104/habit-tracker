@@ -108,6 +108,8 @@ async def create_profile(
     - **calendar_enabled**: Whether the calendar surface is enabled for this profile
     - **publish_to_azure**: Whether to publish tasks to Azure DevOps (placeholder)
     - **default_landing**: Landing page for this profile ('today' or 'habits')
+    - **week_start_monday**: Whether calendars/weekday charts start on Monday (default: true)
+    - **use_habit_color_accent**: Whether the habit detail view uses the habit's own color as its accent (default: false)
 
     Profiles are personal - they always belong to the authenticated user.
     """
@@ -163,6 +165,8 @@ async def patch_profile(
     - **calendar_enabled**: Whether the calendar surface is enabled for this profile
     - **publish_to_azure**: Whether to publish tasks to Azure DevOps (placeholder)
     - **default_landing**: Landing page for this profile ('today' or 'habits')
+    - **week_start_monday**: Whether calendars/weekday charts start on Monday
+    - **use_habit_color_accent**: Whether the habit detail view uses the habit's own color as its accent
     """
     db_profile = await db.get(Profile, profile_id)
     if not db_profile:

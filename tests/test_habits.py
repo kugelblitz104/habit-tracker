@@ -1,6 +1,7 @@
 """Tests for habit management endpoints."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -473,6 +474,67 @@ class TestGetHabit:
         data = response.json()
         assert data["completed_today"] is False
         assert data["skipped_today"] is False
+
+    async def test_get_habit_today_status_honors_tz(
+        self, client, db_session, setup_factories
+    ):
+        """completed_today is computed against "today" in the requested zone.
+
+        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
+        their calendar dates always differ. A tracker dated "today" in one
+        zone is therefore completed_today only for that zone, regardless of
+        when the test runs.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        tz_name, other_tz_name = "Etc/GMT-14", "Etc/GMT+12"
+        expected_today = datetime.now(ZoneInfo(tz_name)).date()
+        TrackerFactory(
+            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
+        )
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(f"/habits/{habit.id}", params={"tz": tz_name})
+        assert response.status_code == 200
+        assert response.json()["completed_today"] is True
+
+        response = await client.get(
+            f"/habits/{habit.id}", params={"tz": other_tz_name}
+        )
+        assert response.status_code == 200
+        assert response.json()["completed_today"] is False
+
+    async def test_get_habit_invalid_tz(self, client, db_session, setup_factories):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}", params={"tz": "Not/AZone"}
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
 
 
 class TestUpdateHabitPut:
@@ -1525,6 +1587,54 @@ class TestListHabitTrackersLite:
         data = response.json()
         assert data["days"] == 1000
 
+    async def test_list_trackers_lite_default_end_date_honors_tz(
+        self, client, db_session, setup_factories
+    ):
+        """The default end_date is "today" in the requested zone."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        for tz_name in ("Etc/GMT+12", "Etc/GMT-14"):
+            expected_today = datetime.now(ZoneInfo(tz_name)).date()
+            response = await client.get(
+                f"/habits/{habit.id}/trackers/lite", params={"tz": tz_name}
+            )
+            assert response.status_code == 200
+            assert response.json()["end_date"] == expected_today.isoformat()
+
+    async def test_list_trackers_lite_invalid_tz(
+        self, client, db_session, setup_factories
+    ):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}/trackers/lite", params={"tz": "Not/AZone"}
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
+
 
 class TestGetHabitKPIs:
     """Tests for GET /habits/{habit_id}/kpis endpoint."""
@@ -1690,6 +1800,74 @@ class TestGetHabitKPIs:
         response = await client.get(f"/habits/{habit.id}/kpis")
         assert response.status_code == 403
 
+    async def test_get_habit_kpis_invalid_tz(
+        self, client, db_session, setup_factories
+    ):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}/kpis", params={"tz": "Not/AZone"}
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
+
+    async def test_get_habit_kpis_tz_shifts_today(
+        self, client, db_session, setup_factories
+    ):
+        """current_streak is computed against "today" in the requested zone.
+
+        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
+        their calendar dates always differ. A daily habit completed on
+        "today" in one zone therefore has a current streak in that zone and
+        none in the other - deterministic regardless of when the test runs.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        for tz_name, other_tz_name in [
+            ("Etc/GMT+12", "Etc/GMT-14"),
+            ("Etc/GMT-14", "Etc/GMT+12"),
+        ]:
+            habit = HabitFactory(user=user, frequency=1, range=1)
+            await db_session.commit()
+
+            expected_today = datetime.now(ZoneInfo(tz_name)).date()
+            TrackerFactory(
+                habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
+            )
+            await db_session.commit()
+
+            response = await client.get(
+                f"/habits/{habit.id}/kpis", params={"tz": tz_name}
+            )
+            assert response.status_code == 200
+            assert response.json()["current_streak"] == 1
+
+            response = await client.get(
+                f"/habits/{habit.id}/kpis", params={"tz": other_tz_name}
+            )
+            assert response.status_code == 200
+            assert response.json()["current_streak"] == 0
+
 
 class TestGetHabitStreaks:
     """Tests for GET /habits/{habit_id}/streaks endpoint."""
@@ -1799,6 +1977,67 @@ class TestGetHabitStreaks:
 
         response = await client.get(f"/habits/{habit.id}/streaks")
         assert response.status_code == 403
+
+    async def test_get_habit_streaks_invalid_tz(
+        self, client, db_session, setup_factories
+    ):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}/streaks", params={"tz": "Not/AZone"}
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
+
+    async def test_get_habit_streaks_honors_tz(
+        self, client, db_session, setup_factories
+    ):
+        """Streaks run through "today" in the requested zone.
+
+        A daily habit with a single tracker dated "today" in the requested
+        zone yields exactly one streak ending on that date - deterministic
+        regardless of when the test runs.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=1)
+        await db_session.commit()
+
+        tz_name = "Etc/GMT-14"
+        expected_today = datetime.now(ZoneInfo(tz_name)).date()
+        TrackerFactory(
+            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
+        )
+        await db_session.commit()
+
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        response = await client.get(
+            f"/habits/{habit.id}/streaks", params={"tz": tz_name}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["end_date"] == expected_today.isoformat()
+        assert data[0]["length"] == 1
 
 
 class TestSortHabits:

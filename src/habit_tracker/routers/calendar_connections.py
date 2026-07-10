@@ -1,6 +1,5 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -12,6 +11,7 @@ from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
+    resolve_timezone,
 )
 from habit_tracker.models import (
     CalendarConnection,
@@ -126,7 +126,7 @@ async def create_calendar_connection(
 
 # NOTE: static route declared BEFORE the dynamic /{connection_id} routes so
 # FastAPI does not try to parse "events" as a connection id
-@router.get("/events", summary="Get calendar events for a profile on a day")
+@router.get("/events", summary="Get calendar events for a profile over a day range")
 async def list_calendar_events(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
@@ -134,6 +134,15 @@ async def list_calendar_events(
     profile_id: int = Query(description="The profile whose calendar events to list"),
     target_date: Optional[date] = Query(
         default=None, description="The day to list events for (default: today)"
+    ),
+    days: int = Query(
+        default=1,
+        ge=1,
+        le=14,
+        description=(
+            "Number of days to return events for, starting at target_date "
+            "(default: 1, max: 14)"
+        ),
     ),
     tz: Optional[str] = Query(
         default=None,
@@ -147,8 +156,10 @@ async def list_calendar_events(
 ) -> CalendarEventList:
     """
     Fetch, cache and parse the profile's enabled ICS calendar feeds and return
-    the normalized events of a single day (recurrences expanded). All-day
-    events come first, then timed events ordered by start time.
+    the normalized events of the window [target_date, target_date + days)
+    (recurrences expanded). Each event carries the **event_date** it belongs
+    to; events are ordered by event_date, then all-day events first, then
+    timed events by start time.
 
     Successful fetches are cached for 15 minutes; a failing feed keeps serving
     its stale cache, is not re-attempted for 5 minutes, and its failure is
@@ -156,7 +167,8 @@ async def list_calendar_events(
     response.
 
     - **profile_id**: The profile whose calendar events to list (required)
-    - **target_date**: The day to list events for, YYYY-MM-DD (default: today)
+    - **target_date**: The first day to list events for, YYYY-MM-DD (default: today)
+    - **days**: Number of days in the window starting at target_date (default: 1, max: 14)
     - **tz**: Optional IANA timezone for day boundaries (invalid name -> 422)
     """
     profile = await db.get(Profile, profile_id)
@@ -166,18 +178,7 @@ async def list_calendar_events(
         )
     authorize_resource_access(current_user, profile.user_id, "calendar connection")
 
-    zone: Optional[ZoneInfo] = None
-    if tz is not None:
-        try:
-            zone = ZoneInfo(tz)
-        except (KeyError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    f"Invalid timezone '{tz}': must be a valid IANA timezone "
-                    "name, e.g. 'America/New_York'"
-                ),
-            )
+    zone = resolve_timezone(tz)
 
     if target_date is None:
         # "Today" is timezone-dependent: use the caller's zone when given,
@@ -204,18 +205,26 @@ async def list_calendar_events(
         if connection.cached_ics is None:
             continue
         try:
-            events.extend(
-                parse_events(connection.cached_ics, connection, target_date, tz=zone)
-            )
+            # One fetch/cache refresh per connection above; expanding the
+            # window is parse-only and cheap
+            for day_offset in range(days):
+                events.extend(
+                    parse_events(
+                        connection.cached_ics,
+                        connection,
+                        target_date + timedelta(days=day_offset),
+                        tz=zone,
+                    )
+                )
         except ValueError as exc:
             errors.append(f"{connection.name}: {exc}")
 
     # Persist whatever cache-column updates refresh_connection made
     await db.commit()
 
-    # All-day events first, then timed events by start; timestamp() keeps
-    # naive and timezone-aware starts comparable
-    events.sort(key=lambda e: (not e.all_day, e.start.timestamp()))
+    # By day, then all-day events first, then timed events by start;
+    # timestamp() keeps naive and timezone-aware starts comparable
+    events.sort(key=lambda e: (e.event_date, not e.all_day, e.start.timestamp()))
 
     return CalendarEventList(events=events, date=target_date, errors=errors)
 
