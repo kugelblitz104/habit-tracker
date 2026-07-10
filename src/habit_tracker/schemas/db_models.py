@@ -91,6 +91,12 @@ class Profile(Base):
     tasks: Mapped[List["Task"]] = relationship(
         "Task", back_populates="profile", cascade="all, delete-orphan", lazy="select"
     )
+    calendar_connections: Mapped[List["CalendarConnection"]] = relationship(
+        "CalendarConnection",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     # Constraints
     __table_args__ = (
@@ -166,6 +172,37 @@ class Project(Base):
     # to NULL (ON DELETE SET NULL), so no delete-orphan cascade here
     tasks: Mapped[List["Task"]] = relationship(
         "Task", back_populates="project", passive_deletes=True, lazy="select"
+    )
+
+
+class CalendarConnection(Base):
+    __tablename__ = "calendar_connection"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str] = mapped_column(String, nullable=False)
+    url: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # ICS feed cache - internal, never exposed via the API
+    cached_ics: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    etag: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship(
+        "Profile", back_populates="calendar_connections", lazy="select"
     )
 
 

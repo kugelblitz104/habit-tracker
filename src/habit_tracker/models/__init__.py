@@ -1,3 +1,11 @@
+from habit_tracker.models.calendar_connections import (
+    CalendarConnectionCreate,
+    CalendarConnectionList,
+    CalendarConnectionRead,
+    CalendarConnectionUpdate,
+    CalendarEventList,
+    CalendarEventRead,
+)
 from habit_tracker.models.habits import (
     HabitCreate,
     HabitKPIs,
@@ -42,7 +50,15 @@ from habit_tracker.models.imports import (
     ImportResult,
     ImportedHabitSummary,
 )
-from habit_tracker.schemas.db_models import Habit, Profile, Project, Task, Tracker, User
+from habit_tracker.schemas.db_models import (
+    CalendarConnection,
+    Habit,
+    Profile,
+    Project,
+    Task,
+    Tracker,
+    User,
+)
 from habit_tracker.constants import TaskBand, TaskStatus, TrackerStatus
 
 __all__ = [
@@ -53,6 +69,7 @@ __all__ = [
     "Task",
     "Habit",
     "Tracker",
+    "CalendarConnection",
     # Pydantic Schemas
     "UserCreate",
     "UserRead",
@@ -87,4 +104,10 @@ __all__ = [
     "TaskBand",
     "ImportResult",
     "ImportedHabitSummary",
+    "CalendarConnectionCreate",
+    "CalendarConnectionRead",
+    "CalendarConnectionUpdate",
+    "CalendarConnectionList",
+    "CalendarEventRead",
+    "CalendarEventList",
 ]

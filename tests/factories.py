@@ -10,7 +10,15 @@ from factory.helpers import post_generation
 from passlib.context import CryptContext
 
 from habit_tracker.constants import TaskStatus, TrackerStatus
-from habit_tracker.schemas.db_models import Habit, Profile, Project, Task, Tracker, User
+from habit_tracker.schemas.db_models import (
+    CalendarConnection,
+    Habit,
+    Profile,
+    Project,
+    Task,
+    Tracker,
+    User,
+)
 
 _test_pwd_context = CryptContext(
     schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=4
@@ -141,6 +149,25 @@ class ProjectFactory(BaseFactory):
     color = Faker("color")
     notes = Faker("paragraph", nb_sentences=3, variable_nb_sentences=True)
     archived = False
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+
+
+class CalendarConnectionFactory(BaseFactory):
+    """Factory for creating test calendar connections."""
+
+    class Meta:
+        model = CalendarConnection
+
+    name = Sequence(lambda n: f"Calendar {n}")
+    color = "#3366cc"
+    url = Sequence(lambda n: f"https://calendar.example.com/feed-{n}.ics")
+    provider = "Google"
+    enabled = True
+    cached_ics = None
+    last_fetched_at = None
+    etag = None
+    last_error = None
     profile = SubFactory(ProfileFactory)
     created_date = LazyFunction(datetime.now)
 

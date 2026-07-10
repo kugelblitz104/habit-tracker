@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from habit_tracker.routers import (
     auth,
+    calendar_connections,
     habits,
     imports,
     profiles,
@@ -48,3 +49,4 @@ app.include_router(habits.router)
 app.include_router(trackers.router)
 app.include_router(auth.router)
 app.include_router(imports.router)
+app.include_router(calendar_connections.router)
