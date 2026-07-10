@@ -20,6 +20,7 @@ class TaskBase(BaseModel):
     block_reason: Optional[str] = None
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
+    estimated_effort: Optional[int] = None
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
 
@@ -28,6 +29,13 @@ class TaskBase(BaseModel):
     def validate_title(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Title cannot be empty or whitespace")
+        return v
+
+    @field_validator("estimated_effort")
+    @classmethod
+    def validate_estimated_effort(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError("Estimated effort cannot be negative")
         return v
 
     @field_validator("priority")
@@ -76,6 +84,7 @@ class TaskUpdate(BaseModel):
     block_reason: Optional[str] = None
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
+    estimated_effort: Optional[int] = None
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
 
@@ -107,6 +116,13 @@ class TaskUpdate(BaseModel):
     def validate_status(cls, v: Optional[int]) -> Optional[int]:
         if v is not None and v not in [status.value for status in TaskStatus]:
             raise ValueError("Status must be a valid TaskStatus value")
+        return v
+
+    @field_validator("estimated_effort")
+    @classmethod
+    def validate_estimated_effort(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 0:
+            raise ValueError("Estimated effort cannot be negative")
         return v
 
 

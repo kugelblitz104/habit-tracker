@@ -13,6 +13,7 @@ from habit_tracker.routers import (
     profiles,
     projects,
     tasks,
+    time_entries,
     trackers,
     users,
 )
@@ -45,6 +46,7 @@ app.include_router(users.router)
 app.include_router(profiles.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
+app.include_router(time_entries.router)
 app.include_router(habits.router)
 app.include_router(trackers.router)
 app.include_router(auth.router)

@@ -39,6 +39,17 @@ class TaskStatus(int, Enum):
     CANCELLED = 7
 
 
+class TimeEntryKind(int, Enum):
+    """How a time entry was tracked.
+
+    0 = stopwatch (free-running elapsed timer)
+    1 = pomodoro (fixed work interval)
+    """
+
+    STOPWATCH = 0
+    POMODORO = 1
+
+
 class TaskBand(str, Enum):
     """Computed urgency band for a task. Never stored - derived from
     status + priority + due date via compute_band()."""

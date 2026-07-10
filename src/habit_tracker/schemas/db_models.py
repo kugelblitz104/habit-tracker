@@ -13,7 +13,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from habit_tracker.constants import TaskStatus, TrackerStatus
+from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
 
 
 class Base(DeclarativeBase):
@@ -76,6 +76,24 @@ class Profile(Base):
     use_habit_color_accent: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    # Per-profile pomodoro timer defaults (minutes, and pomodoros before a long
+    # break). The frontend timer reads these; individual runs may still override.
+    pomodoro_work_minutes: Mapped[int] = mapped_column(
+        Integer, default=25, nullable=False
+    )
+    pomodoro_break_minutes: Mapped[int] = mapped_column(
+        Integer, default=5, nullable=False
+    )
+    pomodoro_long_break_minutes: Mapped[int] = mapped_column(
+        Integer, default=15, nullable=False
+    )
+    pomodoro_cycles: Mapped[int] = mapped_column(
+        Integer, default=4, nullable=False
+    )
+    # Whether the estimated-effort field is shown on tasks in this profile.
+    show_estimated_effort: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
@@ -99,6 +117,12 @@ class Profile(Base):
     )
     calendar_connections: Mapped[List["CalendarConnection"]] = relationship(
         "CalendarConnection",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    time_entries: Mapped[List["TimeEntry"]] = relationship(
+        "TimeEntry",
         back_populates="profile",
         cascade="all, delete-orphan",
         lazy="select",
@@ -179,6 +203,11 @@ class Project(Base):
     tasks: Mapped[List["Task"]] = relationship(
         "Task", back_populates="project", passive_deletes=True, lazy="select"
     )
+    # Adhoc time entries attached directly to the project. Also detached (not
+    # deleted) when the project is removed (ON DELETE SET NULL).
+    time_entries: Mapped[List["TimeEntry"]] = relationship(
+        "TimeEntry", back_populates="project", passive_deletes=True, lazy="select"
+    )
 
 
 class CalendarConnection(Base):
@@ -250,6 +279,8 @@ class Task(Base):
     block_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     external_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Estimated level of effort in minutes (est-vs-actual against time entries).
+    estimated_effort: Mapped[int | None] = mapped_column(Integer, nullable=True)
     closed_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
@@ -273,6 +304,72 @@ class Task(Base):
     )
     parent: Mapped["Task | None"] = relationship(
         "Task", back_populates="subtasks", remote_side="Task.id", lazy="select"
+    )
+    # Time entries ride on the DB's ON DELETE CASCADE (passive_deletes), so
+    # deleting a task never needs to load its entries first
+    time_entries: Mapped[List["TimeEntry"]] = relationship(
+        "TimeEntry",
+        back_populates="task",
+        passive_deletes=True,
+        lazy="select",
+    )
+
+
+class TimeEntry(Base):
+    __tablename__ = "time_entry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Nullable so a timer can run untethered to any task; deleting the task
+    # deletes its time entries (ON DELETE CASCADE).
+    task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("task.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Direct project attachment for "adhoc" work not tied to a task. Mutually
+    # exclusive with task_id (a task-attached entry's project is derived from
+    # its task). Deleting the project just detaches (ON DELETE SET NULL).
+    project_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("project.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    kind: Mapped[int] = mapped_column(
+        Integer, default=TimeEntryKind.STOPWATCH, nullable=False
+    )
+    # Optional free-text label ("Standup", "Code review", …); autofilled from
+    # recent entries in the UI.
+    label: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    # Null while the timer is running; set when stopped.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Elapsed seconds, computed on stop; null while running.
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship(
+        "Profile", back_populates="time_entries", lazy="select"
+    )
+    task: Mapped["Task | None"] = relationship(
+        "Task", back_populates="time_entries", lazy="select"
+    )
+    project: Mapped["Project | None"] = relationship(
+        "Project", back_populates="time_entries", lazy="select"
     )
 
 

@@ -24,7 +24,9 @@ from tests.factories import (
     HabitFactory,
     ProfileFactory,
     ProjectFactory,
+    RunningTimeEntryFactory,
     TaskFactory,
+    TimeEntryFactory,
     TrackerFactory,
     UserFactory,
 )
@@ -189,4 +191,6 @@ def setup_factories(db_session: AsyncSession) -> None:
     CalendarConnectionFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     TaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     DoneTaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    TimeEntryFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    RunningTimeEntryFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     TrackerFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]

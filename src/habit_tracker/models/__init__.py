@@ -32,6 +32,15 @@ from habit_tracker.models.tasks import (
     TaskRead,
     TaskUpdate,
 )
+from habit_tracker.models.time_entries import (
+    ProjectTimeSummary,
+    TaskTimeSummary,
+    TimeEntryCreate,
+    TimeEntryList,
+    TimeEntryRead,
+    TimeEntrySummary,
+    TimeEntryUpdate,
+)
 from habit_tracker.models.trackers import (
     TrackerCreate,
     TrackerList,
@@ -56,10 +65,16 @@ from habit_tracker.schemas.db_models import (
     Profile,
     Project,
     Task,
+    TimeEntry,
     Tracker,
     User,
 )
-from habit_tracker.constants import TaskBand, TaskStatus, TrackerStatus
+from habit_tracker.constants import (
+    TaskBand,
+    TaskStatus,
+    TimeEntryKind,
+    TrackerStatus,
+)
 
 __all__ = [
     # DB Models
@@ -67,6 +82,7 @@ __all__ = [
     "Profile",
     "Project",
     "Task",
+    "TimeEntry",
     "Habit",
     "Tracker",
     "CalendarConnection",
@@ -87,6 +103,14 @@ __all__ = [
     "TaskRead",
     "TaskUpdate",
     "TaskList",
+    "TimeEntryCreate",
+    "TimeEntryRead",
+    "TimeEntryUpdate",
+    "TimeEntryList",
+    "TimeEntrySummary",
+    "TaskTimeSummary",
+    "ProjectTimeSummary",
+    "TimeEntryKind",
     "HabitCreate",
     "HabitRead",
     "HabitUpdate",

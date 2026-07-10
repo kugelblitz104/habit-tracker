@@ -9,13 +9,14 @@ from factory.faker import Faker
 from factory.helpers import post_generation
 from passlib.context import CryptContext
 
-from habit_tracker.constants import TaskStatus, TrackerStatus
+from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
     Habit,
     Profile,
     Project,
     Task,
+    TimeEntry,
     Tracker,
     User,
 )
@@ -191,6 +192,29 @@ class DoneTaskFactory(TaskFactory):
 
     status = TaskStatus.DONE
     closed_date = LazyFunction(datetime.now)
+
+
+class TimeEntryFactory(BaseFactory):
+    """Factory for creating test time entries (completed by default)."""
+
+    class Meta:
+        model = TimeEntry
+
+    kind = TimeEntryKind.STOPWATCH
+    started_at = LazyFunction(datetime.now)
+    ended_at = LazyFunction(datetime.now)
+    duration_seconds = 0
+    note = None
+    task = None
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+
+
+class RunningTimeEntryFactory(TimeEntryFactory):
+    """Factory for a running (not-yet-stopped) time entry."""
+
+    ended_at = None
+    duration_seconds = None
 
 
 class TrackerFactory(BaseFactory):

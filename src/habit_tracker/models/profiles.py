@@ -16,12 +16,29 @@ class ProfileBase(BaseModel):
     default_landing: str = "today"
     week_start_monday: bool = True
     use_habit_color_accent: bool = False
+    show_estimated_effort: bool = False
+    pomodoro_work_minutes: int = 25
+    pomodoro_break_minutes: int = 5
+    pomodoro_long_break_minutes: int = 15
+    pomodoro_cycles: int = 4
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Name cannot be empty or whitespace")
+        return v
+
+    @field_validator(
+        "pomodoro_work_minutes",
+        "pomodoro_break_minutes",
+        "pomodoro_long_break_minutes",
+        "pomodoro_cycles",
+    )
+    @classmethod
+    def validate_pomodoro(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Pomodoro settings must be at least 1")
         return v
 
     @field_validator("color_start", "color_end")
@@ -61,6 +78,11 @@ class ProfileUpdate(BaseModel):
     default_landing: Optional[str] = None
     week_start_monday: Optional[bool] = None
     use_habit_color_accent: Optional[bool] = None
+    show_estimated_effort: Optional[bool] = None
+    pomodoro_work_minutes: Optional[int] = None
+    pomodoro_break_minutes: Optional[int] = None
+    pomodoro_long_break_minutes: Optional[int] = None
+    pomodoro_cycles: Optional[int] = None
 
     @field_validator(
         "name",
@@ -72,6 +94,11 @@ class ProfileUpdate(BaseModel):
         "default_landing",
         "week_start_monday",
         "use_habit_color_accent",
+        "show_estimated_effort",
+        "pomodoro_work_minutes",
+        "pomodoro_break_minutes",
+        "pomodoro_long_break_minutes",
+        "pomodoro_cycles",
     )
     @classmethod
     def reject_null(cls, v: object, info: ValidationInfo) -> object:
@@ -79,6 +106,18 @@ class ProfileUpdate(BaseModel):
         # "leave unchanged", but an explicit null is always invalid
         if v is None:
             raise ValueError(f"{info.field_name} cannot be null")
+        return v
+
+    @field_validator(
+        "pomodoro_work_minutes",
+        "pomodoro_break_minutes",
+        "pomodoro_long_break_minutes",
+        "pomodoro_cycles",
+    )
+    @classmethod
+    def validate_pomodoro(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("Pomodoro settings must be at least 1")
         return v
 
     @field_validator("name")
