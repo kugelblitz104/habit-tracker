@@ -1132,6 +1132,377 @@ class TestPatchTask:
         assert response.status_code == 404
 
 
+class TestSubtasks:
+    """Tests for subtasks (self-referential parent_id, one level deep)."""
+
+    async def test_create_subtask(self, client, db_session, setup_factories):
+        """POST with parent_id creates a subtask; parent_id round-trips."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Plan the offsite")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Book the venue",
+                "parent_id": parent.id,
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["parent_id"] == parent.id
+        assert data["subtask_count"] == 0
+        assert data["subtask_done_count"] == 0
+
+        # Round-trips on a fresh GET too
+        response = await client.get(f"/tasks/{data['id']}")
+        assert response.status_code == 200
+        assert response.json()["parent_id"] == parent.id
+
+    async def test_create_subtask_parent_not_found(
+        self, client, db_session, setup_factories
+    ):
+        """A non-existent parent is rejected (400, mirrors project_id)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={"profile_id": profile.id, "title": "Orphan", "parent_id": 99999},
+        )
+        assert response.status_code == 400
+        assert "Parent task not found" in response.json()["detail"]
+
+    async def test_create_subtask_cross_profile_parent(
+        self, client, db_session, setup_factories
+    ):
+        """A parent in a different profile is rejected (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=other_profile)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Mismatched",
+                "parent_id": parent.id,
+            },
+        )
+        assert response.status_code == 400
+        assert "Parent task not found" in response.json()["detail"]
+
+    async def test_create_subtask_under_subtask(
+        self, client, db_session, setup_factories
+    ):
+        """Creating a subtask under a subtask is rejected (400, one level)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        subtask = TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Too deep",
+                "parent_id": subtask.id,
+            },
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"] == "Subtasks can only be nested one level deep"
+        )
+
+    async def test_patch_parent_onto_task_with_subtasks(
+        self, client, db_session, setup_factories
+    ):
+        """A task that HAS subtasks cannot itself become a subtask (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        other = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/tasks/{parent.id}", json={"parent_id": other.id}
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"]
+            == "A task with subtasks cannot itself become a subtask"
+        )
+
+    async def test_patch_self_parent(self, client, db_session, setup_factories):
+        """A task cannot be its own parent (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        task = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(f"/tasks/{task.id}", json={"parent_id": task.id})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "A task cannot be its own parent"
+
+    async def test_patch_set_and_clear_parent(
+        self, client, db_session, setup_factories
+    ):
+        """PATCH can attach a task to a parent and detach it again."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        task = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"parent_id": parent.id}
+        )
+        assert response.status_code == 200
+        assert response.json()["parent_id"] == parent.id
+
+        response = await client.patch(f"/tasks/{task.id}", json={"parent_id": None})
+        assert response.status_code == 200
+        assert response.json()["parent_id"] is None
+
+    async def test_patch_parent_of_existing_subtask_one_level(
+        self, client, db_session, setup_factories
+    ):
+        """PATCHing parent_id to point at a subtask is rejected (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        task = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        subtask = TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"parent_id": subtask.id}
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"] == "Subtasks can only be nested one level deep"
+        )
+
+    async def test_delete_parent_cascades_subtasks(
+        self, client, db_session, setup_factories
+    ):
+        """Deleting a parent task deletes its subtasks (ON DELETE CASCADE)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        subtask = TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+        parent_id, subtask_id = parent.id, subtask.id
+
+        await login_as(client, user)
+
+        response = await client.delete(f"/tasks/{parent_id}")
+        assert response.status_code == 200
+
+        result = await db_session.execute(select(Task).filter(Task.id == parent_id))
+        assert result.scalar_one_or_none() is None
+        result = await db_session.execute(select(Task).filter(Task.id == subtask_id))
+        assert result.scalar_one_or_none() is None
+
+    async def test_list_includes_subtasks_with_parent_id_and_counts(
+        self, client, db_session, setup_factories
+    ):
+        """Subtasks come back in the same list response; counts are right
+        with mixed statuses (done counts DONE only, not cancelled)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Parent")
+        lone = TaskFactory(profile=profile, title="Lone")
+        await db_session.commit()
+
+        sub_open = TaskFactory(profile=profile, parent_id=parent.id)
+        DoneTaskFactory(profile=profile, parent_id=parent.id)
+        TaskFactory(
+            profile=profile,
+            parent_id=parent.id,
+            status=TaskStatus.CANCELLED,
+            closed_date=datetime.now(),
+        )
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.get("/tasks/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        by_id = {t["id"]: t for t in response.json()["tasks"]}
+        # Default list: parent, lone task and the open subtask (closed excluded)
+        assert set(by_id) == {parent.id, lone.id, sub_open.id}
+
+        assert by_id[parent.id]["parent_id"] is None
+        assert by_id[parent.id]["subtask_count"] == 3
+        assert by_id[parent.id]["subtask_done_count"] == 1  # DONE only
+
+        assert by_id[sub_open.id]["parent_id"] == parent.id
+        assert by_id[sub_open.id]["subtask_count"] == 0
+        assert by_id[sub_open.id]["subtask_done_count"] == 0
+
+        assert by_id[lone.id]["subtask_count"] == 0
+        assert by_id[lone.id]["subtask_done_count"] == 0
+
+    async def test_get_single_task_subtask_counts(
+        self, client, db_session, setup_factories
+    ):
+        """GET /tasks/{id} carries the same counts as the list endpoint."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        TaskFactory(profile=profile, parent_id=parent.id)
+        DoneTaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.get(f"/tasks/{parent.id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["subtask_count"] == 2
+        assert data["subtask_done_count"] == 1
+
+    async def test_patch_profile_move_with_subtasks(
+        self, client, db_session, setup_factories
+    ):
+        """Moving a task that has subtasks to another profile fails (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.patch(
+            f"/tasks/{parent.id}", json={"profile_id": other_profile.id}
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"]
+            == "Cannot move a task with subtasks to another profile"
+        )
+
+    async def test_patch_profile_move_of_subtask(
+        self, client, db_session, setup_factories
+    ):
+        """Moving a subtask fails (400) unless parent_id is nulled with it."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        subtask = TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        # Parent would be left in the old profile -> rejected
+        response = await client.patch(
+            f"/tasks/{subtask.id}", json={"profile_id": other_profile.id}
+        )
+        assert response.status_code == 400
+        assert "Parent task not found" in response.json()["detail"]
+
+        # Detaching in the same request makes the move coherent -> allowed
+        response = await client.patch(
+            f"/tasks/{subtask.id}",
+            json={"profile_id": other_profile.id, "parent_id": None},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["profile_id"] == other_profile.id
+        assert data["parent_id"] is None
+
+
 class TestDeleteTask:
     """Tests for DELETE /tasks/{task_id} endpoint."""
 

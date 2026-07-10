@@ -228,6 +228,15 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+    # Self-referential parent for subtasks - ONE level deep only (a subtask
+    # can never itself have subtasks; enforced in the router, not the DB).
+    # Deleting a parent deletes its subtasks (ON DELETE CASCADE).
+    parent_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("task.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -253,6 +262,17 @@ class Task(Base):
     )
     project: Mapped["Project | None"] = relationship(
         "Project", back_populates="tasks", lazy="select"
+    )
+    # Subtask deletion rides on the DB's ON DELETE CASCADE (passive_deletes),
+    # so the ORM never needs to load children to delete a parent
+    subtasks: Mapped[List["Task"]] = relationship(
+        "Task",
+        back_populates="parent",
+        passive_deletes=True,
+        lazy="select",
+    )
+    parent: Mapped["Task | None"] = relationship(
+        "Task", back_populates="subtasks", remote_side="Task.id", lazy="select"
     )
 
 

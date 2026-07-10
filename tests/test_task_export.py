@@ -41,6 +41,7 @@ def _task(**overrides) -> Task:
         "status": TaskStatus.OPEN.value,
         "block_reason": None,
         "project_id": None,
+        "parent_id": None,
         "closed_date": None,
         "created_date": datetime(2026, 1, 1, 12, 0),
     }
@@ -66,6 +67,72 @@ class TestRenderTasksMarkdown:
         assert (
             doc.index("Priority two") < doc.index("Due near") < doc.index("Due far")
         )
+
+    def test_subtasks_nest_under_parent_not_top_level(self):
+        """Subtasks render indented under their parent, never top-level."""
+        today = date(2026, 7, 9)
+        parent = _task(title="Plan the offsite")  # priority 0 -> whenever
+        parent.id = 1
+        # Priority 3 would band the subtask "now" on its own - it must still
+        # render under its parent in the Whenever section, indented
+        sub_open = _task(title="Book the venue", parent_id=1, priority=3)
+        sub_done = _task(
+            title="Pick a date",
+            parent_id=1,
+            status=TaskStatus.DONE.value,
+            closed_date=datetime(2026, 7, 8),
+        )
+        doc = render_tasks_markdown(
+            "Personal", [sub_done, parent, sub_open], {}, today=today
+        )
+        assert "- [ ] Plan the offsite\n  - [ ] Book the venue" in doc
+        assert "  - [x] Pick a date" in doc
+        # Never as a top-level checklist line, and the subtask's own
+        # priority/status never open a band section of their own
+        assert "\n- [ ] Book the venue" not in doc
+        assert "\n- [x] Pick a date" not in doc
+        assert "## Now" not in doc
+        assert "## Completed & cancelled" not in doc
+
+    def test_subtask_detail_bullets_indent_below_subtask(self):
+        """A subtask's detail bullets indent one level below its own line."""
+        today = date(2026, 7, 9)
+        parent = _task(title="Parent task")
+        parent.id = 7
+        _sub = _task(
+            title="Blocked subtask",
+            parent_id=7,
+            status=TaskStatus.BLOCKED.value,
+            priority=2,
+            block_reason="waiting on vendor",
+            notes="First line\nSecond line",
+        )
+        doc = render_tasks_markdown("Personal", [parent, _sub], {}, today=today)
+        assert (
+            "- [ ] Parent task\n"
+            "  - [ ] Blocked subtask\n"
+            "    - Status: Blocked\n"
+            "    - Priority: Medium\n"
+            "    - Blocked: waiting on vendor\n"
+            "    - Notes:\n"
+            "      First line\n"
+            "      Second line" in doc
+        )
+
+    def test_subtask_of_hidden_parent_renders_in_closed_section(self):
+        """Subtasks follow their parent into whatever section it lands in."""
+        today = date(2026, 7, 9)
+        parent = _task(
+            title="Cancelled parent",
+            status=TaskStatus.CANCELLED.value,
+            closed_date=datetime(2026, 7, 1),
+        )
+        parent.id = 3
+        _sub = _task(title="Leftover subtask", parent_id=3)
+        doc = render_tasks_markdown("Personal", [parent, _sub], {}, today=today)
+        completed_at = doc.index("## Completed & cancelled")
+        assert doc.index("  - [ ] Leftover subtask") > completed_at
+        assert "## Whenever" not in doc  # the subtask did not band on its own
 
     def test_hidden_ordering_most_recently_closed_first(self):
         """The closed section is ordered by closed date, most recent first."""
@@ -122,6 +189,44 @@ class TestExportTasksMarkdown:
             < body.index("## Completed & cancelled")
             < body.index("- [x] Finished thing")
         )
+
+    async def test_export_subtasks_nested_under_parent(
+        self, client, db_session, setup_factories
+    ):
+        """Subtasks export as indented checklist lines under their parent."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Plan the offsite")
+        await db_session.commit()
+        base = datetime(2026, 7, 1, 9, 0)
+        TaskFactory(
+            profile=profile,
+            title="Book the venue",
+            parent_id=parent.id,
+            created_date=base,
+        )
+        DoneTaskFactory(
+            profile=profile,
+            title="Pick a date",
+            parent_id=parent.id,
+            created_date=base + timedelta(seconds=1),
+        )
+        await db_session.commit()
+
+        await login_as(client, user)
+        response = await client.get("/tasks/export", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        body = response.text
+        assert (
+            "- [ ] Plan the offsite\n"
+            "  - [ ] Book the venue\n"
+            "  - [x] Pick a date" in body
+        )
+        # The done subtask never surfaces in the Completed section
+        assert "## Completed & cancelled" not in body
 
     async def test_export_header_has_profile_name_and_date(
         self, client, db_session, setup_factories

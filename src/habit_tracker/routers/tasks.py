@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +33,20 @@ router = APIRouter(
 CLOSED_STATUSES = (TaskStatus.DONE.value, TaskStatus.CANCELLED.value)
 
 
-def _task_to_read(task: Task, today: date | None = None) -> TaskRead:
-    """Build a TaskRead with its computed urgency band."""
+def _task_to_read(
+    task: Task,
+    today: date | None = None,
+    subtask_counts: dict[int, tuple[int, int]] | None = None,
+) -> TaskRead:
+    """Build a TaskRead with its computed urgency band and subtask counts.
+
+    Bands are computed uniformly for every task - subtasks get the natural
+    band their own status/priority/dates produce (no special-casing); the
+    frontend nests subtasks under their parent and ignores their band.
+
+    ``subtask_counts`` maps parent task id -> (subtask_count, done_count);
+    tasks without an entry (including all subtasks) get 0/0.
+    """
     task_read = TaskRead.model_validate(task)
     task_read.band = compute_band(
         task.status,
@@ -43,7 +55,62 @@ def _task_to_read(task: Task, today: date | None = None) -> TaskRead:
         scheduled_date=task.scheduled_date,
         today=today,
     )
+    if subtask_counts is not None:
+        count, done_count = subtask_counts.get(task.id, (0, 0))
+        task_read.subtask_count = count
+        task_read.subtask_done_count = done_count
     return task_read
+
+
+async def _get_subtask_counts(
+    db: AsyncSession,
+    *,
+    profile_id: int | None = None,
+    parent_id: int | None = None,
+) -> dict[int, tuple[int, int]]:
+    """Aggregate subtask counts, keyed by parent task id.
+
+    One grouped query - no per-task N+1: for the list endpoint pass
+    ``profile_id`` (counts for every parent in the profile); for a single
+    task pass ``parent_id``. "Done" means status DONE only - cancelled
+    subtasks count toward the total but not the done count.
+    """
+    query = (
+        select(
+            Task.parent_id,
+            func.count(Task.id),
+            func.count(Task.id).filter(Task.status == TaskStatus.DONE.value),
+        )
+        .filter(Task.parent_id.is_not(None))
+        .group_by(Task.parent_id)
+    )
+    if profile_id is not None:
+        query = query.filter(Task.profile_id == profile_id)
+    if parent_id is not None:
+        query = query.filter(Task.parent_id == parent_id)
+    result = await db.execute(query)
+    return {row[0]: (row[1], row[2]) for row in result.all()}
+
+
+async def _validate_parent_task(
+    db: AsyncSession, parent_id: int, profile_id: int, not_found_detail: str
+) -> None:
+    """Validate a task's prospective parent (400 on any violation).
+
+    The parent must exist, belong to ``profile_id``, and not itself be a
+    subtask (subtasks nest exactly ONE level deep).
+    """
+    parent = await db.get(Task, parent_id)
+    if not parent or parent.profile_id != profile_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=not_found_detail,
+        )
+    if parent.parent_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Subtasks can only be nested one level deep",
+        )
 
 
 async def _get_task_and_profile(
@@ -104,6 +171,14 @@ async def list_tasks(
 
     Active tasks are ordered by priority (desc), due date (asc, no due date
     last), then creation date (asc).
+
+    Subtasks are returned in the same response as their parents, with
+    **parent_id** set, so the frontend can nest them without extra requests.
+    A subtask's **band** is the natural value its own status/priority/dates
+    would produce (no special-casing) - the frontend ignores it and groups
+    the subtask under its parent instead. Every task also carries
+    **subtask_count** / **subtask_done_count** (done = status DONE only),
+    computed in a single grouped query.
     """
     if band is not None and band not in [b.value for b in TaskBand]:
         raise HTTPException(
@@ -138,10 +213,13 @@ async def list_tasks(
     result = await db.execute(query)
     db_tasks = result.scalars().all()
 
+    # One aggregate query for the whole profile's subtask counts (no N+1)
+    subtask_counts = await _get_subtask_counts(db, profile_id=profile_id)
+
     # Bands are date-relative and never stored, so band filtering happens in
     # Python after fetching; limit/offset apply to the band-filtered list
     today = date.today()
-    tasks_read = [_task_to_read(t, today) for t in db_tasks]
+    tasks_read = [_task_to_read(t, today, subtask_counts) for t in db_tasks]
     if band is not None:
         tasks_read = [t for t in tasks_read if t.band == band]
 
@@ -179,6 +257,9 @@ async def create_task(
     - **external_ref**: Optional external reference (e.g. "ADO-2841")
     - **external_url**: Optional external URL
     - **project_id**: Optional project (must belong to the same profile)
+    - **parent_id**: Optional parent task, making this task a subtask. The
+      parent must belong to the same profile and must not itself be a
+      subtask (subtasks nest exactly one level deep)
 
     Scheduled data only lives on SCHEDULED tasks: if the created status is
     anything other than SCHEDULED, scheduled_date/scheduled_time are forced to
@@ -193,6 +274,14 @@ async def create_task(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Project not found or does not belong to this profile",
             )
+
+    if task.parent_id is not None:
+        await _validate_parent_task(
+            db,
+            task.parent_id,
+            task.profile_id,
+            "Parent task not found or does not belong to this profile",
+        )
 
     db_task = Task(**task.model_dump())
     if db_task.status in CLOSED_STATUSES:
@@ -230,7 +319,9 @@ async def export_tasks_markdown(
     Tasks are grouped by computed urgency band (Now / Soon / Whenever, plus a
     "Completed & cancelled" section for done/cancelled tasks); empty sections
     are omitted. Each task is a checklist line (`- [x]` when done) with
-    indented detail bullets for the fields that are set. Ordering matches the
+    indented detail bullets for the fields that are set. Subtasks never
+    appear as top-level entries - they render as indented checklist lines
+    under their parent, wherever the parent lands. Ordering matches the
     tasks list endpoint: active bands by priority (desc), due date (asc, no
     due date last), then creation date; the closed section by closed date
     (most recent first).
@@ -256,12 +347,15 @@ async def read_task(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> TaskRead:
     """
-    Retrieve a specific task by its ID, including its computed urgency band.
+    Retrieve a specific task by its ID, including its computed urgency band
+    and its subtask counts (subtask_count / subtask_done_count, done = status
+    DONE only).
 
     - **task_id**: The unique identifier of the task to retrieve
     """
     task, _ = await _get_task_and_profile(db, task_id, current_user)
-    return _task_to_read(task)
+    subtask_counts = await _get_subtask_counts(db, parent_id=task_id)
+    return _task_to_read(task, subtask_counts=subtask_counts)
 
 
 @router.patch("/{task_id}", summary="Update a task (partial update)")
@@ -292,6 +386,16 @@ async def patch_task(
     - **external_ref**: Optional external reference (e.g. "ADO-2841")
     - **external_url**: Optional external URL
     - **project_id**: Optional project (must belong to the task's profile)
+    - **parent_id**: Optional parent task (must belong to the task's
+      resulting profile and must not itself be a subtask; a task that has
+      subtasks cannot become a subtask; a task cannot be its own parent).
+      Set null to detach a subtask from its parent
+
+    Moving a task to another profile follows the same philosophy as
+    project_id: the resulting parent is validated against the resulting
+    profile, so moving a subtask fails (400) unless parent_id is nulled in
+    the same request, and moving a task that has subtasks always fails (400)
+    since its subtasks would be left behind.
 
     Scheduled data only lives on SCHEDULED tasks: if the resulting status (the
     new status if provided, else the existing one) is anything other than
@@ -329,6 +433,50 @@ async def patch_task(
                 detail="Project not found or does not belong to the task's profile",
             )
 
+    # A profile move may not leave subtasks behind: a task that has subtasks
+    # cannot move (mirrors the project rule - profile coherence is enforced,
+    # never silently fixed)
+    if new_profile_id is not None and new_profile_id != db_task.profile_id:
+        subtask_total = await db.scalar(
+            select(func.count(Task.id)).filter(Task.parent_id == task_id)
+        )
+        if subtask_total:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot move a task with subtasks to another profile",
+            )
+
+    # Validate the resulting parent (moved or kept) against the resulting
+    # profile - so moving a subtask to another profile fails unless parent_id
+    # is nulled in the same request
+    target_parent_id = (
+        task_data["parent_id"] if "parent_id" in task_data else db_task.parent_id
+    )
+    if target_parent_id is not None:
+        if target_parent_id == task_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A task cannot be its own parent",
+            )
+        await _validate_parent_task(
+            db,
+            target_parent_id,
+            target_profile_id,
+            "Parent task not found or does not belong to the task's profile",
+        )
+        # ONE level deep: a task that has subtasks cannot itself become a
+        # subtask (only reachable when parent_id is being set - an existing
+        # subtask can never have subtasks of its own)
+        if "parent_id" in task_data:
+            subtask_total = await db.scalar(
+                select(func.count(Task.id)).filter(Task.parent_id == task_id)
+            )
+            if subtask_total:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="A task with subtasks cannot itself become a subtask",
+                )
+
     # Status transitions: entering done/cancelled stamps closed_date (unless
     # already closed); leaving them for an active status clears it
     if "status" in task_data:
@@ -361,7 +509,8 @@ async def patch_task(
             detail="Task change violates a database constraint",
         )
     await db.refresh(db_task)
-    return _task_to_read(db_task)
+    subtask_counts = await _get_subtask_counts(db, parent_id=task_id)
+    return _task_to_read(db_task, subtask_counts=subtask_counts)
 
 
 @router.delete("/{task_id}", summary="Delete a task")
@@ -375,7 +524,8 @@ async def delete_task(
 
     - **task_id**: The unique identifier of the task to delete
 
-    This action cannot be undone.
+    Deleting a parent task also deletes all of its subtasks (database-level
+    ON DELETE CASCADE). This action cannot be undone.
     """
     db_task, _ = await _get_task_and_profile(db, task_id, current_user)
 

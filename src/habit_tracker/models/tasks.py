@@ -21,6 +21,7 @@ class TaskBase(BaseModel):
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
     project_id: Optional[int] = None
+    parent_id: Optional[int] = None
 
     @field_validator("title")
     @classmethod
@@ -56,6 +57,10 @@ class TaskRead(TaskBase):
     created_date: datetime
     updated_date: Optional[datetime] = None
     band: str = TaskBand.WHENEVER
+    # Computed, never stored: how many subtasks this task has, and how many
+    # of them are DONE (cancelled subtasks count toward subtask_count only)
+    subtask_count: int = 0
+    subtask_done_count: int = 0
 
 
 class TaskUpdate(BaseModel):
@@ -72,6 +77,7 @@ class TaskUpdate(BaseModel):
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
     project_id: Optional[int] = None
+    parent_id: Optional[int] = None
 
     @field_validator("profile_id", "title", "priority", "status")
     @classmethod
