@@ -193,6 +193,43 @@ async def authorize_parent_profile(
     return profile
 
 
+async def resolve_habit_profile_id(
+    db: AsyncSession, owner_user_id: int, profile_id: Optional[int]
+) -> int:
+    """Resolve the profile a habit should belong to.
+
+    owner_user_id is the id of the user who owns (or will own) the habit. If
+    profile_id is given, it must exist and belong to that owner (400
+    otherwise) - this keeps the habit's user_id/profile_id invariant intact
+    even when an admin edits another user's habit. If omitted, the owner's
+    oldest profile is used for back-compat.
+
+    Shared by the habits CRUD and the Loop Habit Tracker import.
+    """
+    if profile_id is not None:
+        profile = await db.get(Profile, profile_id)
+        if not profile or profile.user_id != owner_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Profile not found or does not belong to the habit's owner",
+            )
+        return profile_id
+
+    result = await db.execute(
+        select(Profile)
+        .filter(Profile.user_id == owner_user_id)
+        .order_by(Profile.created_date, Profile.id)
+        .limit(1)
+    )
+    default_profile = result.scalar_one_or_none()
+    if not default_profile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User has no profiles; create a profile first",
+        )
+    return default_profile.id
+
+
 async def get_owned_habit(
     db: AsyncSession, habit_id: int, current_user: User
 ) -> Habit:

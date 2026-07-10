@@ -3,14 +3,28 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from datetime import datetime
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.dependencies import get_current_user, get_db
+from habit_tracker.constants import TrackerStatus
+from habit_tracker.core.dependencies import (
+    get_current_user,
+    get_db,
+    get_owned_profile,
+    resolve_habit_profile_id,
+)
 from habit_tracker.models.habits import loopHabitColors
 from habit_tracker.models.imports import (
     ExportResult,
@@ -47,17 +61,42 @@ def reverse_map_color(hex_color: str) -> int:
 def date_to_timestamp(dt: datetime) -> int:
     """
     Convert datetime to Loop Habit Tracker timestamp.
-    Loop Habit Tracker uses milliseconds since epoch.
+    Loop Habit Tracker uses milliseconds since epoch at midnight UTC.
     """
-    return int(dt.timestamp() * 1000)
+    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
 def timestamp_to_date(timestamp: int) -> datetime:
     """
     Convert Loop Habit Tracker timestamp to datetime.
-    Loop Habit Tracker uses milliseconds since epoch.
+
+    Loop stores repetition timestamps as milliseconds since epoch at midnight
+    UTC of the tracked day, so decode in UTC — a server-local decode shifts
+    every date back one day in any negative-offset timezone.
     """
-    return datetime.fromtimestamp(timestamp / 1000)
+    return datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+
+
+def map_repetition_value(value: int) -> Optional[TrackerStatus]:
+    """
+    Map a Loop Habit Tracker repetition value to a TrackerStatus.
+
+    Loop's value semantics vary by app version:
+    - 0 = not done (all versions) — never imported
+    - 1 = skipped (older exports) — SKIPPED
+    - 2 = done / YES_MANUAL — COMPLETED
+    - 3 = SKIP (Loop 2.x) — SKIPPED
+    - >3 = numerical habits store amount x 1000 — COMPLETED
+
+    Returns None for values that should not create a tracker. Writing the raw
+    value into Tracker.status would corrupt the column for 3 and numerical
+    amounts, so everything is clamped to the app's enum here.
+    """
+    if value <= 0:
+        return None
+    if value in (1, 3):
+        return TrackerStatus.SKIPPED
+    return TrackerStatus.COMPLETED
 
 
 @router.post(
@@ -69,11 +108,21 @@ async def import_from_loop_habit_tracker(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     file: UploadFile = File(..., description="SQLite .db file from Loop Habit Tracker"),
+    profile_id: Optional[int] = Query(
+        default=None,
+        description=(
+            "Profile the imported habits belong to. Must belong to the "
+            "current user; defaults to the user's oldest profile if omitted."
+        ),
+    ),
 ) -> ImportResult:
     """
     Import habits and their tracking history from a Loop Habit Tracker database file.
 
     The file should be a SQLite .db file exported from Loop Habit Tracker app.
+
+    - **profile_id**: Optional target profile for the imported habits. Must
+      belong to the current user; defaults to the user's oldest profile
 
     **Mapping from Loop Habit Tracker to this app:**
     - `name` → `name`
@@ -83,9 +132,13 @@ async def import_from_loop_habit_tracker(
     - `freq_den` → `range`
     - `archived` → `archived`
     - `position` → `sort_order`
-    - Repetitions `value` → Tracker `status` (1 = skipped, 2 = completed)
+    - Repetitions `value` → Tracker `status` (1/3 = skipped, 2+ = completed)
     - Repetitions `notes` → Tracker `note`
     """
+    resolved_profile_id = await resolve_habit_profile_id(
+        db, current_user.id, profile_id
+    )
+
     # Validate file extension
     if not file.filename or not file.filename.endswith(".db"):
         raise HTTPException(
@@ -95,6 +148,7 @@ async def import_from_loop_habit_tracker(
 
     # Save uploaded file to a temporary location
     temp_file = None
+    conn = None
     try:
         content = await file.read()
 
@@ -127,10 +181,12 @@ async def import_from_loop_habit_tracker(
                 detail="Invalid database: 'Repetitions' table not found",
             )
 
-        # Get the maximum sort_order for the current user's habits
+        # Get the maximum sort_order within the target profile so imported
+        # habits append after the profile's existing list
         max_sort_order_result = await db.execute(
             select(func.coalesce(func.max(Habit.sort_order), -1)).where(
-                Habit.user_id == current_user.id
+                Habit.user_id == current_user.id,
+                Habit.profile_id == resolved_profile_id,
             )
         )
         current_max_sort_order = max_sort_order_result.scalar() or -1
@@ -167,6 +223,7 @@ async def import_from_loop_habit_tracker(
                 current_max_sort_order += 1
                 new_habit = Habit(
                     user_id=current_user.id,
+                    profile_id=resolved_profile_id,
                     name=name,
                     question=question,
                     color=color,
@@ -212,12 +269,8 @@ async def import_from_loop_habit_tracker(
                             continue
                         seen_dates.add(date_key)
 
-                        # Loop Habit Tracker values:
-                        # 0 = not done
-                        # 1 = skipped (with skip button)
-                        # 2 = done
-                        # For numerical habits, value can be higher
-                        if value == 0:
+                        mapped_status = map_repetition_value(value)
+                        if mapped_status is None:
                             # Not completed - skip importing
                             trackers_skipped += 1
                             continue
@@ -225,7 +278,7 @@ async def import_from_loop_habit_tracker(
                         new_tracker = Tracker(
                             habit_id=new_habit.id,
                             dated=rep_date,
-                            status=value,
+                            status=mapped_status,
                             note=notes,
                         )
                         db.add(new_tracker)
@@ -254,7 +307,6 @@ async def import_from_loop_habit_tracker(
 
         # Commit all changes
         await db.commit()
-        conn.close()
 
         return ImportResult(
             success=True,
@@ -284,6 +336,10 @@ async def import_from_loop_habit_tracker(
         )
 
     finally:
+        # Close the sqlite connection on ALL paths (early HTTPExceptions
+        # included) - on Windows an open connection blocks the unlink below
+        if conn is not None:
+            conn.close()
         # Clean up temporary file
         if temp_file and os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
@@ -297,6 +353,13 @@ async def export_to_loop_habit_tracker(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     include_archived: bool = False,
+    profile_id: Optional[int] = Query(
+        default=None,
+        description=(
+            "Only export habits belonging to this profile. Must belong to "
+            "the current user; omit to export all of the user's habits."
+        ),
+    ),
 ) -> ExportResult:
     """
     Export habits and their tracking history to a Loop Habit Tracker compatible database file.
@@ -305,6 +368,7 @@ async def export_to_loop_habit_tracker(
 
     **Query Parameters:**
     - `include_archived`: Whether to include archived habits (default: False)
+    - `profile_id`: Only export this profile's habits (default: all profiles)
 
     **Mapping from this app to Loop Habit Tracker:**
     - `name` → `name`
@@ -315,10 +379,16 @@ async def export_to_loop_habit_tracker(
     - `archived` → `archived`
     - `sort_order` → `position`
     - `notes` → `description`
-    - Tracker `status` → Repetition `value` (1 = skipped, 2 = completed)
+    - Tracker `status` → Repetition `value` (3 = skipped, 2 = completed)
     - Tracker `note` → Repetition `notes`
     """
+    # Authorize the profile filter before touching the filesystem (404/403
+    # from get_owned_profile must not be swallowed by the except below)
+    if profile_id is not None:
+        await get_owned_profile(db, profile_id, current_user, "profile")
+
     temp_file = None
+    conn = None
     try:
         # Create a temporary file for the export database
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
@@ -365,6 +435,8 @@ async def export_to_loop_habit_tracker(
 
         # Fetch user's habits
         query = select(Habit).where(Habit.user_id == current_user.id)
+        if profile_id is not None:
+            query = query.where(Habit.profile_id == profile_id)
         if not include_archived:
             query = query.where(Habit.archived == False)  # noqa: E712
         query = query.order_by(Habit.sort_order)
@@ -420,13 +492,15 @@ async def export_to_loop_habit_tracker(
             trackers = tracker_result.scalars().all()
 
             for tracker in trackers:
-                # Convert tracker to repetition
-                # Loop Habit Tracker values:
-                # 0 = not done
-                # 1 = skipped
-                # 2 = done
-                if tracker.status > 0 or tracker.note is not None:
-                    value = tracker.status
+                # Convert tracker to repetition using Loop 2.x semantics
+                # (0 = not done, 2 = done, 3 = skip); our import accepts both
+                # the old 1 and the new 3 for skips, so round-trips are safe
+                if tracker.status == TrackerStatus.SKIPPED:
+                    value = 3
+                elif tracker.status == TrackerStatus.COMPLETED:
+                    value = 2
+                elif tracker.note is not None:
+                    value = 0
                 else:
                     # Not completed and not skipped - skip export
                     continue
@@ -445,6 +519,7 @@ async def export_to_loop_habit_tracker(
 
         conn.commit()
         conn.close()
+        conn = None
 
         # Generate filename with timestamp
         export_filename = f"habits_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
@@ -465,5 +540,9 @@ async def export_to_loop_habit_tracker(
         )
 
     finally:
+        # Close the sqlite connection on ALL paths - on Windows an open
+        # connection blocks the unlink below
+        if conn is not None:
+            conn.close()
         if temp_file and os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
