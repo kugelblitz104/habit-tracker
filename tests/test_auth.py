@@ -189,6 +189,20 @@ class TestUserLogin:
         assert "access_token" in data
         assert "refresh_token" in data
 
+    async def test_login_with_email(self, client, db_session, setup_factories):
+        """Successfully login with email in the username field."""
+        user = UserFactory()
+        await db_session.commit()
+
+        response = await client.post(
+            "/auth/login",
+            data={"username": user.email, "password": "password123"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert "refresh_token" in data
+
     async def test_login_wrong_password(self, client, db_session, setup_factories):
         """Reject login with incorrect password (401)."""
         user = UserFactory(username="wrongpassuser")

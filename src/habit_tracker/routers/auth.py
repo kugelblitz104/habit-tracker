@@ -83,8 +83,14 @@ async def login(
     Use username (or email) and password to login.
     The username field accepts either username or email.
     """
-    # Try to find user by username first, then by email
-    user = await db.execute(select(User).filter(User.username == form_data.username))
+    # The OAuth2 "username" field accepts either the username or the email —
+    # both columns are unique, so a single OR lookup resolves the account.
+    identifier = form_data.username
+    user = await db.execute(
+        select(User).filter(
+            (User.username == identifier) | (User.email == identifier)
+        )
+    )
     user = user.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.password_hash):
