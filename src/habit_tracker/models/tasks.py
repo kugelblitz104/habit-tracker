@@ -23,6 +23,7 @@ class TaskBase(BaseModel):
     estimated_effort: Optional[int] = None
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
+    sort_order: int = 0
 
     @field_validator("title")
     @classmethod
@@ -87,6 +88,7 @@ class TaskUpdate(BaseModel):
     estimated_effort: Optional[int] = None
     project_id: Optional[int] = None
     parent_id: Optional[int] = None
+    sort_order: Optional[int] = None
 
     @field_validator("profile_id", "title", "priority", "status")
     @classmethod

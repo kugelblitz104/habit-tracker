@@ -286,6 +286,11 @@ class Task(Base):
         DateTime, default=datetime.now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Manual display order among siblings (ascending). Used for drag-to-reorder
+    # subtasks; ties (and never-reordered tasks, all 0) fall back to created_date.
+    sort_order: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, index=True
+    )
 
     # Relationships
     profile: Mapped["Profile"] = relationship(

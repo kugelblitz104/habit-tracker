@@ -340,6 +340,57 @@ async def export_tasks_markdown(
     return PlainTextResponse(content=markdown, media_type="text/markdown")
 
 
+@router.put("/sort", summary="Reorder tasks")
+async def sort_tasks(
+    task_ids: list[int],  # Just IDs in desired order
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> JSONResponse:
+    """
+    Reorder tasks by providing their IDs in the desired display order.
+
+    - **task_ids**: List of task IDs in the order you want them displayed
+
+    The first ID gets the lowest sort_order, the last the highest; tasks are
+    displayed in ascending sort_order (with created_date as a tiebreak). This
+    is used for drag-to-reorder among a set of siblings (e.g. one parent's
+    subtasks); the caller is expected to pass a coherent sibling set, but the
+    endpoint only enforces ownership, not shared parentage.
+    """
+    if not task_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="task_ids list cannot be empty",
+        )
+
+    if len(task_ids) != len(set(task_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Duplicate task IDs in request",
+        )
+
+    result = await db.execute(select(Task).filter(Task.id.in_(task_ids)))
+    tasks = {t.id: t for t in result.scalars().all()}
+
+    missing = set(task_ids) - set(tasks.keys())
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="One or more tasks not found"
+        )
+
+    # Authorize every distinct owning profile (403 if the caller owns none of
+    # a given task's profile). One lookup per profile, not per task.
+    for profile_id in {t.profile_id for t in tasks.values()}:
+        await authorize_parent_profile(db, profile_id, current_user, "task")
+
+    # Assign sort_order in request order (first item gets the lowest value).
+    for order, task_id in enumerate(task_ids):
+        tasks[task_id].sort_order = order
+
+    await db.commit()
+    return JSONResponse(content={"detail": "Tasks sorted successfully"})
+
+
 @router.get("/{task_id}", summary="Get a task by ID")
 async def read_task(
     task_id: int,

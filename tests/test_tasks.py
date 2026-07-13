@@ -1552,3 +1552,90 @@ class TestDeleteTask:
 
         response = await client.delete("/tasks/99999")
         assert response.status_code == 404
+
+
+class TestSortTasks:
+    """Tests for PUT /tasks/sort endpoint."""
+
+    async def test_sort_tasks_basic(self, client, db_session, setup_factories):
+        """Successfully reorder sibling tasks; first ID gets the lowest sort_order."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Parent")
+        await db_session.commit()
+        sub1 = TaskFactory(profile=profile, parent=parent, title="Sub 1")
+        sub2 = TaskFactory(profile=profile, parent=parent, title="Sub 2")
+        sub3 = TaskFactory(profile=profile, parent=parent, title="Sub 3")
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        # Reorder: sub3, sub1, sub2
+        response = await client.put(
+            "/tasks/sort",
+            json=[sub3.id, sub1.id, sub2.id],
+        )
+        assert response.status_code == 200
+        assert response.json()["detail"] == "Tasks sorted successfully"
+
+        await db_session.refresh(sub1)
+        await db_session.refresh(sub2)
+        await db_session.refresh(sub3)
+        assert sub3.sort_order == 0
+        assert sub1.sort_order == 1
+        assert sub2.sort_order == 2
+
+    async def test_sort_tasks_empty_list(self, client, db_session, setup_factories):
+        """An empty task_ids list is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.put("/tasks/sort", json=[])
+        assert response.status_code == 400
+
+    async def test_sort_tasks_duplicate_ids(self, client, db_session, setup_factories):
+        """Duplicate task IDs are rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        task = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.put("/tasks/sort", json=[task.id, task.id])
+        assert response.status_code == 400
+
+    async def test_sort_tasks_not_found(self, client, db_session, setup_factories):
+        """A missing task ID yields 404."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.put("/tasks/sort", json=[99999])
+        assert response.status_code == 404
+
+    async def test_sort_tasks_forbidden(self, client, db_session, setup_factories):
+        """Reordering a task in another user's profile is forbidden."""
+        user = UserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
+
+        foreign_profile = ProfileFactory(user=other_user, name="Theirs")
+        await db_session.commit()
+        task = TaskFactory(profile=foreign_profile)
+        await db_session.commit()
+
+        await login_as(client, user)
+
+        response = await client.put("/tasks/sort", json=[task.id])
+        assert response.status_code == 403
