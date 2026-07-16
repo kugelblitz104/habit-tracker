@@ -28,6 +28,7 @@ class TaskStatus(int, Enum):
     6 = done
     7 = cancelled
     8 = pending (work done on my end, waiting for others to validate/close)
+    9 = unclear (requirements are unclear / need clarification)
     """
 
     OPEN = 0
@@ -39,6 +40,7 @@ class TaskStatus(int, Enum):
     DONE = 6
     CANCELLED = 7
     PENDING = 8
+    UNCLEAR = 9
 
 
 class TimeEntryKind(int, Enum):

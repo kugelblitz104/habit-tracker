@@ -41,6 +41,7 @@ _STATUS_LABELS = {
     TaskStatus.DONE.value: "Done",
     TaskStatus.CANCELLED.value: "Cancelled",
     TaskStatus.PENDING.value: "Pending",
+    TaskStatus.UNCLEAR.value: "Unclear",
 }
 
 _PRIORITY_LABELS = {1: "Low", 2: "Medium", 3: "High"}
