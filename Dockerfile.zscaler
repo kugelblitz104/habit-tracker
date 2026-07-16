@@ -1,0 +1,43 @@
+# LOCAL DEV ONLY — build behind the corporate (Zscaler) TLS proxy.
+#
+# Identical to the production Dockerfile, plus a step that installs the corporate
+# CA from a build secret (id=zscaler_ca) so TLS verification works behind the
+# proxy at both build time (uv -> pypi) and run time (httpx -> Azure DevOps /
+# GitHub, which also traverse the proxy locally). The CA is never committed,
+# never copied into the build context, and never enters an image layer — it's
+# mounted only for the one RUN that installs it, though the resulting trusted CA
+# *is* baked into the system bundle, which is intended for local runtime.
+#
+# This file requires a BuildKit-capable builder (it uses --mount=type=secret).
+# Deployment/CI use the plain `Dockerfile`, which has no secret mount and builds
+# anywhere. Wired up via docker-compose.yml (build.dockerfile + build.secrets).
+FROM python:3.11-slim-bullseye
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+USER root
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV UV_SYSTEM_CERTS=true
+
+WORKDIR /code
+
+COPY ./pyproject.toml ./uv.lock /code/
+
+# Install the corporate CA from the build secret BEFORE any step that talks to
+# the network (uv sync). The secret is mounted only for this RUN. When no secret
+# is supplied the guard is a no-op (so this file still builds a clean image).
+RUN --mount=type=secret,id=zscaler_ca \
+    if [ -s /run/secrets/zscaler_ca ]; then \
+        cp /run/secrets/zscaler_ca /usr/local/share/ca-certificates/zscaler-ca.crt && \
+        update-ca-certificates; \
+    else \
+        echo "No corporate CA secret provided - building a clean image"; \
+    fi
+
+RUN uv sync --frozen
+COPY ./src /code/src
+
+COPY ./alembic.ini /code/alembic.ini
+COPY ./alembic /code/alembic
+
+CMD uv run alembic upgrade head && uv run uvicorn src.habit_tracker.main:app --host 0.0.0.0 --port 8080

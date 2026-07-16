@@ -23,7 +23,10 @@ services:
     api:
         build:
             context: .
-            dockerfile: Dockerfile
+            # Local dev uses the Zscaler variant so builds work behind the
+            # corporate TLS proxy. Deployment/CI build the plain `Dockerfile`
+            # (no build secrets), which any builder can handle.
+            dockerfile: Dockerfile.zscaler
             # Corporate CA for building behind the Zscaler proxy. Supplied only
             # when ZSCALER_CA_PATH is set (local dev); omitted in deployment.
             secrets:
