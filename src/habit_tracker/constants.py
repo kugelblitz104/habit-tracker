@@ -27,6 +27,7 @@ class TaskStatus(int, Enum):
     5 = deferred
     6 = done
     7 = cancelled
+    8 = pending (work done on my end, waiting for others to validate/close)
     """
 
     OPEN = 0
@@ -37,6 +38,7 @@ class TaskStatus(int, Enum):
     DEFERRED = 5
     DONE = 6
     CANCELLED = 7
+    PENDING = 8
 
 
 class TimeEntryKind(int, Enum):
