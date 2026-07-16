@@ -22,6 +22,7 @@ from tests.factories import (
     CalendarConnectionFactory,
     DoneTaskFactory,
     HabitFactory,
+    IntegrationConnectionFactory,
     ProfileFactory,
     ProjectFactory,
     RunningTimeEntryFactory,
@@ -189,6 +190,7 @@ def setup_factories(db_session: AsyncSession) -> None:
     HabitFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     ProjectFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     CalendarConnectionFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    IntegrationConnectionFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     TaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     DoneTaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
     TimeEntryFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]

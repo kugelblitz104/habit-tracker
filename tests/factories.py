@@ -10,9 +10,11 @@ from factory.helpers import post_generation
 from passlib.context import CryptContext
 
 from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
+from habit_tracker.core.crypto import encrypt_secret
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
     Habit,
+    IntegrationConnection,
     Profile,
     Project,
     Task,
@@ -169,6 +171,25 @@ class CalendarConnectionFactory(BaseFactory):
     last_fetched_at = None
     etag = None
     last_error = None
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+
+
+class IntegrationConnectionFactory(BaseFactory):
+    """Factory for creating test integration connections (GitHub by default)."""
+
+    class Meta:
+        model = IntegrationConnection
+
+    provider = "github"
+    name = Sequence(lambda n: f"Integration {n}")
+    # Store a real Fernet ciphertext so decrypt in the router round-trips.
+    encrypted_token = LazyFunction(lambda: encrypt_secret("test-pat-123"))
+    organization = None
+    project = None
+    work_item_type = None
+    default_repo = "octocat/hello-world"
+    enabled = True
     profile = SubFactory(ProfileFactory)
     created_date = LazyFunction(datetime.now)
 

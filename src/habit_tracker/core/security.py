@@ -49,6 +49,18 @@ def create_refresh_token(data: dict):
     return jwt.encode(data_to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
+def create_reset_token(data: dict):
+    data_to_encode = data.copy()
+
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.reset_token_expiry_minutes
+    )
+
+    data_to_encode.update({"exp": expire, "type": "reset"})
+
+    return jwt.encode(data_to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
 def decode_token(token: str):
     try:
         logger.debug("Decoding token")

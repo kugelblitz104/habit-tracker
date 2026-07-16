@@ -10,6 +10,7 @@ from habit_tracker.routers import (
     calendar_connections,
     habits,
     imports,
+    integrations,
     profiles,
     projects,
     tasks,
@@ -52,3 +53,4 @@ app.include_router(trackers.router)
 app.include_router(auth.router)
 app.include_router(imports.router)
 app.include_router(calendar_connections.router)
+app.include_router(integrations.router)

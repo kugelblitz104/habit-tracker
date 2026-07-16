@@ -59,9 +59,19 @@ from habit_tracker.models.imports import (
     ImportResult,
     ImportedHabitSummary,
 )
+from habit_tracker.models.integrations import (
+    IntegrationConnectionCreate,
+    IntegrationConnectionList,
+    IntegrationConnectionRead,
+    IntegrationConnectionUpdate,
+    IntegrationSyncResult,
+    PublishRequest,
+    PublishResult,
+)
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
     Habit,
+    IntegrationConnection,
     Profile,
     Project,
     Task,
@@ -70,6 +80,7 @@ from habit_tracker.schemas.db_models import (
     User,
 )
 from habit_tracker.constants import (
+    IntegrationProvider,
     TaskBand,
     TaskStatus,
     TimeEntryKind,
@@ -86,6 +97,7 @@ __all__ = [
     "Habit",
     "Tracker",
     "CalendarConnection",
+    "IntegrationConnection",
     # Pydantic Schemas
     "UserCreate",
     "UserRead",
@@ -128,6 +140,14 @@ __all__ = [
     "TaskBand",
     "ImportResult",
     "ImportedHabitSummary",
+    "IntegrationProvider",
+    "IntegrationConnectionCreate",
+    "IntegrationConnectionRead",
+    "IntegrationConnectionUpdate",
+    "IntegrationConnectionList",
+    "IntegrationSyncResult",
+    "PublishRequest",
+    "PublishResult",
     "CalendarConnectionCreate",
     "CalendarConnectionRead",
     "CalendarConnectionUpdate",

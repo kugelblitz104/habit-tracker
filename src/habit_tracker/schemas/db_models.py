@@ -127,6 +127,12 @@ class Profile(Base):
         cascade="all, delete-orphan",
         lazy="select",
     )
+    integration_connections: Mapped[List["IntegrationConnection"]] = relationship(
+        "IntegrationConnection",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     # Constraints
     __table_args__ = (
@@ -241,6 +247,54 @@ class CalendarConnection(Base):
     )
 
 
+class IntegrationConnection(Base):
+    """A per-profile connection to an external task tracker (Azure DevOps or
+    GitHub), authenticated with a user-supplied PAT stored encrypted. Which
+    provider-specific columns are used depends on `provider`:
+    - azure_devops: `organization` + `project` (required), `work_item_type`
+      (optional publish type, defaults to "Task").
+    - github: `default_repo` ("owner/repo", the publish target; reading assigned
+      issues needs no repo).
+    """
+
+    __tablename__ = "integration_connection"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # Fernet-encrypted PAT - internal, never exposed via the API.
+    encrypted_token: Mapped[str] = mapped_column(Text, nullable=False)
+    # Azure DevOps: organization + project. GitHub: unused.
+    organization: Mapped[str | None] = mapped_column(String, nullable=True)
+    project: Mapped[str | None] = mapped_column(String, nullable=True)
+    work_item_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    # GitHub: "owner/repo" publish target. Azure DevOps: unused.
+    default_repo: Mapped[str | None] = mapped_column(String, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship(
+        "Profile", back_populates="integration_connections", lazy="select"
+    )
+
+    @property
+    def has_token(self) -> bool:
+        """Whether a PAT is stored (surfaced by the API; the token never is)."""
+        return bool(self.encrypted_token)
+
+
 class Task(Base):
     __tablename__ = "task"
 
@@ -277,6 +331,13 @@ class Task(Base):
         Integer, default=TaskStatus.OPEN, nullable=False
     )
     block_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # External work-item link. `source` is the provider ("azure_devops" /
+    # "github") or NULL for tasks with no external origin; `external_ref` is the
+    # human key (e.g. "AB#2841", "owner/repo#42"); `external_url` deep-links to
+    # the item. The unique constraint below makes sync idempotent (re-syncing an
+    # already-imported item is a no-op) without blocking multiple purely-local
+    # tasks, since NULLs compare distinct in Postgres.
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String, nullable=True)
     external_url: Mapped[str | None] = mapped_column(String, nullable=True)
     # Estimated level of effort in minutes (est-vs-actual against time entries).
@@ -317,6 +378,20 @@ class Task(Base):
         back_populates="task",
         passive_deletes=True,
         lazy="select",
+    )
+
+    # Constraints
+    __table_args__ = (
+        # One task per (profile, provider, external ref) so re-syncing an
+        # imported item never duplicates it. Purely-local tasks have NULL
+        # source/external_ref, which Postgres treats as distinct, so this never
+        # constrains manually-created tasks.
+        UniqueConstraint(
+            "profile_id",
+            "source",
+            "external_ref",
+            name="uix_task_profile_source_external_ref",
+        ),
     )
 
 

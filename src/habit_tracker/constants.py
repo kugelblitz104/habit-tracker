@@ -50,6 +50,13 @@ class TimeEntryKind(int, Enum):
     POMODORO = 1
 
 
+class IntegrationProvider(str, Enum):
+    """External task-tracker an integration connection talks to."""
+
+    AZURE_DEVOPS = "azure_devops"
+    GITHUB = "github"
+
+
 class TaskBand(str, Enum):
     """Computed urgency band for a task. Never stored - derived from
     status + priority + due date via compute_band()."""

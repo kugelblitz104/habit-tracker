@@ -18,6 +18,7 @@ class TaskBase(BaseModel):
     scheduled_time: Optional[time] = None
     status: int = TaskStatus.OPEN
     block_reason: Optional[str] = None
+    source: Optional[str] = None
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
     estimated_effort: Optional[int] = None
@@ -83,6 +84,7 @@ class TaskUpdate(BaseModel):
     scheduled_time: Optional[time] = None
     status: Optional[int] = None
     block_reason: Optional[str] = None
+    source: Optional[str] = None
     external_ref: Optional[str] = None
     external_url: Optional[str] = None
     estimated_effort: Optional[int] = None

@@ -337,3 +337,143 @@ class TestTokenRefresh:
         )
         assert response.status_code == 401
         assert "Invalid refresh token" in response.json()["detail"]
+
+
+class TestForgotPassword:
+    """Tests for /auth/forgot-password endpoint."""
+
+    async def test_forgot_password_existing_email(
+        self, client, db_session, setup_factories
+    ):
+        """A registered email gets the generic 200 response."""
+        user = UserFactory(email="real@example.com")
+        await db_session.commit()
+
+        response = await client.post(
+            "/auth/forgot-password", json={"email": user.email}
+        )
+        assert response.status_code == 200
+        assert "reset link" in response.json()["message"].lower()
+
+    async def test_forgot_password_unknown_email_same_response(self, client):
+        """An unknown email returns the identical response (no enumeration)."""
+        known = await client.post(
+            "/auth/forgot-password", json={"email": "nobody@example.com"}
+        )
+        assert known.status_code == 200
+        # Must match the wording used for a real account exactly.
+        assert (
+            known.json()["message"]
+            == "If an account exists for that email, a password reset link "
+            "has been sent."
+        )
+
+    async def test_forgot_password_invalid_email(self, client):
+        """Malformed email is rejected by validation (422)."""
+        response = await client.post(
+            "/auth/forgot-password", json={"email": "not-an-email"}
+        )
+        assert response.status_code == 422
+
+
+class TestResetPassword:
+    """Tests for /auth/reset-password endpoint."""
+
+    async def test_reset_password_success(self, client, db_session, setup_factories):
+        """A valid reset token sets a new password that can be used to log in."""
+        from habit_tracker.core.security import create_reset_token
+
+        user = UserFactory(username="resetme")
+        await db_session.commit()
+
+        token = create_reset_token(data={"sub": str(user.id)})
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": token, "new_password": "brandnewpass1"},
+        )
+        assert response.status_code == 200
+
+        # Old password no longer works...
+        old_login = await client.post(
+            "/auth/login",
+            data={"username": "resetme", "password": "password123"},
+        )
+        assert old_login.status_code == 401
+
+        # ...and the new one does.
+        new_login = await client.post(
+            "/auth/login",
+            data={"username": "resetme", "password": "brandnewpass1"},
+        )
+        assert new_login.status_code == 200
+
+    async def test_reset_password_rejects_access_token(
+        self, client, db_session, setup_factories
+    ):
+        """A non-reset token type is rejected (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        login = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        access_token = login.json()["access_token"]
+
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": access_token, "new_password": "brandnewpass1"},
+        )
+        assert response.status_code == 400
+        assert "Invalid or expired reset token" in response.json()["detail"]
+
+    async def test_reset_password_expired_token(
+        self, client, db_session, setup_factories
+    ):
+        """An expired reset token is rejected (400)."""
+        from datetime import datetime, timedelta, timezone
+
+        import jwt
+
+        from habit_tracker.core.config import settings
+
+        user = UserFactory()
+        await db_session.commit()
+
+        expired_token = jwt.encode(
+            {
+                "sub": str(user.id),
+                "type": "reset",
+                "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+            },
+            settings.secret_key,
+            algorithm=settings.algorithm,
+        )
+
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": expired_token, "new_password": "brandnewpass1"},
+        )
+        assert response.status_code == 400
+
+    async def test_reset_password_malformed_token(self, client):
+        """A malformed token is rejected (400)."""
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": "invalid.malformed.token", "new_password": "brandnewpass1"},
+        )
+        assert response.status_code == 400
+
+    async def test_reset_password_too_short(self, client, db_session, setup_factories):
+        """A too-short new password is rejected by validation (422)."""
+        from habit_tracker.core.security import create_reset_token
+
+        user = UserFactory()
+        await db_session.commit()
+
+        token = create_reset_token(data={"sub": str(user.id)})
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": token, "new_password": "short"},
+        )
+        assert response.status_code == 422

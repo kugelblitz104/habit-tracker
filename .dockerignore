@@ -1,0 +1,26 @@
+# Keep the build context small and free of local/dev artifacts. The image only
+# needs pyproject.toml, uv.lock, src/, alembic.ini and alembic/ (see Dockerfile);
+# everything else here just bloats/slows the context (especially over /mnt/c).
+.git/
+.venv/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+tests/
+htmlcov/
+.coverage
+*.md
+
+# Never ship env files or certificates into the build context.
+.env
+.env.*
+*.pem
+*.crt
+*.cer
+certs/
+
+# Untracked scratch directory that must never enter an image.
+Task System Overhaul/
