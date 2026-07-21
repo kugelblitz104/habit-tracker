@@ -11,6 +11,7 @@ class ProfileBase(BaseModel):
     color_start: str = "#e0763f"
     color_end: str = "#c14e6a"
     habits_enabled: bool = True
+    countdowns_enabled: bool = True
     calendar_enabled: bool = True
     publish_to_azure: bool = False
     default_landing: str = "today"
@@ -73,6 +74,7 @@ class ProfileUpdate(BaseModel):
     color_start: Optional[str] = None
     color_end: Optional[str] = None
     habits_enabled: Optional[bool] = None
+    countdowns_enabled: Optional[bool] = None
     calendar_enabled: Optional[bool] = None
     publish_to_azure: Optional[bool] = None
     default_landing: Optional[str] = None
@@ -89,6 +91,7 @@ class ProfileUpdate(BaseModel):
         "color_start",
         "color_end",
         "habits_enabled",
+        "countdowns_enabled",
         "calendar_enabled",
         "publish_to_azure",
         "default_landing",

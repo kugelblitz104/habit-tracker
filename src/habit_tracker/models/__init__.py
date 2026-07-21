@@ -6,6 +6,12 @@ from habit_tracker.models.calendar_connections import (
     CalendarEventList,
     CalendarEventRead,
 )
+from habit_tracker.models.countdowns import (
+    CountdownCreate,
+    CountdownList,
+    CountdownRead,
+    CountdownUpdate,
+)
 from habit_tracker.models.habits import (
     HabitCreate,
     HabitKPIs,
@@ -70,6 +76,7 @@ from habit_tracker.models.integrations import (
 )
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
+    Countdown,
     Habit,
     IntegrationConnection,
     Profile,
@@ -98,7 +105,12 @@ __all__ = [
     "Tracker",
     "CalendarConnection",
     "IntegrationConnection",
+    "Countdown",
     # Pydantic Schemas
+    "CountdownCreate",
+    "CountdownRead",
+    "CountdownUpdate",
+    "CountdownList",
     "UserCreate",
     "UserRead",
     "UserUpdate",

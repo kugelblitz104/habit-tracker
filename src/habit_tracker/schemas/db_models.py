@@ -61,6 +61,9 @@ class Profile(Base):
     habits_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
+    countdowns_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
     calendar_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
@@ -480,3 +483,49 @@ class Tracker(Base):
         # Ensure one tracker per habit per date
         UniqueConstraint("habit_id", "dated", name="uix_habit_dated"),
     )
+
+
+class Countdown(Base):
+    __tablename__ = "countdown"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Optional link to a task. A countdown is a first-class entity: it can stand
+    # alone (no task) or reference one for context/navigation. Deleting the task
+    # unlinks the countdown (SET NULL) rather than deleting it, since its target
+    # date is its own.
+    task_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("task.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    # The countdown's own target (prefilled from a linked task's due date, then
+    # independent). Date is required; time is optional (date-only = end of day).
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    target_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    # Free-text grouping label (e.g. "Birthdays", "Bills") + an optional hex
+    # accent — both drive the grouped/colored countdown views.
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Recurrence: none/weekly/monthly/yearly. target_date is the anchor; the next
+    # occurrence is derived from it (birthdays roll to next year, bills to next
+    # month) — no server-side rollover job.
+    repeat: Mapped[str] = mapped_column(String, default="none", nullable=False)
+    # Opt-in: show the Nth occurrence for a recurring countdown (e.g. "26th
+    # birthday"), derived client-side from the anchor.
+    show_occurrence: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship("Profile", lazy="select")
+    task: Mapped["Task | None"] = relationship("Task", lazy="select")
