@@ -255,7 +255,9 @@ class IntegrationConnection(Base):
     GitHub), authenticated with a user-supplied PAT stored encrypted. Which
     provider-specific columns are used depends on `provider`:
     - azure_devops: `organization` + `project` (required), `work_item_type`
-      (optional publish type, defaults to "Task").
+      (optional publish type, defaults to "Task"), `base_url` (optional host
+      root for on-prem Azure DevOps Server / TFS; defaults to the public cloud
+      `https://dev.azure.com`).
     - github: `default_repo` ("owner/repo", the publish target; reading assigned
       issues needs no repo).
     """
@@ -277,6 +279,9 @@ class IntegrationConnection(Base):
     organization: Mapped[str | None] = mapped_column(String, nullable=True)
     project: Mapped[str | None] = mapped_column(String, nullable=True)
     work_item_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Azure DevOps: optional host root for on-prem Azure DevOps Server / TFS
+    # (e.g. "https://tfs.example.com"); NULL means the public cloud. GitHub: unused.
+    base_url: Mapped[str | None] = mapped_column(String, nullable=True)
     # GitHub: "owner/repo" publish target. Azure DevOps: unused.
     default_repo: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

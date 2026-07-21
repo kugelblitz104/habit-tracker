@@ -53,6 +53,7 @@ def build_client(connection: IntegrationConnection, token: str) -> IntegrationCl
             project=connection.project or "",
             token=token,
             work_item_type=connection.work_item_type or "Task",
+            base_url=connection.base_url,
         )
     if connection.provider == IntegrationProvider.GITHUB.value:
         return GitHubClient(token=token, default_repo=connection.default_repo)

@@ -10,7 +10,11 @@ from sqlalchemy import select
 from habit_tracker.main import app
 from habit_tracker.schemas.db_models import IntegrationConnection, Task
 from habit_tracker.services.integrations import ExternalItem, IntegrationError
-from habit_tracker.services.integrations.azure_devops import html_to_text, text_to_html
+from habit_tracker.services.integrations.azure_devops import (
+    AzureDevOpsClient,
+    html_to_text,
+    text_to_html,
+)
 from habit_tracker.services.integrations.base import get_client_builder
 from tests.factories import (
     IntegrationConnectionFactory,
@@ -410,3 +414,46 @@ class TestAzureHtmlSerialization:
     def test_text_to_html_empty(self):
         assert text_to_html(None) == ""
         assert text_to_html("") == ""
+
+
+class TestAzureDevOpsClientUrls:
+    """The API base URL is what the create/sync paths hit. Cloud connections
+    address https://dev.azure.com/{org}; on-prem Azure DevOps Server / TFS sets
+    base_url to its own host. These build the URLs without any HTTP call (the
+    FakeClient tests above stub the client, so they can't catch a bad base)."""
+
+    def test_cloud_default_base(self):
+        client = AzureDevOpsClient(organization="contoso", project="Payments", token="pat")
+        assert client.org_base == "https://dev.azure.com/contoso"
+        assert client.project_base == "https://dev.azure.com/contoso/Payments"
+        assert (
+            client._work_item_url(42)
+            == "https://dev.azure.com/contoso/Payments/_workitems/edit/42"
+        )
+
+    def test_on_prem_base_url_replaces_host(self):
+        client = AzureDevOpsClient(
+            organization="CoStarCollection",
+            project="CoStarDataManagement",
+            token="pat",
+            base_url="https://tfs.example.com",
+        )
+        assert client.org_base == "https://tfs.example.com/CoStarCollection"
+        assert (
+            client.project_base
+            == "https://tfs.example.com/CoStarCollection/CoStarDataManagement"
+        )
+        # Matches the URL you'd see in the browser for a work item.
+        assert (
+            client._work_item_url(7)
+            == "https://tfs.example.com/CoStarCollection/CoStarDataManagement/_workitems/edit/7"
+        )
+
+    def test_on_prem_base_url_trailing_slash_trimmed(self):
+        client = AzureDevOpsClient(
+            organization="Coll",
+            project="Proj",
+            token="pat",
+            base_url="https://tfs.example.com/",
+        )
+        assert client.project_base == "https://tfs.example.com/Coll/Proj"

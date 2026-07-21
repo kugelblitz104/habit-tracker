@@ -14,6 +14,18 @@ from habit_tracker.constants import IntegrationProvider
 _PROVIDER_VALUES = {p.value for p in IntegrationProvider}
 
 
+def _normalize_base_url(v: Optional[str]) -> Optional[str]:
+    """Empty/whitespace -> None (public cloud). Otherwise require an http(s)
+    scheme and strip any trailing slash so it joins cleanly with the org/project
+    path segments."""
+    if v is None or not v.strip():
+        return None
+    v = v.strip().rstrip("/")
+    if not v.startswith(("http://", "https://")):
+        raise ValueError("base_url must start with http:// or https://")
+    return v
+
+
 class IntegrationConnectionBase(BaseModel):
     provider: str
     name: str
@@ -21,6 +33,9 @@ class IntegrationConnectionBase(BaseModel):
     organization: Optional[str] = None
     project: Optional[str] = None
     work_item_type: Optional[str] = None
+    # Optional host root for on-prem Azure DevOps Server / TFS (e.g.
+    # "https://tfs.example.com"); leave unset for the public cloud.
+    base_url: Optional[str] = None
     # GitHub
     default_repo: Optional[str] = None
     enabled: bool = True
@@ -52,6 +67,11 @@ class IntegrationConnectionBase(BaseModel):
         if len(parts) != 2 or not all(parts):
             raise ValueError('default_repo must be in the form "owner/repo"')
         return v
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+        return _normalize_base_url(v)
 
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "IntegrationConnectionBase":
@@ -96,6 +116,7 @@ class IntegrationConnectionUpdate(BaseModel):
     organization: Optional[str] = None
     project: Optional[str] = None
     work_item_type: Optional[str] = None
+    base_url: Optional[str] = None
     default_repo: Optional[str] = None
     enabled: Optional[bool] = None
     # Provide to rotate the PAT; omit to leave it unchanged.
@@ -132,6 +153,11 @@ class IntegrationConnectionUpdate(BaseModel):
         if len(parts) != 2 or not all(parts):
             raise ValueError('default_repo must be in the form "owner/repo"')
         return v
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+        return _normalize_base_url(v)
 
 
 class IntegrationConnectionList(BaseModel):

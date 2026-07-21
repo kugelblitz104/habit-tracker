@@ -55,13 +55,25 @@ _MAX_ITEMS = 200
 
 class AzureDevOpsClient:
     def __init__(
-        self, organization: str, project: str, token: str, work_item_type: str = "Task"
+        self,
+        organization: str,
+        project: str,
+        token: str,
+        work_item_type: str = "Task",
+        base_url: str | None = None,
     ):
         self.organization = organization
         self.project = project
         self.token = token
         self.work_item_type = work_item_type
-        self.org_base = f"https://dev.azure.com/{organization}"
+        # `base_url` is the host root; it defaults to the public cloud but points
+        # at an on-prem Azure DevOps Server / TFS host when set (e.g.
+        # "https://tfs.example.com"). It replaces only the "https://dev.azure.com"
+        # prefix — the organization (cloud) / collection (on-prem) and project
+        # segments are appended the same way for both, so the resulting URLs
+        # match what you'd see in the browser: {host}/{org}/{project}/_apis/...
+        host = (base_url or "https://dev.azure.com").rstrip("/")
+        self.org_base = f"{host}/{organization}"
         self.project_base = f"{self.org_base}/{project}"
 
     def _work_item_url(self, work_item_id: int) -> str:
