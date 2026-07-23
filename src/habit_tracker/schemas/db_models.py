@@ -64,6 +64,9 @@ class Profile(Base):
     countdowns_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
+    insights_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
     calendar_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
