@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -526,6 +526,36 @@ async def patch_time_entry(
         )
     await db.refresh(entry)
     return _to_read(entry)
+
+
+@router.delete("/", summary="Delete all time entries in a profile")
+async def delete_all_time_entries(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose time entries to delete"),
+) -> JSONResponse:
+    """
+    Delete every time entry in a profile.
+
+    - **profile_id**: The profile whose time entries to delete (required)
+
+    This action cannot be undone. Any running (unstopped) entry is deleted
+    too. Linked tasks and projects are not affected.
+    """
+    await get_owned_profile(db, profile_id, current_user, "time entry")
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(TimeEntry)
+            .filter(TimeEntry.profile_id == profile_id)
+        )
+    ).scalar() or 0
+    await db.execute(delete(TimeEntry).where(TimeEntry.profile_id == profile_id))
+    await db.commit()
+    return JSONResponse(
+        content={"detail": f"Deleted {count} time entries", "deleted": count}
+    )
 
 
 @router.delete("/{entry_id}", summary="Delete a time entry")

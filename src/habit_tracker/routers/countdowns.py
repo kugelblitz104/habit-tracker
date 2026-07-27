@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -139,6 +139,35 @@ async def patch_countdown(
     await db.commit()
     await db.refresh(db_countdown)
     return CountdownRead.model_validate(db_countdown)
+
+
+@router.delete("/", summary="Delete all countdowns in a profile")
+async def delete_all_countdowns(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose countdowns to delete"),
+) -> JSONResponse:
+    """
+    Delete every countdown in a profile.
+
+    - **profile_id**: The profile whose countdowns to delete (required)
+
+    This action cannot be undone. Linked tasks are not affected.
+    """
+    await get_owned_profile(db, profile_id, current_user, "countdown")
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Countdown)
+            .filter(Countdown.profile_id == profile_id)
+        )
+    ).scalar() or 0
+    await db.execute(delete(Countdown).where(Countdown.profile_id == profile_id))
+    await db.commit()
+    return JSONResponse(
+        content={"detail": f"Deleted {count} countdowns", "deleted": count}
+    )
 
 
 @router.delete("/{countdown_id}", summary="Delete a countdown")

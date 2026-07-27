@@ -3,13 +3,14 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
+    get_owned_profile,
     resolve_habit_profile_id,
     resolve_timezone,
     resolve_today,
@@ -461,6 +462,39 @@ async def patch_habit(
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
+
+
+@router.delete("/", summary="Delete all habits in a profile")
+async def delete_all_habits(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose habits to delete"),
+) -> JSONResponse:
+    """
+    Delete every habit (and its trackers) in a profile.
+
+    - **profile_id**: The profile whose habits to delete (required)
+
+    This action cannot be undone. Each habit's tracker history is deleted
+    with it (ON DELETE CASCADE).
+    """
+    await get_owned_profile(db, profile_id, current_user, "habit")
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Habit)
+            .filter(Habit.profile_id == profile_id)
+        )
+    ).scalar() or 0
+    await db.execute(delete(Habit).where(Habit.profile_id == profile_id))
+    await db.commit()
+    return JSONResponse(
+        content={
+            "detail": f"Deleted {count} habits and their trackers",
+            "deleted": count,
+        }
+    )
 
 
 @router.delete("/{habit_id}", summary="Delete a habit")

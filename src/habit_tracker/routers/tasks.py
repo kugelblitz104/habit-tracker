@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -562,6 +562,37 @@ async def patch_task(
     await db.refresh(db_task)
     subtask_counts = await _get_subtask_counts(db, parent_id=task_id)
     return _task_to_read(db_task, subtask_counts=subtask_counts)
+
+
+@router.delete("/", summary="Delete all tasks in a profile")
+async def delete_all_tasks(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose tasks to delete"),
+) -> JSONResponse:
+    """
+    Delete every task (and its subtasks) in a profile.
+
+    - **profile_id**: The profile whose tasks to delete (required)
+
+    This action cannot be undone. Time entries attached to a deleted task
+    are removed with it (ON DELETE CASCADE); countdowns that link a task are
+    kept and unlinked (ON DELETE SET NULL), matching single-task delete.
+    """
+    await get_owned_profile(db, profile_id, current_user, "task")
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .filter(Task.profile_id == profile_id)
+        )
+    ).scalar() or 0
+    await db.execute(delete(Task).where(Task.profile_id == profile_id))
+    await db.commit()
+    return JSONResponse(
+        content={"detail": f"Deleted {count} tasks", "deleted": count}
+    )
 
 
 @router.delete("/{task_id}", summary="Delete a task")

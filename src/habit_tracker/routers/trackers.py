@@ -1,7 +1,8 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -9,6 +10,7 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
+    get_owned_profile,
 )
 from habit_tracker.models import (
     Habit,
@@ -150,6 +152,37 @@ async def patch_tracker(
     await db.commit()
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
+
+
+@router.delete("/", summary="Delete all trackers in a profile")
+async def delete_all_trackers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose trackers to delete"),
+) -> JSONResponse:
+    """
+    Delete every tracker entry belonging to a profile's habits, keeping the
+    habits themselves.
+
+    - **profile_id**: The profile whose trackers to delete (required)
+
+    This action cannot be undone.
+    """
+    await get_owned_profile(db, profile_id, current_user, "tracker")
+
+    habit_ids = select(Habit.id).where(Habit.profile_id == profile_id)
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Tracker)
+            .where(Tracker.habit_id.in_(habit_ids))
+        )
+    ).scalar() or 0
+    await db.execute(delete(Tracker).where(Tracker.habit_id.in_(habit_ids)))
+    await db.commit()
+    return JSONResponse(
+        content={"detail": f"Deleted {count} trackers", "deleted": count}
+    )
 
 
 @router.delete("/{tracker_id}", summary="Delete a tracker entry")

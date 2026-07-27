@@ -3,7 +3,7 @@ from typing import Annotated, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -241,6 +241,40 @@ async def patch_project(
 
     counts = await _get_task_counts(db, [db_project.id])
     return _project_to_read(db_project, counts)
+
+
+@router.delete("/", summary="Delete all projects in a profile")
+async def delete_all_projects(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose projects to delete"),
+) -> JSONResponse:
+    """
+    Delete every project in a profile.
+
+    - **profile_id**: The profile whose projects to delete (required)
+
+    This action cannot be undone. As with single-project delete, tasks are
+    NOT deleted - they are kept and their project association is cleared
+    (the DB sets task.project_id to NULL).
+    """
+    await get_owned_profile(db, profile_id, current_user, "project")
+
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Project)
+            .filter(Project.profile_id == profile_id)
+        )
+    ).scalar() or 0
+    await db.execute(delete(Project).where(Project.profile_id == profile_id))
+    await db.commit()
+    return JSONResponse(
+        content={
+            "detail": f"Deleted {count} projects; their tasks were kept and unassigned",
+            "deleted": count,
+        }
+    )
 
 
 @router.delete("/{project_id}", summary="Delete a project")

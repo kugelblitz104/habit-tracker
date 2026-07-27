@@ -2,7 +2,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -80,65 +80,6 @@ async def read_current_user(
     """
 
     return UserRead.model_validate(current_user)
-
-
-@router.delete("/trackers", summary="Delete all trackers for a user")
-async def delete_all_trackers_for_user(
-    user_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> JSONResponse:
-    """
-    Delete all tracker entries for a specific user.
-
-    - **user_id**: The unique identifier of the user whose trackers should be deleted
-
-    This action cannot be undone and will remove all tracking data for the user.
-    """
-    authorize_resource_access(current_user, user_id, "user")
-    result = await db.execute(
-        select(Tracker).join(Habit).filter(Habit.user_id == user_id)
-    )
-    trackers_to_delete = result.scalars().all()
-    await db.execute(
-        delete(Tracker).where(Tracker.id.in_([t.id for t in trackers_to_delete]))
-    )
-
-    await db.commit()
-    return JSONResponse(
-        content={
-            "detail": f"Deleted {len(trackers_to_delete)} trackers for user {user_id}"
-        },
-        status_code=status.HTTP_200_OK,
-    )
-
-
-@router.delete("/habits", summary="Delete all habits for a user")
-async def delete_all_habits_for_user(
-    user_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> JSONResponse:
-    """
-    Delete all habits (and their associated trackers) for a specific user.
-
-    - **user_id**: The unique identifier of the user whose habits should be deleted
-
-    This action cannot be undone and will remove all habit and tracking data for the user.
-    """
-    authorize_resource_access(current_user, user_id, "user")
-    result = await db.execute(select(Habit).filter(Habit.user_id == user_id))
-    habits_to_delete = result.scalars().all()
-    for habit in habits_to_delete:
-        await db.delete(habit)  # Trackers are cascade deleted
-
-    await db.commit()
-    return JSONResponse(
-        content={
-            "detail": f"Deleted {len(habits_to_delete)} habits and their trackers for user {user_id}"
-        },
-        status_code=status.HTTP_200_OK,
-    )
 
 
 @router.get("/{user_id}", summary="Get a user by ID")
