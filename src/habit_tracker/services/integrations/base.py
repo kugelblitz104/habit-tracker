@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Callable, List, Protocol, runtime_checkable
 
+import httpx
+
 from habit_tracker.constants import IntegrationProvider
 from habit_tracker.schemas.db_models import IntegrationConnection
 
@@ -13,6 +15,31 @@ class IntegrationError(Exception):
     The router turns this into a 502 with the message, so keep messages
     user-facing ("Azure DevOps returned 401 Unauthorized — check the PAT").
     """
+
+
+def transport_error_message(
+    exc: httpx.HTTPError, provider: str, host: str | None = None
+) -> str:
+    """Turn a low-level httpx transport failure into a user-facing message.
+
+    A connect/DNS failure — the backend can't even reach the host — is the most
+    common on-prem misconfiguration, and httpx surfaces it as an opaque
+    ``[Errno -2] Name or service not known``. Name the host and point at the
+    real cause: the *server* running this app (not the user's browser) has to
+    reach the host, so an internal/on-prem endpoint needs network or VPN access
+    from wherever the backend is deployed.
+    """
+    where = f" at {host}" if host else ""
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return (
+            f"Couldn't reach {provider}{where}. Check the server URL, and note "
+            f"that the host must be reachable from the server running this app "
+            f"— an on-prem endpoint needs network/VPN access from the backend, "
+            f"not just from your browser."
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{provider} timed out{where}. The host may be slow or unreachable."
+    return f"{provider} request failed: {exc}"
 
 
 @dataclass

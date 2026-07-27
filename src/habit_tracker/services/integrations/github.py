@@ -5,7 +5,11 @@ from typing import List, Optional
 
 import httpx
 
-from habit_tracker.services.integrations.base import ExternalItem, IntegrationError
+from habit_tracker.services.integrations.base import (
+    ExternalItem,
+    IntegrationError,
+    transport_error_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,9 @@ class GitHubClient:
                 )
                 _raise_for_status(resp, "GitHub")
         except httpx.HTTPError as exc:
-            raise IntegrationError(f"GitHub request failed: {exc}") from exc
+            raise IntegrationError(
+                transport_error_message(exc, "GitHub", API_BASE)
+            ) from exc
 
         items: List[ExternalItem] = []
         for issue in resp.json()[:_MAX_ITEMS]:
@@ -77,7 +83,9 @@ class GitHubClient:
                 )
                 _raise_for_status(resp, "GitHub")
         except httpx.HTTPError as exc:
-            raise IntegrationError(f"GitHub request failed: {exc}") from exc
+            raise IntegrationError(
+                transport_error_message(exc, "GitHub", API_BASE)
+            ) from exc
 
         data = resp.json()
         number = data["number"]

@@ -7,7 +7,11 @@ from typing import List
 
 import httpx
 
-from habit_tracker.services.integrations.base import ExternalItem, IntegrationError
+from habit_tracker.services.integrations.base import (
+    ExternalItem,
+    IntegrationError,
+    transport_error_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +77,7 @@ class AzureDevOpsClient:
         # segments are appended the same way for both, so the resulting URLs
         # match what you'd see in the browser: {host}/{org}/{project}/_apis/...
         host = (base_url or "https://dev.azure.com").rstrip("/")
+        self.host = host
         self.org_base = f"{host}/{organization}"
         self.project_base = f"{self.org_base}/{project}"
 
@@ -107,7 +112,9 @@ class AzureDevOpsClient:
                 )
                 _raise_for_status(detail_resp, "Azure DevOps")
         except httpx.HTTPError as exc:
-            raise IntegrationError(f"Azure DevOps request failed: {exc}") from exc
+            raise IntegrationError(
+                transport_error_message(exc, "Azure DevOps", self.host)
+            ) from exc
 
         items: List[ExternalItem] = []
         for wi in detail_resp.json().get("value", []):
@@ -147,7 +154,9 @@ class AzureDevOpsClient:
                 )
                 _raise_for_status(resp, "Azure DevOps")
         except httpx.HTTPError as exc:
-            raise IntegrationError(f"Azure DevOps request failed: {exc}") from exc
+            raise IntegrationError(
+                transport_error_message(exc, "Azure DevOps", self.host)
+            ) from exc
 
         data = resp.json()
         wid = data["id"]
