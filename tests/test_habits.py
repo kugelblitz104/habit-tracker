@@ -1634,6 +1634,114 @@ class TestListHabitTrackersLite:
         assert response.status_code == 422
         assert "Invalid timezone" in response.json()["detail"]
 
+    async def _login(self, client, user):
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+    async def test_auto_skipped_dates_use_history_outside_the_window(
+        self, client, db_session, setup_factories
+    ):
+        """A completion BEFORE the requested range still auto-skips days in it.
+
+        This is the whole point of returning the flag from the server: a 4-day
+        window (the phone dashboard) holds no tracker rows at all here, yet all
+        four days are auto-skipped by a completion 5 days back. A client
+        computing this from the response's own `trackers` could never know.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=7)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=5))
+        await db_session.commit()
+
+        await self._login(client, user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["trackers"] == []  # nothing in the 4-day window
+        assert data["auto_skipped_dates"] == [
+            (date.today() - timedelta(days=offset)).isoformat()
+            for offset in (3, 2, 1, 0)
+        ]
+
+    async def test_auto_skipped_dates_empty_for_daily_habit(
+        self, client, db_session, setup_factories
+    ):
+        """frequency >= range: every day needs action, so nothing auto-skips."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=1)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1))
+        await db_session.commit()
+
+        await self._login(client, user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
+        assert response.status_code == 200
+        assert response.json()["auto_skipped_dates"] == []
+
+    async def test_auto_skipped_dates_ignore_skipped_trackers(
+        self, client, db_session, setup_factories
+    ):
+        """Only COMPLETED rows satisfy the goal - an explicit skip does not."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=7)
+        await db_session.commit()
+
+        TrackerFactory(
+            habit=habit,
+            dated=date.today() - timedelta(days=5),
+            status=TrackerStatus.SKIPPED,
+        )
+        await db_session.commit()
+
+        await self._login(client, user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
+        assert response.status_code == 200
+        assert response.json()["auto_skipped_dates"] == []
+
+    async def test_auto_skipped_dates_are_the_raw_date_predicate(
+        self, client, db_session, setup_factories
+    ):
+        """A date can be auto-skipped AND carry a completed row.
+
+        The endpoint reports the date-level predicate; letting an explicit row
+        win is the consumer's job (matches `calculate_streaks`).
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=7)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=5))
+        TrackerFactory(habit=habit, dated=date.today())
+        await db_session.commit()
+
+        await self._login(client, user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert date.today().isoformat() in data["auto_skipped_dates"]
+        assert [t["dated"] for t in data["trackers"]] == [date.today().isoformat()]
+
 
 class TestGetHabitKPIs:
     """Tests for GET /habits/{habit_id}/kpis endpoint."""

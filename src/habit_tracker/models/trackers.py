@@ -57,3 +57,6 @@ class TrackerLiteList(BaseModel):
     end_date: date
     days: int
     has_previous: bool = False  # Indicates if there are older trackers
+    auto_skipped_dates: List[date] = Field(
+        default_factory=list,
+    )

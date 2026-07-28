@@ -28,8 +28,13 @@ from habit_tracker.models import (
     TrackerLiteList,
     TrackerRead,
 )
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import User
-from habit_tracker.services.habit_stats import calculate_kpis, calculate_streaks
+from habit_tracker.services.habit_stats import (
+    calculate_kpis,
+    calculate_streaks,
+    is_auto_skipped,
+)
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -252,12 +257,16 @@ async def list_habit_trackers_lite(
     Use this for calendar views and streak calculations. Use the full trackers
     endpoint or fetch individual trackers when you need notes or timestamps.
 
+    Also returns **auto_skipped_dates** for the range, so callers can render a
+    day's status without fetching extra history to evaluate auto-skip
+    themselves.
+
     - **habit_id**: The unique identifier of the habit
     - **end_date**: End date for the range (defaults to today)
     - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
     - **tz**: Optional IANA timezone for the default end_date (invalid name -> 422)
     """
-    await get_owned_habit(db, habit_id, current_user)
+    habit = await get_owned_habit(db, habit_id, current_user)
 
     # Validate tz even when end_date is explicit so a typo never passes
     # silently
@@ -290,6 +299,29 @@ async def list_habit_trackers_lite(
     )
     has_previous = older_result.scalar() is not None
 
+    # Auto-skip for a day looks back over [day - range + 1, day), so the oldest
+    # day in this range needs completions from up to range - 1 days BEFORE
+    # start_date. Querying that here is what lets callers fetch only the days
+    # they actually render - the lookback never crosses the wire.
+    lookback_start = start_date - timedelta(days=habit.range - 1)
+    completed_result = await db.execute(
+        select(Tracker.dated)
+        .filter(Tracker.habit_id == habit_id)
+        .filter(Tracker.dated >= lookback_start)
+        .filter(Tracker.dated <= end_date)
+        .filter(Tracker.status == TrackerStatus.COMPLETED)
+    )
+    completed_dates = set(completed_result.scalars().all())
+
+    auto_skipped_dates = [
+        day
+        for day in (
+            start_date + timedelta(days=offset)
+            for offset in range((end_date - start_date).days + 1)
+        )
+        if is_auto_skipped(day, completed_dates, habit.frequency, habit.range)
+    ]
+
     # Convert to lite format with has_note flag
     trackers_lite = [
         TrackerLite(
@@ -307,6 +339,7 @@ async def list_habit_trackers_lite(
         end_date=end_date,
         days=days,
         has_previous=has_previous,
+        auto_skipped_dates=auto_skipped_dates,
     )
 
 

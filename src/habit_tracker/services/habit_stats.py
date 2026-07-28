@@ -172,16 +172,21 @@ def _completion_rate(
 
 def _weekday_completion_rates(
     completed_dates: set[date],
-    frequency: int,
-    range_: int,
     start: date,
     today: date,
 ) -> list[float]:
-    """Per-weekday completion rates over the overall window.
+    """Per-weekday completion share over the overall window.
 
     Returns a length-7 list indexed by ``date.weekday()`` (0 = Monday ...
-    6 = Sunday). For each weekday the expected completions are spread evenly
-    from the overall goal: ``day_count * frequency / range``.
+    6 = Sunday): the fraction of that weekday's occurrences actually marked
+    completed. Only completions count - skipped and auto-skipped days do not.
+
+    Deliberately NOT normalized by ``frequency / range`` the way
+    ``_completion_rate`` is. That normalization asks "did this weekday carry
+    its even share of the goal", which scales every bar by ``range /
+    frequency`` and saturates at ``1.0`` on the slightest activity - a 1x/7
+    habit touched 5 times on a Monday rendered as a near-full bar,
+    indistinguishable from a weekday completed every week.
     """
     totals = [0] * 7
     completed = [0] * 7
@@ -193,14 +198,9 @@ def _weekday_completion_rates(
             completed[wd] += 1
         day += timedelta(days=1)
 
-    rates: list[float] = []
-    for wd in range(7):
-        expected = totals[wd] * frequency / range_
-        if expected <= 0:
-            rates.append(0.0)
-        else:
-            rates.append(min(1.0, completed[wd] / expected))
-    return rates
+    return [
+        completed[wd] / totals[wd] if totals[wd] > 0 else 0.0 for wd in range(7)
+    ]
 
 
 def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> HabitKPIs:
@@ -240,9 +240,7 @@ def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> Ha
     overall_rate = _completion_rate(
         completed_dates, frequency, range_, start, today
     )
-    weekday_rates = _weekday_completion_rates(
-        completed_dates, frequency, range_, start, today
-    )
+    weekday_rates = _weekday_completion_rates(completed_dates, start, today)
 
     return HabitKPIs(
         total_completions=total_completions,
