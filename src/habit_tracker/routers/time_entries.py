@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -33,7 +33,7 @@ router = APIRouter(
 )
 
 
-def _naive(dt: Optional[datetime]) -> Optional[datetime]:
+def _naive(dt: datetime | None) -> datetime | None:
     """Coerce a datetime to naive server-local time.
 
     Every timestamp in this app is stored naive (like ``datetime.now()``), so
@@ -76,9 +76,9 @@ async def _validate_project(db: AsyncSession, project_id: int, profile_id: int) 
 async def _resolve_task_project(
     db: AsyncSession,
     profile_id: int,
-    task_id: Optional[int],
-    project_id: Optional[int],
-) -> tuple[Optional[int], Optional[int]]:
+    task_id: int | None,
+    project_id: int | None,
+) -> tuple[int | None, int | None]:
     """Validate and enforce task/project mutual exclusivity for a time entry.
 
     A task-attached entry derives its project from the task, so a direct
@@ -95,8 +95,8 @@ async def _resolve_task_project(
 
 
 async def _running_entry(
-    db: AsyncSession, profile_id: int, exclude_id: Optional[int] = None
-) -> Optional[TimeEntry]:
+    db: AsyncSession, profile_id: int, exclude_id: int | None = None
+) -> TimeEntry | None:
     """Return the profile's currently-running entry (ended_at IS NULL), if any.
 
     At most one timer may run per profile so the Today active-timer indicator
@@ -134,20 +134,18 @@ async def list_time_entries(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     profile_id: int = Query(description="The profile whose time entries to list"),
-    task_id: Optional[int] = Query(
-        default=None, description="Only entries for this task"
-    ),
-    project_id: Optional[int] = Query(
+    task_id: int | None = Query(default=None, description="Only entries for this task"),
+    project_id: int | None = Query(
         default=None,
         description=(
             "Only entries for this project: task-attached entries whose task "
             "belongs to the project, plus adhoc entries attached to it directly"
         ),
     ),
-    kind: Optional[int] = Query(
+    kind: int | None = Query(
         default=None, description="Only entries of this kind (0 stopwatch, 1 pomodoro)"
     ),
-    running: Optional[bool] = Query(
+    running: bool | None = Query(
         default=None,
         description="Filter to running (true) or completed (false) entries",
     ),
@@ -205,7 +203,11 @@ async def list_time_entries(
 
     def scoped(stmt):
         # Only join the task table when resolving a project filter.
-        return stmt.outerjoin(Task, TimeEntry.task_id == Task.id) if project_id is not None else stmt
+        return (
+            stmt.outerjoin(Task, TimeEntry.task_id == Task.id)
+            if project_id is not None
+            else stmt
+        )
 
     count_result = await db.execute(
         scoped(select(func.count(TimeEntry.id)).select_from(TimeEntry)).filter(*filters)
@@ -229,9 +231,7 @@ async def list_time_entries(
     )
 
 
-@router.post(
-    "/", status_code=status.HTTP_201_CREATED, summary="Create a time entry"
-)
+@router.post("/", status_code=status.HTTP_201_CREATED, summary="Create a time entry")
 async def create_time_entry(
     entry: TimeEntryCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -308,7 +308,7 @@ async def read_active_time_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     profile_id: int = Query(description="The profile whose running timer to fetch"),
-) -> Optional[TimeEntryRead]:
+) -> TimeEntryRead | None:
     """
     Return the profile's currently-running time entry (the one with no
     ended_at), or null when nothing is running. Powers the Today view's
@@ -359,9 +359,7 @@ async def time_entry_summary(
     ).all()
 
     per_task = [
-        TaskTimeSummary(
-            task_id=row[0], total_seconds=int(row[1]), entry_count=row[2]
-        )
+        TaskTimeSummary(task_id=row[0], total_seconds=int(row[1]), entry_count=row[2])
         for row in task_rows
     ]
     total = sum(item.total_seconds for item in per_task)
@@ -485,10 +483,8 @@ async def patch_time_entry(
                 db, entry.profile_id, None, data["project_id"]
             )
         else:
-            target_task = data["task_id"] if "task_id" in data else entry.task_id
-            target_project = (
-                data["project_id"] if "project_id" in data else entry.project_id
-            )
+            target_task = data.get("task_id", entry.task_id)
+            target_project = data.get("project_id", entry.project_id)
             resolved_task, resolved_project = await _resolve_task_project(
                 db, entry.profile_id, target_task, target_project
             )

@@ -26,7 +26,9 @@ load_dotenv()
 # Explicit allowed origins (e.g. the deployed frontend) come from the env var.
 # Filter out empty strings so an unset/blank CORS_ORIGINS doesn't become [""],
 # which matches no origin and silently blocks every browser request.
-CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

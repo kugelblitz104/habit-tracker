@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from pydantic import BaseModel, ValidationInfo, field_validator
 
 from habit_tracker.models._base import _StampedRead
@@ -15,7 +13,7 @@ class ProjectBase(BaseModel):
     profile_id: int
     name: str
     color: str
-    notes: Optional[str] = None
+    notes: str | None = None
     archived: bool = False
 
     @field_validator("name")
@@ -39,11 +37,11 @@ class ProjectRead(_StampedRead, ProjectBase):
 
 
 class ProjectUpdate(BaseModel):
-    profile_id: Optional[int] = None
-    name: Optional[str] = None
-    color: Optional[str] = None
-    notes: Optional[str] = None
-    archived: Optional[bool] = None
+    profile_id: int | None = None
+    name: str | None = None
+    color: str | None = None
+    notes: str | None = None
+    archived: bool | None = None
 
     @field_validator("profile_id", "name", "color", "archived")
     @classmethod
@@ -52,17 +50,17 @@ class ProjectUpdate(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Name")
 
     @field_validator("color")
     @classmethod
-    def validate_color(cls, v: Optional[str]) -> Optional[str]:
+    def validate_color(cls, v: str | None) -> str | None:
         return validate_hex_color(v)
 
 
 class ProjectList(BaseModel):
-    projects: List[ProjectRead] = []
+    projects: list[ProjectRead] = []
     total: int
     limit: int
     offset: int

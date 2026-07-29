@@ -1,5 +1,7 @@
 """Tests for authentication endpoints."""
 
+from datetime import UTC
+
 from sqlalchemy import select
 
 from habit_tracker.core.security import verify_password
@@ -54,9 +56,7 @@ class TestUserRegistration:
         assert response.status_code == 400
         assert "Email already registered" in response.json()["detail"]
 
-    async def test_register_duplicate_username(
-        self, client, db_session
-    ):
+    async def test_register_duplicate_username(self, client, db_session):
         """Reject registration with existing username (400)."""
         UserFactory(username="existinguser")
         await db_session.commit()
@@ -298,12 +298,10 @@ class TestTokenRefresh:
         assert response.status_code == 401
         assert "Invalid refresh token" in response.json()["detail"]
 
-    async def test_refresh_with_expired_token(
-        self, client, db_session
-    ):
+    async def test_refresh_with_expired_token(self, client, db_session):
         """Reject refresh with expired token (401)."""
         # Create an expired token manually
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         import jwt
 
@@ -317,7 +315,7 @@ class TestTokenRefresh:
             {
                 "sub": str(user.id),
                 "type": "refresh",
-                "exp": datetime.now(timezone.utc) - timedelta(days=1),
+                "exp": datetime.now(UTC) - timedelta(days=1),
             },
             settings.secret_key,
             algorithm=settings.algorithm,
@@ -342,9 +340,7 @@ class TestTokenRefresh:
 class TestForgotPassword:
     """Tests for /auth/forgot-password endpoint."""
 
-    async def test_forgot_password_existing_email(
-        self, client, db_session
-    ):
+    async def test_forgot_password_existing_email(self, client, db_session):
         """A registered email gets the generic 200 response."""
         user = UserFactory(email="real@example.com")
         await db_session.commit()
@@ -423,11 +419,9 @@ class TestResetPassword:
         assert response.status_code == 400
         assert "Invalid or expired reset token" in response.json()["detail"]
 
-    async def test_reset_password_expired_token(
-        self, client, db_session
-    ):
+    async def test_reset_password_expired_token(self, client, db_session):
         """An expired reset token is rejected (400)."""
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         import jwt
 
@@ -440,7 +434,7 @@ class TestResetPassword:
             {
                 "sub": str(user.id),
                 "type": "reset",
-                "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+                "exp": datetime.now(UTC) - timedelta(minutes=1),
             },
             settings.secret_key,
             algorithm=settings.algorithm,

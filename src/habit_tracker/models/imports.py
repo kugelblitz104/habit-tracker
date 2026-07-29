@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import BaseModel
 
 
@@ -20,8 +18,8 @@ class ImportResult(BaseModel):
     trackers_imported: int
     habits_skipped: int
     trackers_skipped: int
-    details: List[ImportedHabitSummary] = []
-    errors: List[str] = []
+    details: list[ImportedHabitSummary] = []
+    errors: list[str] = []
 
 
 class ExportResult(BaseModel):

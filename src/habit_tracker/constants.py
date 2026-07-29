@@ -1,4 +1,5 @@
 """Constants used across the application."""
+
 from datetime import date, timedelta
 from enum import Enum
 

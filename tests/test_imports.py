@@ -4,7 +4,7 @@ import base64
 import os
 import sqlite3
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select
 
@@ -20,14 +20,12 @@ from tests.factories import (
 
 def loop_timestamp(day: date) -> int:
     """Milliseconds since epoch at midnight UTC — Loop's repetition format."""
-    return int(
-        datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000
-    )
+    return int(datetime(day.year, day.month, day.day, tzinfo=UTC).timestamp() * 1000)
 
 
 def timestamp_to_day(timestamp_ms: int) -> date:
     """Decode a Loop repetition timestamp (midnight-UTC ms) to its date."""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).date()
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=UTC).date()
 
 
 def read_export_rows(payload: dict, query: str) -> list[sqlite3.Row]:
@@ -132,9 +130,7 @@ def upload(content: bytes, filename: str = "loop.db") -> dict:
 class TestImportFromLoopHabitTracker:
     """Tests for POST /import/loop-habit-tracker."""
 
-    async def test_import_defaults_to_oldest_profile(
-        self, client, db_session
-    ):
+    async def test_import_defaults_to_oldest_profile(self, client, db_session):
         """Without profile_id, habits land in the user's default profile."""
         user = UserFactory()
         await db_session.commit()
@@ -146,7 +142,9 @@ class TestImportFromLoopHabitTracker:
                 {"habit": 1, "timestamp": loop_timestamp(date(2025, 6, 1)), "value": 2}
             ],
         )
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["success"] is True
@@ -157,9 +155,7 @@ class TestImportFromLoopHabitTracker:
         assert habit.user_id == user.id
         assert habit.profile_id == user.profiles[0].id
 
-    async def test_import_into_explicit_profile(
-        self, client, db_session
-    ):
+    async def test_import_into_explicit_profile(self, client, db_session):
         """profile_id targets a specific profile and sort_order appends there."""
         user = UserFactory()
         second_profile = ProfileFactory(user=user)
@@ -189,9 +185,7 @@ class TestImportFromLoopHabitTracker:
         # Appended after the profile's existing max sort_order
         assert [h.sort_order for h in imported] == [8, 9]
 
-    async def test_import_rejects_foreign_profile(
-        self, client, db_session
-    ):
+    async def test_import_rejects_foreign_profile(self, client, db_session):
         """Importing into another user's profile is a 400."""
         user = UserFactory()
         other = UserFactory()
@@ -206,9 +200,7 @@ class TestImportFromLoopHabitTracker:
         )
         assert response.status_code == 400
 
-    async def test_import_preserves_full_history(
-        self, client, db_session
-    ):
+    async def test_import_preserves_full_history(self, client, db_session):
         """Repetitions years in the past import with exact dates (UTC decode)."""
         user = UserFactory()
         await db_session.commit()
@@ -222,7 +214,9 @@ class TestImportFromLoopHabitTracker:
                 for d in old_days
             ],
         )
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["trackers_imported"] == len(old_days)
@@ -235,9 +229,7 @@ class TestImportFromLoopHabitTracker:
         )
         assert list(result.scalars().all()) == old_days
 
-    async def test_import_maps_loop_values_to_status(
-        self, client, db_session
-    ):
+    async def test_import_maps_loop_values_to_status(self, client, db_session):
         """0 not imported; 1 and 3 -> SKIPPED; 2 and numeric -> COMPLETED."""
         user = UserFactory()
         await db_session.commit()
@@ -257,7 +249,9 @@ class TestImportFromLoopHabitTracker:
                 for d, v in cases.items()
             ],
         )
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 201
         data = response.json()
         assert data["trackers_imported"] == 4
@@ -275,9 +269,7 @@ class TestImportFromLoopHabitTracker:
         assert statuses[date(2025, 1, 4)] == TrackerStatus.SKIPPED
         assert statuses[date(2025, 1, 5)] == TrackerStatus.COMPLETED
 
-    async def test_import_dedupes_same_day_repetitions(
-        self, client, db_session
-    ):
+    async def test_import_dedupes_same_day_repetitions(self, client, db_session):
         """Two repetitions on the same date keep only the first."""
         user = UserFactory()
         await db_session.commit()
@@ -291,14 +283,14 @@ class TestImportFromLoopHabitTracker:
                 {"habit": 1, "timestamp": loop_timestamp(day) + 1, "value": 2},
             ],
         )
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 201
         assert response.json()["trackers_imported"] == 1
         assert response.json()["trackers_skipped"] == 1
 
-    async def test_import_rejects_wrong_extension(
-        self, client, db_session
-    ):
+    async def test_import_rejects_wrong_extension(self, client, db_session):
         user = UserFactory()
         await db_session.commit()
         await login(client, user)
@@ -308,9 +300,7 @@ class TestImportFromLoopHabitTracker:
         )
         assert response.status_code == 400
 
-    async def test_import_rejects_non_loop_database(
-        self, client, db_session
-    ):
+    async def test_import_rejects_non_loop_database(self, client, db_session):
         """A valid SQLite file without Loop's tables is a 400."""
         user = UserFactory()
         await db_session.commit()
@@ -323,27 +313,31 @@ class TestImportFromLoopHabitTracker:
             conn.execute("CREATE TABLE Unrelated (id INTEGER PRIMARY KEY)")
             conn.commit()
             conn.close()
-            with open(path, "rb") as f:
+            # Tiny local temp-file read in test setup, alongside the equally
+            # blocking sqlite3 calls above - not worth threaded/async I/O.
+            with open(path, "rb") as f:  # noqa: ASYNC230
                 content = f.read()
         finally:
             os.unlink(path)
 
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 400
         assert "Habits" in response.json()["detail"]
 
     async def test_import_requires_auth(self, client, db_session):
         content = build_loop_db(habits=[], repetitions=[])
-        response = await client.post("/import/loop-habit-tracker", files=upload(content))
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
         assert response.status_code == 401
 
 
 class TestExportToLoopHabitTracker:
     """Tests for GET /import/loop-habit-tracker."""
 
-    async def test_export_filters_by_profile(
-        self, client, db_session
-    ):
+    async def test_export_filters_by_profile(self, client, db_session):
         """profile_id exports only that profile's habits."""
         user = UserFactory()
         second_profile = ProfileFactory(user=user)
@@ -360,9 +354,7 @@ class TestExportToLoopHabitTracker:
         rows = read_export_rows(response.json(), "SELECT name FROM Habits")
         assert [r["name"] for r in rows] == ["Second profile habit"]
 
-    async def test_export_rejects_foreign_profile(
-        self, client, db_session
-    ):
+    async def test_export_rejects_foreign_profile(self, client, db_session):
         user = UserFactory()
         other = UserFactory()
         await db_session.commit()
@@ -373,14 +365,14 @@ class TestExportToLoopHabitTracker:
         )
         assert response.status_code == 403
 
-    async def test_export_writes_loop2_skip_values(
-        self, client, db_session
-    ):
+    async def test_export_writes_loop2_skip_values(self, client, db_session):
         """SKIPPED exports as Loop 2.x's 3; COMPLETED as 2."""
         user = UserFactory()
         habit = HabitFactory(user=user)
         TrackerFactory(habit=habit, dated=date(2025, 4, 1))
-        TrackerFactory(habit=habit, dated=date(2025, 4, 2), status=TrackerStatus.SKIPPED)
+        TrackerFactory(
+            habit=habit, dated=date(2025, 4, 2), status=TrackerStatus.SKIPPED
+        )
         await db_session.commit()
         await login(client, user)
 
@@ -394,15 +386,15 @@ class TestExportToLoopHabitTracker:
         assert values[date(2025, 4, 1)] == 2
         assert values[date(2025, 4, 2)] == 3
 
-    async def test_export_import_round_trip(
-        self, client, db_session
-    ):
+    async def test_export_import_round_trip(self, client, db_session):
         """An exported file imports back with identical dates and statuses."""
         user = UserFactory()
         target_profile = ProfileFactory(user=user)
         habit = HabitFactory(user=user, name="Round trip", color="#1976D2")
         TrackerFactory(habit=habit, dated=date(2023, 11, 5))
-        TrackerFactory(habit=habit, dated=date(2024, 8, 20), status=TrackerStatus.SKIPPED)
+        TrackerFactory(
+            habit=habit, dated=date(2024, 8, 20), status=TrackerStatus.SKIPPED
+        )
         await db_session.commit()
         await login(client, user)
 

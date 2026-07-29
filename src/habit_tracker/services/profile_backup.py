@@ -16,8 +16,8 @@ each foreign key resolves against rows created earlier in the same call:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -175,7 +175,7 @@ def build_profile_backup(
 ) -> ProfileBackup:
     """Assemble the portable backup document from loaded ORM rows (pure)."""
     return ProfileBackup(
-        exported_at=exported_at or datetime.now(timezone.utc),
+        exported_at=exported_at or datetime.now(UTC),
         profile=ProfileSettings.model_validate(profile),
         projects=[ProjectBackup.model_validate(p) for p in projects],
         tasks=[TaskBackup.model_validate(t) for t in tasks],
@@ -200,9 +200,7 @@ async def _unique_profile_name(db: AsyncSession, user_id: int, desired: str) -> 
     "(imported 2)", "(imported 3)", … so re-importing the same backup never
     collides.
     """
-    result = await db.execute(
-        select(Profile.name).where(Profile.user_id == user_id)
-    )
+    result = await db.execute(select(Profile.name).where(Profile.user_id == user_id))
     existing = {name for (name,) in result.all()}
     if desired not in existing:
         return desired
@@ -224,8 +222,7 @@ async def restore_profile_backup(
     """
     if backup.format != BACKUP_FORMAT:
         raise BackupError(
-            f"Unrecognized backup format {backup.format!r}; "
-            f"expected {BACKUP_FORMAT!r}."
+            f"Unrecognized backup format {backup.format!r}; expected {BACKUP_FORMAT!r}."
         )
     if backup.version > BACKUP_VERSION:
         raise BackupError(
@@ -270,7 +267,11 @@ async def restore_profile_backup(
     for item in parents:
         row = Task(
             profile_id=profile.id,
-            project_id=project_map.get(item.project_id),
+            project_id=(
+                project_map.get(item.project_id)
+                if item.project_id is not None
+                else None
+            ),
             parent_id=None,
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
@@ -281,7 +282,13 @@ async def restore_profile_backup(
         task_map[item.id] = row.id
         tasks_imported += 1
     for item in children:
-        parent_new_id = task_map.get(item.parent_id)
+        # item.parent_id is never None here (children was filtered above),
+        # but TaskBackup.parent_id is typed int | None; the ternary narrows
+        # it for basedpyright without changing behavior (task_map.get(None)
+        # would already return None, same as the else branch below).
+        parent_new_id = (
+            task_map.get(item.parent_id) if item.parent_id is not None else None
+        )
         if parent_new_id is None:
             # Parent missing from the backup (shouldn't happen) — keep the
             # subtask rather than drop it, promoted to top level.
@@ -291,7 +298,11 @@ async def restore_profile_backup(
             )
         row = Task(
             profile_id=profile.id,
-            project_id=project_map.get(item.project_id),
+            project_id=(
+                project_map.get(item.project_id)
+                if item.project_id is not None
+                else None
+            ),
             parent_id=parent_new_id,
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
@@ -335,8 +346,12 @@ async def restore_profile_backup(
     for item in backup.time_entries:
         row = TimeEntry(
             profile_id=profile.id,
-            task_id=task_map.get(item.task_id),
-            project_id=project_map.get(item.project_id),
+            task_id=(task_map.get(item.task_id) if item.task_id is not None else None),
+            project_id=(
+                project_map.get(item.project_id)
+                if item.project_id is not None
+                else None
+            ),
             **item.model_dump(
                 exclude={"id", "task_id", "project_id"}, exclude_none=True
             ),
@@ -347,7 +362,7 @@ async def restore_profile_backup(
     for item in backup.countdowns:
         row = Countdown(
             profile_id=profile.id,
-            task_id=task_map.get(item.task_id),
+            task_id=(task_map.get(item.task_id) if item.task_id is not None else None),
             **item.model_dump(exclude={"id", "task_id"}, exclude_none=True),
         )
         db.add(row)

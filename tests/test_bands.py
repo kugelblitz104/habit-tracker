@@ -15,8 +15,7 @@ class TestHiddenBand:
 
     def test_cancelled_is_hidden(self):
         assert (
-            compute_band(TaskStatus.CANCELLED, 0, None, today=TODAY)
-            == TaskBand.HIDDEN
+            compute_band(TaskStatus.CANCELLED, 0, None, today=TODAY) == TaskBand.HIDDEN
         )
 
     def test_done_with_due_today_is_hidden(self):
@@ -33,9 +32,7 @@ class TestHiddenBand:
     def test_scheduled_ignored_when_done(self):
         """A scheduled date does not un-hide a done task."""
         assert (
-            compute_band(
-                TaskStatus.DONE, 0, None, scheduled_date=TODAY, today=TODAY
-            )
+            compute_band(TaskStatus.DONE, 0, None, scheduled_date=TODAY, today=TODAY)
             == TaskBand.HIDDEN
         )
 
@@ -55,8 +52,7 @@ class TestDeferredBand:
 
     def test_deferred_no_signals_is_whenever(self):
         assert (
-            compute_band(TaskStatus.DEFERRED, 0, None, today=TODAY)
-            == TaskBand.WHENEVER
+            compute_band(TaskStatus.DEFERRED, 0, None, today=TODAY) == TaskBand.WHENEVER
         )
 
     def test_deferred_due_today_is_whenever(self):
@@ -67,8 +63,7 @@ class TestDeferredBand:
 
     def test_deferred_priority_3_is_whenever(self):
         assert (
-            compute_band(TaskStatus.DEFERRED, 3, None, today=TODAY)
-            == TaskBand.WHENEVER
+            compute_band(TaskStatus.DEFERRED, 3, None, today=TODAY) == TaskBand.WHENEVER
         )
 
     def test_deferred_scheduled_today_is_whenever(self):
@@ -89,8 +84,7 @@ class TestDeferredBand:
     def test_deferred_is_not_hidden(self):
         """Deferred is still active - only done/cancelled are hidden."""
         assert (
-            compute_band(TaskStatus.DEFERRED, 0, None, today=TODAY)
-            != TaskBand.HIDDEN
+            compute_band(TaskStatus.DEFERRED, 0, None, today=TODAY) != TaskBand.HIDDEN
         )
 
 
@@ -114,16 +108,12 @@ class TestNowBand:
     def test_priority_3_due_far_future_is_now(self):
         """Priority 3 wins even if the due date alone would be 'whenever'."""
         far_future = TODAY + timedelta(days=30)
-        assert (
-            compute_band(TaskStatus.OPEN, 3, far_future, today=TODAY) == TaskBand.NOW
-        )
+        assert compute_band(TaskStatus.OPEN, 3, far_future, today=TODAY) == TaskBand.NOW
 
     def test_blocked_status_does_not_change_band(self):
         """blocked status does not alter the band."""
         assert compute_band(TaskStatus.BLOCKED, 0, TODAY, today=TODAY) == TaskBand.NOW
-        assert (
-            compute_band(TaskStatus.BLOCKED, 3, None, today=TODAY) == TaskBand.NOW
-        )
+        assert compute_band(TaskStatus.BLOCKED, 3, None, today=TODAY) == TaskBand.NOW
 
 
 class TestSoonBand:
@@ -131,16 +121,12 @@ class TestSoonBand:
 
     def test_due_tomorrow_is_soon(self):
         tomorrow = TODAY + timedelta(days=1)
-        assert (
-            compute_band(TaskStatus.OPEN, 0, tomorrow, today=TODAY) == TaskBand.SOON
-        )
+        assert compute_band(TaskStatus.OPEN, 0, tomorrow, today=TODAY) == TaskBand.SOON
 
     def test_due_today_plus_7_is_soon(self):
         """Boundary: exactly 7 days out is still 'soon'."""
         boundary = TODAY + timedelta(days=7)
-        assert (
-            compute_band(TaskStatus.OPEN, 0, boundary, today=TODAY) == TaskBand.SOON
-        )
+        assert compute_band(TaskStatus.OPEN, 0, boundary, today=TODAY) == TaskBand.SOON
 
     def test_priority_2_no_due_date_is_soon(self):
         assert compute_band(TaskStatus.OPEN, 2, None, today=TODAY) == TaskBand.SOON
@@ -163,14 +149,10 @@ class TestWheneverBand:
         )
 
     def test_priority_0_no_due_date_is_whenever(self):
-        assert (
-            compute_band(TaskStatus.OPEN, 0, None, today=TODAY) == TaskBand.WHENEVER
-        )
+        assert compute_band(TaskStatus.OPEN, 0, None, today=TODAY) == TaskBand.WHENEVER
 
     def test_priority_1_no_due_date_is_whenever(self):
-        assert (
-            compute_band(TaskStatus.OPEN, 1, None, today=TODAY) == TaskBand.WHENEVER
-        )
+        assert compute_band(TaskStatus.OPEN, 1, None, today=TODAY) == TaskBand.WHENEVER
 
     def test_in_progress_no_signals_is_whenever(self):
         assert (
@@ -184,9 +166,7 @@ class TestScheduledDateBand:
 
     def test_scheduled_today_is_now(self):
         assert (
-            compute_band(
-                TaskStatus.OPEN, 0, None, scheduled_date=TODAY, today=TODAY
-            )
+            compute_band(TaskStatus.OPEN, 0, None, scheduled_date=TODAY, today=TODAY)
             == TaskBand.NOW
         )
 
@@ -216,9 +196,7 @@ class TestEffectiveDateEarliestWins:
         """Scheduled today beats a far-off due date -> now."""
         due = TODAY + timedelta(days=10)
         assert (
-            compute_band(
-                TaskStatus.OPEN, 0, due, scheduled_date=TODAY, today=TODAY
-            )
+            compute_band(TaskStatus.OPEN, 0, due, scheduled_date=TODAY, today=TODAY)
             == TaskBand.NOW
         )
 

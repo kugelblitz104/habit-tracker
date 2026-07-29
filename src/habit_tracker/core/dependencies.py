@@ -1,17 +1,17 @@
 import logging
 from datetime import date, datetime
-from typing import Annotated, Optional, Protocol, TypeVar
+from typing import Annotated, Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped
 
+from habit_tracker.core.security import decode_token
 from habit_tracker.database import SessionLocal
 from habit_tracker.schemas.db_models import Habit, Profile, User
-from habit_tracker.core.security import decode_token
 
 logger = logging.getLogger(__name__)
 
@@ -206,9 +206,22 @@ async def authorize_parent_profile(
 
     Raises:
         HTTPException: 403 if the caller is neither the profile's owner nor
-        an admin
+        an admin, or (in practice unreachable - see above) 500 if the child
+        row's profile_id doesn't actually reference an existing profile
     """
     profile = await db.get(Profile, profile_id)
+    if profile is None:
+        # The FK is supposed to make this impossible; if it ever fires, a
+        # clear 500 beats an AttributeError on profile.user_id below.
+        logger.error(
+            "authorize_parent_profile: profile_id=%s has no matching Profile "
+            "row despite an FK reference to it",
+            profile_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Referenced profile is missing",
+        )
     authorize_resource_access(current_user, profile.user_id, resource_name)
     return profile
 
@@ -260,7 +273,7 @@ async def get_owned_child(
 
 
 async def resolve_habit_profile_id(
-    db: AsyncSession, owner_user_id: int, profile_id: Optional[int]
+    db: AsyncSession, owner_user_id: int, profile_id: int | None
 ) -> int:
     """Resolve the profile a habit should belong to.
 
@@ -296,9 +309,7 @@ async def resolve_habit_profile_id(
     return default_profile.id
 
 
-async def get_owned_habit(
-    db: AsyncSession, habit_id: int, current_user: User
-) -> Habit:
+async def get_owned_habit(db: AsyncSession, habit_id: int, current_user: User) -> Habit:
     """
     Fetch a habit by ID and authorize the caller against its owner.
 
@@ -326,7 +337,7 @@ async def get_owned_habit(
     return habit
 
 
-def resolve_timezone(tz: Optional[str]) -> Optional[ZoneInfo]:
+def resolve_timezone(tz: str | None) -> ZoneInfo | None:
     """
     Resolve an optional IANA timezone name (e.g. "America/New_York") from a
     query parameter into a ZoneInfo.
@@ -356,7 +367,7 @@ def resolve_timezone(tz: Optional[str]) -> Optional[ZoneInfo]:
         )
 
 
-def resolve_today(tz: Optional[str]) -> date:
+def resolve_today(tz: str | None) -> date:
     """
     Return "today" for an optional IANA timezone query parameter.
 

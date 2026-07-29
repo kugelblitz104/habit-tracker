@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from passlib.context import CryptContext
@@ -25,9 +25,7 @@ def create_access_token(
 ):
     data_to_encode = data.copy()
 
-    data_to_encode.update(
-        {"exp": datetime.now(timezone.utc) + expires_delta, "type": "access"}
-    )
+    data_to_encode.update({"exp": datetime.now(UTC) + expires_delta, "type": "access"})
 
     logger.debug("Creating access token")
 
@@ -40,9 +38,7 @@ def create_access_token(
 def create_refresh_token(data: dict):
     data_to_encode = data.copy()
 
-    expire = datetime.now(timezone.utc) + timedelta(
-        days=settings.refresh_token_expiry_days
-    )
+    expire = datetime.now(UTC) + timedelta(days=settings.refresh_token_expiry_days)
 
     data_to_encode.update({"exp": expire, "type": "refresh"})
 
@@ -52,9 +48,7 @@ def create_refresh_token(data: dict):
 def create_reset_token(data: dict):
     data_to_encode = data.copy()
 
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.reset_token_expiry_minutes
-    )
+    expire = datetime.now(UTC) + timedelta(minutes=settings.reset_token_expiry_minutes)
 
     data_to_encode.update({"exp": expire, "type": "reset"})
 
@@ -73,8 +67,10 @@ def decode_token(token: str):
         logger.warning("Token has expired")
         return None
     except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid token: {str(e)}")
+        logger.warning(f"Invalid token: {e!s}")
         return None
-    except Exception as e:
-        logger.error(f"Token decoding failed: {str(e)}")
+    except Exception as e:  # noqa: BLE001 - final safety net after the two
+        # specific jwt exception types; decode_token must never raise for
+        # any caller, so anything unexpected also degrades to "no user".
+        logger.error(f"Token decoding failed: {e!s}")
         return None

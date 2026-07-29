@@ -2,8 +2,6 @@
 
 from datetime import date, timedelta
 
-import pytest
-
 from habit_tracker.constants import TrackerStatus
 from tests.factories import (
     AdminUserFactory,
@@ -52,9 +50,7 @@ class TestUserOnboardingFlow:
         response = await shared_client.get("/users/")
         assert response.status_code == 200
 
-    async def test_user_creates_first_habit(
-        self, shared_client, shared_db_session
-    ):
+    async def test_user_creates_first_habit(self, shared_client, shared_db_session):
         """New user creates their first habit."""
         # Register and login
         await shared_client.post(
@@ -140,10 +136,7 @@ class TestUserOnboardingFlow:
 class TestHabitTrackingFlow:
     """Tests for habit tracking workflows."""
 
-    @pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
-    async def test_daily_habit_completion_flow(
-        self, client, db_session, login_as
-    ):
+    async def test_daily_habit_completion_flow(self, client, db_session, login_as):
         """Create habit, mark complete, verify KPIs."""
         user = UserFactory()
         await db_session.commit()
@@ -215,9 +208,7 @@ class TestHabitTrackingFlow:
         data = habit_response.json()
         assert data["skipped_today"] is True
 
-    async def test_habit_archive_unarchive_flow(
-        self, client, db_session, login_as
-    ):
+    async def test_habit_archive_unarchive_flow(self, client, db_session, login_as):
         """Archive and unarchive habit."""
         user = UserFactory()
         await db_session.commit()
@@ -244,13 +235,10 @@ class TestHabitTrackingFlow:
         assert unarchive_response.json()["archived"] is False
 
 
-@pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
 class TestStreakBuildingFlow:
     """Tests for streak building workflows."""
 
-    async def test_build_streak_consecutive_days(
-        self, client, db_session, login_as
-    ):
+    async def test_build_streak_consecutive_days(self, client, db_session, login_as):
         """Build streak over consecutive days."""
         user = UserFactory()
         await db_session.commit()
@@ -275,9 +263,7 @@ class TestStreakBuildingFlow:
         streaks = streaks_response.json()
         assert len(streaks) >= 1
 
-    async def test_build_streak_with_frequency(
-        self, client, db_session, login_as
-    ):
+    async def test_build_streak_with_frequency(self, client, db_session, login_as):
         """Build streak with frequency > 1."""
         user = UserFactory()
         await db_session.commit()
@@ -311,9 +297,7 @@ class TestStreakBuildingFlow:
 class TestMultiUserScenarios:
     """Tests for multi-user scenarios."""
 
-    async def test_multiple_users_isolated_data(
-        self, client, db_session, login_as
-    ):
+    async def test_multiple_users_isolated_data(self, client, db_session, login_as):
         """Verify user data isolation."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -334,9 +318,7 @@ class TestMultiUserScenarios:
         response = await client.get(f"/habits/{habit2.id}")
         assert response.status_code == 403
 
-    async def test_admin_manages_multiple_users(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_manages_multiple_users(self, client, db_session, login_as):
         """Admin can manage multiple users."""
         admin = AdminUserFactory()
         user1 = UserFactory()

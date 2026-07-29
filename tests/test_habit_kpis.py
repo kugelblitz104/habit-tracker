@@ -50,9 +50,7 @@ class TestGetHabitKPIs:
         assert data["last_completed_date"] is None
         assert data["weekday_completion_rates"] == [0.0] * 7
 
-    async def test_get_habit_kpis_unauthorized(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_kpis_unauthorized(self, client, db_session, login_as):
         """User cannot access other's habit KPIs (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -66,9 +64,7 @@ class TestGetHabitKPIs:
         response = await client.get(f"/habits/{habit.id}/kpis")
         assert response.status_code == 403
 
-    async def test_get_habit_kpis_invalid_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_kpis_invalid_tz(self, client, db_session, login_as):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()
@@ -84,9 +80,7 @@ class TestGetHabitKPIs:
         assert response.status_code == 422
         assert "Invalid timezone" in response.json()["detail"]
 
-    async def test_get_habit_kpis_tz_shifts_today(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_kpis_tz_shifts_today(self, client, db_session, login_as):
         """current_streak is computed against "today" in the requested zone.
 
         Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
@@ -143,9 +137,7 @@ class TestGetHabitStreaks:
         data = response.json()
         assert len(data) == 0
 
-    async def test_get_habit_streaks_single_streak(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_streaks_single_streak(self, client, db_session, login_as):
         """Single continuous streak."""
         user = UserFactory()
         await db_session.commit()
@@ -168,9 +160,7 @@ class TestGetHabitStreaks:
         data = response.json()
         assert len(data) >= 1
 
-    async def test_get_habit_streaks_with_skips(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_streaks_with_skips(self, client, db_session, login_as):
         """Streaks including skipped days."""
         user = UserFactory()
         await db_session.commit()
@@ -178,9 +168,7 @@ class TestGetHabitStreaks:
         habit = HabitFactory(user=user, frequency=1, range=1)
         await db_session.commit()
 
-        TrackerFactory(
-            habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED
-        )
+        TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED)
         TrackerFactory(
             habit=habit,
             dated=date.today() - timedelta(days=1),
@@ -198,9 +186,7 @@ class TestGetHabitStreaks:
         response = await client.get(f"/habits/{habit.id}/streaks")
         assert response.status_code == 200
 
-    async def test_get_habit_streaks_unauthorized(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_streaks_unauthorized(self, client, db_session, login_as):
         """User cannot access other's habit streaks (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -214,9 +200,7 @@ class TestGetHabitStreaks:
         response = await client.get(f"/habits/{habit.id}/streaks")
         assert response.status_code == 403
 
-    async def test_get_habit_streaks_invalid_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_streaks_invalid_tz(self, client, db_session, login_as):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()
@@ -232,9 +216,7 @@ class TestGetHabitStreaks:
         assert response.status_code == 422
         assert "Invalid timezone" in response.json()["detail"]
 
-    async def test_get_habit_streaks_honors_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_streaks_honors_tz(self, client, db_session, login_as):
         """Streaks run through "today" in the requested zone.
 
         A daily habit with a single tracker dated "today" in the requested

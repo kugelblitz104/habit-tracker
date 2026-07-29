@@ -44,9 +44,41 @@ dev = ["ruff>=0.14", "basedpyright>=1.31"]
 line-length = 88
 src = ["src", "tests"]
 
+[tool.ruff.lint]
+ignore = [
+    # DTZ011/DTZ005/DTZ001/DTZ901 - this API deliberately stores and
+    # serialises NAIVE datetimes: FastAPI/Pydantic emit them with no
+    # timezone designator, and the front-end's `parseServerDate` appends
+    # "Z" itself precisely because of that contract (see the front-end's
+    # src/lib/date-utils.ts). Making these tz-aware would change the wire
+    # format and break the client. Timezone handling is done explicitly
+    # where it matters, via core/dependencies.py's `resolve_timezone` /
+    # `resolve_today` and the `tz` query param - not by making every stored
+    # timestamp aware.
+    "DTZ011",
+    "DTZ005",
+    "DTZ001",
+    "DTZ901",
+    # B008 - flags `Depends(...)` in a function default, which is FastAPI's
+    # fundamental dependency-injection idiom. A false positive for this
+    # framework.
+    "B008",
+]
+
 [tool.basedpyright]
 include = ["src", "tests"]
 typeCheckingMode = "standard"
+
+[[tool.basedpyright.executionEnvironments]]
+# factory_boy's documented pattern is every Factory subclass declaring its
+# own inner `Meta` class, which structurally "overrides" the `Meta` on
+# `SQLAlchemyModelFactory`/`BaseFactory` - that's the library's supported
+# usage, not an accidental shadowing bug, so this check is a false positive
+# for every factory in tests/factories.py. Scoped to tests/ only; src/ keeps
+# the rule at its default.
+root = "tests"
+extraPaths = ["."]
+reportIncompatibleVariableOverride = "none"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

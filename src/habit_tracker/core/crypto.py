@@ -23,7 +23,9 @@ def _fernet() -> Fernet:
     if key:
         return Fernet(key.encode() if isinstance(key, str) else key)
     # Derive a valid 32-byte urlsafe-base64 Fernet key from the app secret.
-    derived = base64.urlsafe_b64encode(hashlib.sha256(settings.secret_key.encode()).digest())
+    derived = base64.urlsafe_b64encode(
+        hashlib.sha256(settings.secret_key.encode()).digest()
+    )
     return Fernet(derived)
 
 

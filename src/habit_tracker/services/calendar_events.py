@@ -12,8 +12,8 @@ module provides:
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, time, timedelta, tzinfo
-from typing import Awaitable, Callable
 
 import httpx
 import icalendar
@@ -47,9 +47,7 @@ FETCH_USER_AGENT = "HabitTracker-Calendar/1.0 (+ICS subscription reader)"
 IcsFetcher = Callable[[str, str | None], Awaitable[tuple[int, str | None, str | None]]]
 
 
-async def fetch_ics(
-    url: str, etag: str | None
-) -> tuple[int, str | None, str | None]:
+async def fetch_ics(url: str, etag: str | None) -> tuple[int, str | None, str | None]:
     """Fetch an ICS feed over HTTP.
 
     Sends ``If-None-Match`` when an ETag is available so unchanged feeds can
@@ -169,9 +167,7 @@ def cache_is_fresh(connection: CalendarConnection, now: datetime) -> bool:
     return now - connection.last_fetched_at < ttl
 
 
-def _record_failure(
-    connection: CalendarConnection, now: datetime, error: str
-) -> str:
+def _record_failure(connection: CalendarConnection, now: datetime, error: str) -> str:
     """Record a failed fetch attempt: keep the stale cache, set last_error,
     and stamp the attempt time so the failure backoff (ERROR_RETRY_TTL)
     applies. Returns the error string for the caller to surface."""
@@ -205,16 +201,17 @@ async def refresh_connection(
 
     try:
         status_code, body, etag = await fetcher(connection.url, connection.etag)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - fetching an arbitrary external
+        # ICS URL can fail in ways specific to the fetcher implementation
+        # (network, timeout, TLS, ...); any failure degrades to a recorded
+        # last_error with the stale cache kept, never an unhandled 500.
         logger.warning(
             "ICS fetch failed for connection %s (%s): %s",
             connection.id,
             connection.url,
             exc,
         )
-        return _record_failure(
-            connection, now, f"fetch failed ({type(exc).__name__})"
-        )
+        return _record_failure(connection, now, f"fetch failed ({type(exc).__name__})")
 
     if status_code == 200 and body is not None:
         if len(body.encode("utf-8", errors="ignore")) > MAX_FEED_BYTES:
@@ -223,10 +220,11 @@ async def refresh_connection(
         # maintenance page can't clobber a good ICS cache
         try:
             icalendar.Calendar.from_ical(body)
-        except Exception:
-            return _record_failure(
-                connection, now, "feed returned unparseable content"
-            )
+        except Exception:  # noqa: BLE001 - parsing arbitrary external,
+            # untrusted feed content; any parse failure (icalendar raises
+            # several distinct exception types) degrades to a recorded
+            # failure rather than an unhandled 500.
+            return _record_failure(connection, now, "feed returned unparseable content")
         connection.cached_ics = body
         connection.etag = etag
         connection.last_fetched_at = now

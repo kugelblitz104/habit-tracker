@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker, User
@@ -18,9 +19,7 @@ from tests.factories import (
 class TestUserModel:
     """Tests for User model."""
 
-    async def test_user_creation_with_required_fields(
-        self, db_session
-    ):
+    async def test_user_creation_with_required_fields(self, db_session):
         """User can be created with required fields."""
         user = UserFactory()
         await db_session.commit()
@@ -79,9 +78,7 @@ class TestUserModel:
 class TestHabitModel:
     """Tests for Habit model."""
 
-    async def test_habit_creation_with_required_fields(
-        self, db_session
-    ):
+    async def test_habit_creation_with_required_fields(self, db_session):
         """Habit can be created with required fields."""
         user = UserFactory()
         await db_session.commit()
@@ -321,7 +318,7 @@ class TestModelConstraints:
         UserFactory(username="uniqueuser")
         await db_session.commit()
 
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             UserFactory(username="uniqueuser")
             await db_session.commit()
 
@@ -330,7 +327,7 @@ class TestModelConstraints:
         UserFactory(email="unique@example.com")
         await db_session.commit()
 
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             UserFactory(email="unique@example.com")
             await db_session.commit()
 
@@ -346,7 +343,7 @@ class TestModelConstraints:
             user_id=99999,  # Non-existent user
         )
         db_session.add(habit)
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await db_session.commit()
 
     async def test_tracker_requires_habit(self, db_session):
@@ -357,14 +354,15 @@ class TestModelConstraints:
             status=TrackerStatus.COMPLETED,
         )
         db_session.add(tracker)
-        with pytest.raises(Exception):
+        with pytest.raises(IntegrityError):
             await db_session.commit()
 
 
 def test_models_barrel_never_reexports_orm():
     """`from habit_tracker.models import X` must always give the Pydantic X."""
-    import habit_tracker.models as m
     from pydantic import BaseModel
+
+    import habit_tracker.models as m
 
     for name in m.__all__:
         obj = getattr(m, name)

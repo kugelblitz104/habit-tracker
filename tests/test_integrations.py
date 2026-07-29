@@ -55,7 +55,7 @@ class FakeClient:
 def override_builder(fake):
     """Route every connection's client to `fake` for this test (cleared at
     client-fixture teardown)."""
-    app.dependency_overrides[get_client_builder] = lambda: (lambda conn, token: fake)
+    app.dependency_overrides[get_client_builder] = lambda: lambda conn, token: fake
 
 
 class TestIntegrationConnectionCrud:
@@ -154,9 +154,7 @@ class TestIntegrationConnectionCrud:
         assert data["integration_connections"][0]["has_token"] is True
         assert "encrypted_token" not in response.text
 
-    async def test_list_foreign_profile_forbidden(
-        self, client, db_session, login_as
-    ):
+    async def test_list_foreign_profile_forbidden(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         foreign = ProfileFactory(user=other, name="Theirs")
@@ -339,9 +337,7 @@ class TestIntegrationPublish:
         assert task.external_ref == "AB#999"
         assert task.external_url.endswith("/999")
 
-    async def test_publish_rejects_already_linked(
-        self, client, db_session, login_as
-    ):
+    async def test_publish_rejects_already_linked(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(
@@ -414,7 +410,9 @@ class TestAzureDevOpsClientUrls:
     FakeClient tests above stub the client, so they can't catch a bad base)."""
 
     def test_cloud_default_base(self):
-        client = AzureDevOpsClient(organization="contoso", project="Payments", token="pat")
+        client = AzureDevOpsClient(
+            organization="contoso", project="Payments", token="pat"
+        )
         assert client.org_base == "https://dev.azure.com/contoso"
         assert client.project_base == "https://dev.azure.com/contoso/Payments"
         assert (

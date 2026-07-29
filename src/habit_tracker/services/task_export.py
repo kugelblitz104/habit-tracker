@@ -25,8 +25,8 @@ first). Subtasks under one parent use the active ordering.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time
-from typing import Iterable, Mapping
 
 from habit_tracker.constants import TaskBand, TaskPriority, TaskStatus, compute_band
 from habit_tracker.schemas.db_models import Task
@@ -174,9 +174,7 @@ def render_tasks_markdown(
         lines.extend(["", f"## {title}", ""])
         for task in group:
             lines.extend(_render_task(task, project_names))
-            subtasks = sorted(
-                subtasks_by_parent.get(task.id, []), key=_active_sort_key
-            )
+            subtasks = sorted(subtasks_by_parent.get(task.id, []), key=_active_sort_key)
             for subtask in subtasks:
                 lines.extend(_render_task(subtask, project_names, indent="  "))
     return "\n".join(lines) + "\n"

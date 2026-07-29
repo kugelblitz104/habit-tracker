@@ -36,9 +36,15 @@ async def send_email(to: str, subject: str, body: str) -> None:
 
     # Port 465 speaks TLS from the first byte (implicit); 587/2587 upgrade an
     # initially-plaintext connection via STARTTLS. Passing both would error.
-    tls_kwargs = (
-        {"use_tls": True} if settings.smtp_port == 465 else {"start_tls": True}
-    )
+    # (Named explicitly rather than via a `**kwargs` dict: a `dict[str, bool]`
+    # unpacked into aiosmtplib.send's fixed keyword-only signature loses which
+    # specific parameter each value lands on, so basedpyright checks a bare
+    # `bool` against every other unfilled parameter's type and fails all of
+    # them. Passing both parameters directly keeps the same two mutually
+    # exclusive values — one True, the other its own default — with a type
+    # basedpyright can actually verify.)
+    use_tls = settings.smtp_port == 465
+    start_tls = None if use_tls else True
 
     await aiosmtplib.send(
         message,
@@ -46,7 +52,8 @@ async def send_email(to: str, subject: str, body: str) -> None:
         port=settings.smtp_port,
         username=settings.smtp_user or None,
         password=settings.smtp_password or None,
-        **tls_kwargs,
+        use_tls=use_tls,
+        start_tls=start_tls,
     )
     logger.info("Sent email to %s (subject: %s)", to, subject)
 

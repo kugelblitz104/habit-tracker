@@ -1,7 +1,8 @@
 """Shared types + client factory for the external integrations."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, List, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import httpx
 
@@ -63,7 +64,7 @@ class ExternalItem:
 
 @runtime_checkable
 class IntegrationClient(Protocol):
-    async def list_open_assigned(self) -> List[ExternalItem]:
+    async def list_open_assigned(self) -> list[ExternalItem]:
         """The current user's open items assigned to them."""
         ...
 

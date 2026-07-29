@@ -25,7 +25,6 @@ Two things are deliberately NOT round-tripped:
 """
 
 from datetime import date, datetime, time
-from typing import List, Optional
 
 from pydantic import BaseModel
 
@@ -62,77 +61,77 @@ class ProjectBackup(_FromORM):
     id: int
     name: str
     color: str
-    notes: Optional[str] = None
+    notes: str | None = None
     archived: bool = False
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class TaskBackup(_FromORM):
     id: int
-    project_id: Optional[int] = None
-    parent_id: Optional[int] = None
+    project_id: int | None = None
+    parent_id: int | None = None
     title: str
-    notes: Optional[str] = None
+    notes: str | None = None
     priority: int = 0
-    due_date: Optional[date] = None
-    due_time: Optional[time] = None
-    scheduled_date: Optional[date] = None
-    scheduled_time: Optional[time] = None
+    due_date: date | None = None
+    due_time: time | None = None
+    scheduled_date: date | None = None
+    scheduled_time: time | None = None
     status: int = 0
-    block_reason: Optional[str] = None
-    source: Optional[str] = None
-    external_ref: Optional[str] = None
-    external_url: Optional[str] = None
-    estimated_effort: Optional[int] = None
-    closed_date: Optional[datetime] = None
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    block_reason: str | None = None
+    source: str | None = None
+    external_ref: str | None = None
+    external_url: str | None = None
+    estimated_effort: int | None = None
+    closed_date: datetime | None = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
     sort_order: int = 0
 
 
 class CountdownBackup(_FromORM):
     id: int
-    task_id: Optional[int] = None
+    task_id: int | None = None
     title: str
     target_date: date
-    target_time: Optional[time] = None
-    category: Optional[str] = None
-    color: Optional[str] = None
+    target_time: time | None = None
+    category: str | None = None
+    color: str | None = None
     repeat: str = "none"
     show_occurrence: bool = False
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class TimeEntryBackup(_FromORM):
     id: int
-    task_id: Optional[int] = None
-    project_id: Optional[int] = None
+    task_id: int | None = None
+    project_id: int | None = None
     kind: int = 0
-    label: Optional[str] = None
+    label: str | None = None
     started_at: datetime
-    ended_at: Optional[datetime] = None
-    duration_seconds: Optional[int] = None
-    note: Optional[str] = None
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    ended_at: datetime | None = None
+    duration_seconds: int | None = None
+    note: str | None = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class HabitBackup(_FromORM):
     id: int
     name: str
     question: str
-    category: Optional[str] = None
+    category: str | None = None
     color: str
     frequency: int
     range: int
     reminder: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
     archived: bool = False
     sort_order: int = 0
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class TrackerBackup(_FromORM):
@@ -140,9 +139,9 @@ class TrackerBackup(_FromORM):
     habit_id: int
     dated: date
     status: int = 2
-    note: Optional[str] = None
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    note: str | None = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class CalendarConnectionBackup(_FromORM):
@@ -150,21 +149,21 @@ class CalendarConnectionBackup(_FromORM):
     name: str
     color: str
     url: str
-    provider: Optional[str] = None
+    provider: str | None = None
     enabled: bool = True
-    created_date: Optional[datetime] = None
-    updated_date: Optional[datetime] = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
 
 
 class IntegrationConnectionBackup(_FromORM):
     id: int
     provider: str
     name: str
-    organization: Optional[str] = None
-    project: Optional[str] = None
-    work_item_type: Optional[str] = None
-    base_url: Optional[str] = None
-    default_repo: Optional[str] = None
+    organization: str | None = None
+    project: str | None = None
+    work_item_type: str | None = None
+    base_url: str | None = None
+    default_repo: str | None = None
     enabled: bool = True
     # Whether the source connection had a PAT stored (the token itself is never
     # exported); surfaced so the import summary can flag re-auth.
@@ -178,14 +177,14 @@ class ProfileBackup(BaseModel):
     version: int = BACKUP_VERSION
     exported_at: datetime
     profile: ProfileSettings
-    projects: List[ProjectBackup] = []
-    tasks: List[TaskBackup] = []
-    countdowns: List[CountdownBackup] = []
-    time_entries: List[TimeEntryBackup] = []
-    habits: List[HabitBackup] = []
-    trackers: List[TrackerBackup] = []
-    calendar_connections: List[CalendarConnectionBackup] = []
-    integration_connections: List[IntegrationConnectionBackup] = []
+    projects: list[ProjectBackup] = []
+    tasks: list[TaskBackup] = []
+    countdowns: list[CountdownBackup] = []
+    time_entries: list[TimeEntryBackup] = []
+    habits: list[HabitBackup] = []
+    trackers: list[TrackerBackup] = []
+    calendar_connections: list[CalendarConnectionBackup] = []
+    integration_connections: list[IntegrationConnectionBackup] = []
 
 
 class ImportSummary(BaseModel):
@@ -203,4 +202,4 @@ class ImportSummary(BaseModel):
     trackers_imported: int = 0
     calendar_connections_imported: int = 0
     integration_connections_imported: int = 0
-    warnings: List[str] = []
+    warnings: list[str] = []

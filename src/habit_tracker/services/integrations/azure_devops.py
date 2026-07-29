@@ -3,7 +3,6 @@
 import html as html_lib
 import logging
 import re
-from typing import List
 
 import httpx
 
@@ -42,6 +41,7 @@ def text_to_html(value: str | None) -> str:
     if not value:
         return ""
     return html_lib.escape(value).replace("\n", "<br>\n")
+
 
 API_VERSION = "7.0"
 TIMEOUT_SECONDS = 15.0
@@ -85,7 +85,7 @@ class AzureDevOpsClient:
     def _work_item_url(self, work_item_id: int) -> str:
         return f"{self.org_base}/{self.project}/_workitems/edit/{work_item_id}"
 
-    async def list_open_assigned(self) -> List[ExternalItem]:
+    async def list_open_assigned(self) -> list[ExternalItem]:
         # PAT auth is HTTP Basic with an empty username.
         auth = ("", self.token)
         try:
@@ -117,7 +117,7 @@ class AzureDevOpsClient:
                 transport_error_message(exc, "Azure DevOps", self.host)
             ) from exc
 
-        items: List[ExternalItem] = []
+        items: list[ExternalItem] = []
         for wi in detail_resp.json().get("value", []):
             fields = wi.get("fields", {})
             wid = wi["id"]

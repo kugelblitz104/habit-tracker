@@ -3,8 +3,8 @@ import os
 import sqlite3
 import tempfile
 import uuid
-from datetime import datetime, timezone
-from typing import Annotated, Optional
+from datetime import UTC, datetime
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -45,7 +45,7 @@ def date_to_timestamp(dt: datetime) -> int:
     Convert datetime to Loop Habit Tracker timestamp.
     Loop Habit Tracker uses milliseconds since epoch at midnight UTC.
     """
-    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return int(dt.replace(tzinfo=UTC).timestamp() * 1000)
 
 
 def timestamp_to_date(timestamp: int) -> datetime:
@@ -56,10 +56,10 @@ def timestamp_to_date(timestamp: int) -> datetime:
     UTC of the tracked day, so decode in UTC — a server-local decode shifts
     every date back one day in any negative-offset timezone.
     """
-    return datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+    return datetime.fromtimestamp(timestamp / 1000, tz=UTC)
 
 
-def map_repetition_value(value: int) -> Optional[TrackerStatus]:
+def map_repetition_value(value: int) -> TrackerStatus | None:
     """
     Map a Loop Habit Tracker repetition value to a TrackerStatus.
 
@@ -90,7 +90,7 @@ async def import_from_loop_habit_tracker(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     file: UploadFile = File(..., description="SQLite .db file from Loop Habit Tracker"),
-    profile_id: Optional[int] = Query(
+    profile_id: int | None = Query(
         default=None,
         description=(
             "Profile the imported habits belong to. Must belong to the "
@@ -134,8 +134,12 @@ async def import_from_loop_habit_tracker(
     try:
         content = await file.read()
 
-        # Create a temporary file
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        # Create a temporary file. Not a `with` block (SIM115): the path
+        # outlives this statement - it is reopened by sqlite3 below - and is
+        # only unlinked in the `finally` at the bottom of this function
+        # (after the sqlite connection is closed, since on Windows an open
+        # connection blocks the unlink).
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115
         temp_file.write(content)
         temp_file.close()
 
@@ -267,10 +271,13 @@ async def import_from_loop_habit_tracker(
                         habit_trackers_imported += 1
                         trackers_imported += 1
 
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001 - one bad row (of
+                        # arbitrary shape from a user-uploaded SQLite export)
+                        # must not abort the rest of the import; the failure
+                        # is recorded and the loop continues.
                         trackers_skipped += 1
                         errors.append(
-                            f"Failed to import tracker for habit '{name}': {str(e)}"
+                            f"Failed to import tracker for habit '{name}': {e!s}"
                         )
 
                 habits_imported += 1
@@ -282,10 +289,11 @@ async def import_from_loop_habit_tracker(
                     )
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - same per-row resilience
+                # as the tracker loop above: skip this habit, keep importing.
                 habits_skipped += 1
                 habit_name = habit_row["name"] if habit_row else "Unknown"
-                errors.append(f"Failed to import habit '{habit_name}': {str(e)}")
+                errors.append(f"Failed to import habit '{habit_name}': {e!s}")
 
         # Commit all changes
         await db.commit()
@@ -307,14 +315,15 @@ async def import_from_loop_habit_tracker(
     except sqlite3.Error as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid SQLite database: {str(e)}",
+            detail=f"Invalid SQLite database: {e!s}",
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level catch-all converting
+        # any unexpected failure into a 500 rather than an unhandled error.
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Import failed: {str(e)}",
+            detail=f"Import failed: {e!s}",
         )
 
     finally:
@@ -335,7 +344,7 @@ async def export_to_loop_habit_tracker(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     include_archived: bool = False,
-    profile_id: Optional[int] = Query(
+    profile_id: int | None = Query(
         default=None,
         description=(
             "Only export habits belonging to this profile. Must belong to "
@@ -372,8 +381,13 @@ async def export_to_loop_habit_tracker(
     temp_file = None
     conn = None
     try:
-        # Create a temporary file for the export database
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
+        # Create a temporary file for the export database. Not a `with`
+        # block (SIM115): the path outlives this statement - it is reopened
+        # by sqlite3 below and again by the base64 read further down, and
+        # only unlinked in the `finally` at the bottom of this function
+        # (after the sqlite connection is closed, since on Windows an open
+        # connection blocks the unlink).
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")  # noqa: SIM115
         temp_file.close()
 
         # Create the SQLite database with Loop Habit Tracker schema
@@ -420,7 +434,7 @@ async def export_to_loop_habit_tracker(
         if profile_id is not None:
             query = query.where(Habit.profile_id == profile_id)
         if not include_archived:
-            query = query.where(Habit.archived == False)  # noqa: E712
+            query = query.where(Habit.archived == False)
         query = query.order_by(Habit.sort_order)
 
         result = await db.execute(query)
@@ -506,8 +520,13 @@ async def export_to_loop_habit_tracker(
         # Generate filename with timestamp
         export_filename = f"habits_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
 
-        # Read the file and encode as base64 for JSON transport
-        with open(temp_file.name, "rb") as f:
+        # Read the file and encode as base64 for JSON transport. Blocking
+        # open() (ASYNC230): this reads back the small SQLite export file
+        # this same function just wrote via the equally-blocking sqlite3
+        # driver, so switching only this read to threaded/async I/O would
+        # not remove the blocking sqlite3 calls above it - not worth the
+        # added complexity for a bounded, one-profile export file.
+        with open(temp_file.name, "rb") as f:  # noqa: ASYNC230
             encoded_data = base64.b64encode(f.read()).decode("ascii")
 
         return ExportResult(
@@ -515,10 +534,11 @@ async def export_to_loop_habit_tracker(
             data=encoded_data,
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - top-level catch-all converting
+        # any unexpected failure into a 500 rather than an unhandled error.
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Export failed: {str(e)}",
+            detail=f"Export failed: {e!s}",
         )
 
     finally:

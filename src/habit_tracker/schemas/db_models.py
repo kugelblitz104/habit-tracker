@@ -1,5 +1,4 @@
 from datetime import date, datetime, time
-from typing import List
 
 from sqlalchemy import (
     Boolean,
@@ -13,6 +12,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
 from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
 
 
@@ -38,10 +38,10 @@ class User(Base):
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    habits: Mapped[List["Habit"]] = relationship(
+    habits: Mapped[list["Habit"]] = relationship(
         "Habit", back_populates="user", cascade="all, delete-orphan", lazy="select"
     )
-    profiles: Mapped[List["Profile"]] = relationship(
+    profiles: Mapped[list["Profile"]] = relationship(
         "Profile", back_populates="user", cascade="all, delete-orphan", lazy="select"
     )
 
@@ -54,13 +54,9 @@ class Profile(Base):
         Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
-    color_start: Mapped[str] = mapped_column(
-        String, default="#e0763f", nullable=False
-    )
+    color_start: Mapped[str] = mapped_column(String, default="#e0763f", nullable=False)
     color_end: Mapped[str] = mapped_column(String, default="#c14e6a", nullable=False)
-    habits_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False
-    )
+    habits_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     countdowns_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
@@ -93,9 +89,7 @@ class Profile(Base):
     pomodoro_long_break_minutes: Mapped[int] = mapped_column(
         Integer, default=15, nullable=False
     )
-    pomodoro_cycles: Mapped[int] = mapped_column(
-        Integer, default=4, nullable=False
-    )
+    pomodoro_cycles: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
     # Whether the estimated-effort field is shown on tasks in this profile.
     show_estimated_effort: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
@@ -109,31 +103,31 @@ class Profile(Base):
     user: Mapped["User"] = relationship(
         "User", back_populates="profiles", lazy="select"
     )
-    habits: Mapped[List["Habit"]] = relationship(
+    habits: Mapped[list["Habit"]] = relationship(
         "Habit", back_populates="profile", cascade="all, delete-orphan", lazy="select"
     )
-    projects: Mapped[List["Project"]] = relationship(
+    projects: Mapped[list["Project"]] = relationship(
         "Project",
         back_populates="profile",
         cascade="all, delete-orphan",
         lazy="select",
     )
-    tasks: Mapped[List["Task"]] = relationship(
+    tasks: Mapped[list["Task"]] = relationship(
         "Task", back_populates="profile", cascade="all, delete-orphan", lazy="select"
     )
-    calendar_connections: Mapped[List["CalendarConnection"]] = relationship(
+    calendar_connections: Mapped[list["CalendarConnection"]] = relationship(
         "CalendarConnection",
         back_populates="profile",
         cascade="all, delete-orphan",
         lazy="select",
     )
-    time_entries: Mapped[List["TimeEntry"]] = relationship(
+    time_entries: Mapped[list["TimeEntry"]] = relationship(
         "TimeEntry",
         back_populates="profile",
         cascade="all, delete-orphan",
         lazy="select",
     )
-    integration_connections: Mapped[List["IntegrationConnection"]] = relationship(
+    integration_connections: Mapped[list["IntegrationConnection"]] = relationship(
         "IntegrationConnection",
         back_populates="profile",
         cascade="all, delete-orphan",
@@ -182,7 +176,7 @@ class Habit(Base):
     profile: Mapped["Profile"] = relationship(
         "Profile", back_populates="habits", lazy="select"
     )
-    trackers: Mapped[List["Tracker"]] = relationship(
+    trackers: Mapped[list["Tracker"]] = relationship(
         "Tracker", back_populates="habit", cascade="all, delete-orphan", lazy="select"
     )
 
@@ -212,12 +206,12 @@ class Project(Base):
     )
     # Tasks are not deleted with their project - the DB sets task.project_id
     # to NULL (ON DELETE SET NULL), so no delete-orphan cascade here
-    tasks: Mapped[List["Task"]] = relationship(
+    tasks: Mapped[list["Task"]] = relationship(
         "Task", back_populates="project", passive_deletes=True, lazy="select"
     )
     # Adhoc time entries attached directly to the project. Also detached (not
     # deleted) when the project is removed (ON DELETE SET NULL).
-    time_entries: Mapped[List["TimeEntry"]] = relationship(
+    time_entries: Mapped[list["TimeEntry"]] = relationship(
         "TimeEntry", back_populates="project", passive_deletes=True, lazy="select"
     )
 
@@ -373,7 +367,7 @@ class Task(Base):
     )
     # Subtask deletion rides on the DB's ON DELETE CASCADE (passive_deletes),
     # so the ORM never needs to load children to delete a parent
-    subtasks: Mapped[List["Task"]] = relationship(
+    subtasks: Mapped[list["Task"]] = relationship(
         "Task",
         back_populates="parent",
         passive_deletes=True,
@@ -384,7 +378,7 @@ class Task(Base):
     )
     # Time entries ride on the DB's ON DELETE CASCADE (passive_deletes), so
     # deleting a task never needs to load its entries first
-    time_entries: Mapped[List["TimeEntry"]] = relationship(
+    time_entries: Mapped[list["TimeEntry"]] = relationship(
         "TimeEntry",
         back_populates="task",
         passive_deletes=True,
@@ -528,7 +522,9 @@ class Countdown(Base):
     repeat: Mapped[str] = mapped_column(String, default="none", nullable=False)
     # Opt-in: show the Nth occurrence for a recurring countdown (e.g. "26th
     # birthday"), derived client-side from the anchor.
-    show_occurrence: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    show_occurrence: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

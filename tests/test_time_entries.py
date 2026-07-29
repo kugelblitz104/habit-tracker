@@ -64,15 +64,11 @@ class TestListTimeEntries:
         profile = user.profiles[0]
         base = datetime(2026, 7, 1, 9, 0, 0)
         older = TimeEntryFactory(profile=profile, started_at=base)
-        newer = TimeEntryFactory(
-            profile=profile, started_at=base + timedelta(hours=2)
-        )
+        newer = TimeEntryFactory(profile=profile, started_at=base + timedelta(hours=2))
         await db_session.commit()
         await login_as(user)
 
-        response = await client.get(
-            "/time-entries/", params={"profile_id": profile.id}
-        )
+        response = await client.get("/time-entries/", params={"profile_id": profile.id})
         assert response.status_code == 200
         ids = [e["id"] for e in response.json()["time_entries"]]
         assert ids == [newer.id, older.id]
@@ -208,18 +204,14 @@ class TestCreateTimeEntry:
         assert body["task_id"] == task.id
         assert body["kind"] == TimeEntryKind.POMODORO.value
 
-    async def test_second_running_timer_conflicts(
-        self, client, db_session, login_as
-    ):
+    async def test_second_running_timer_conflicts(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         RunningTimeEntryFactory(profile=profile)
         await db_session.commit()
         await login_as(user)
 
-        response = await client.post(
-            "/time-entries/", json={"profile_id": profile.id}
-        )
+        response = await client.post("/time-entries/", json={"profile_id": profile.id})
         assert response.status_code == 409
 
     async def test_log_completed_entry_computes_duration(
@@ -530,9 +522,7 @@ class TestPatchTimeEntry:
         assert attach.status_code == 200
         assert attach.json()["task_id"] == task.id
 
-        detach = await client.patch(
-            f"/time-entries/{entry.id}", json={"task_id": None}
-        )
+        detach = await client.patch(f"/time-entries/{entry.id}", json={"task_id": None})
         assert detach.status_code == 200
         assert detach.json()["task_id"] is None
 
@@ -586,9 +576,7 @@ class TestPatchTimeEntry:
         assert body["is_running"] is True
         assert body["duration_seconds"] is None
 
-    async def test_reopen_conflicts_with_running(
-        self, client, db_session, login_as
-    ):
+    async def test_reopen_conflicts_with_running(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         RunningTimeEntryFactory(profile=profile)
@@ -626,9 +614,7 @@ class TestPatchTimeEntry:
         await db_session.commit()
         await login_as(user)
 
-        response = await client.patch(
-            f"/time-entries/{entry.id}", json={"kind": None}
-        )
+        response = await client.patch(f"/time-entries/{entry.id}", json={"kind": None})
         assert response.status_code == 422
 
     async def test_foreign(self, client, db_session, login_as):
@@ -638,9 +624,7 @@ class TestPatchTimeEntry:
         await db_session.commit()
         await login_as(user)
 
-        response = await client.patch(
-            f"/time-entries/{entry.id}", json={"note": "x"}
-        )
+        response = await client.patch(f"/time-entries/{entry.id}", json={"note": "x"})
         assert response.status_code == 403
 
 
@@ -683,9 +667,7 @@ class TestDeleteTimeEntry:
 class TestTimeEntryCascade:
     """Deleting a task or profile removes its time entries (DB cascade)."""
 
-    async def test_deleting_task_deletes_entries(
-        self, client, db_session, login_as
-    ):
+    async def test_deleting_task_deletes_entries(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task = TaskFactory(profile=profile)
@@ -763,9 +745,7 @@ class TestTimeEntryProjectAndLabel:
         )
         assert response.status_code == 400
 
-    async def test_blank_label_normalized_to_null(
-        self, client, db_session, login_as
-    ):
+    async def test_blank_label_normalized_to_null(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
         await login_as(user)
@@ -807,9 +787,7 @@ class TestTimeEntryProjectAndLabel:
         assert body["task_id"] == task.id
         assert body["project_id"] is None
 
-    async def test_patch_attach_project_to_adhoc(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_attach_project_to_adhoc(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         project = ProjectFactory(profile=profile)
@@ -864,16 +842,16 @@ class TestTimeEntrySummaryPerProject:
             "/time-entries/summary", params={"profile_id": profile.id}
         )
         assert response.status_code == 200
-        per_project = {item["project_id"]: item for item in response.json()["per_project"]}
+        per_project = {
+            item["project_id"]: item for item in response.json()["per_project"]
+        }
         assert per_project[None]["total_seconds"] == 30
 
 
 class TestTaskEstimatedEffort:
     """Task gains an estimated_effort field (minutes)."""
 
-    async def test_create_with_estimated_effort(
-        self, client, db_session, login_as
-    ):
+    async def test_create_with_estimated_effort(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
         await login_as(user)
@@ -937,9 +915,7 @@ class TestProfilePomodoroSettings:
         await db_session.commit()
         await login_as(user)
 
-        response = await client.post(
-            "/profiles/", json={"name": "Focus"}
-        )
+        response = await client.post("/profiles/", json={"name": "Focus"})
         assert response.status_code == 201
         body = response.json()
         assert body["pomodoro_work_minutes"] == 25
@@ -1001,9 +977,7 @@ class TestProfilePomodoroSettings:
         assert response.status_code == 201
         assert response.json()["show_estimated_effort"] is False
 
-    async def test_toggle_show_estimated_effort(
-        self, client, db_session, login_as
-    ):
+    async def test_toggle_show_estimated_effort(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
         await login_as(user)

@@ -1,4 +1,4 @@
-from typing import List, Optional, overload
+from typing import overload
 
 from pydantic import BaseModel, ValidationInfo, field_validator
 
@@ -19,7 +19,7 @@ _DEFAULT_LANDING_VALUES = tuple(d.value for d in DefaultLanding)
 def _validate_pomodoro(v: int) -> int: ...
 @overload
 def _validate_pomodoro(v: None) -> None: ...
-def _validate_pomodoro(v: Optional[int]) -> Optional[int]:
+def _validate_pomodoro(v: int | None) -> int | None:
     return min_value_int(v, 1, "Pomodoro settings")
 
 
@@ -27,7 +27,7 @@ def _validate_pomodoro(v: Optional[int]) -> Optional[int]:
 def _validate_default_landing(v: str) -> str: ...
 @overload
 def _validate_default_landing(v: None) -> None: ...
-def _validate_default_landing(v: Optional[str]) -> Optional[str]:
+def _validate_default_landing(v: str | None) -> str | None:
     return validate_membership(
         v, _DEFAULT_LANDING_VALUES, "Default landing must be 'today' or 'habits'"
     )
@@ -87,22 +87,22 @@ class ProfileRead(_StampedRead, ProfileBase):
 
 
 class ProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    color_start: Optional[str] = None
-    color_end: Optional[str] = None
-    habits_enabled: Optional[bool] = None
-    countdowns_enabled: Optional[bool] = None
-    insights_enabled: Optional[bool] = None
-    calendar_enabled: Optional[bool] = None
-    publish_to_azure: Optional[bool] = None
-    default_landing: Optional[str] = None
-    week_start_monday: Optional[bool] = None
-    use_habit_color_accent: Optional[bool] = None
-    show_estimated_effort: Optional[bool] = None
-    pomodoro_work_minutes: Optional[int] = None
-    pomodoro_break_minutes: Optional[int] = None
-    pomodoro_long_break_minutes: Optional[int] = None
-    pomodoro_cycles: Optional[int] = None
+    name: str | None = None
+    color_start: str | None = None
+    color_end: str | None = None
+    habits_enabled: bool | None = None
+    countdowns_enabled: bool | None = None
+    insights_enabled: bool | None = None
+    calendar_enabled: bool | None = None
+    publish_to_azure: bool | None = None
+    default_landing: str | None = None
+    week_start_monday: bool | None = None
+    use_habit_color_accent: bool | None = None
+    show_estimated_effort: bool | None = None
+    pomodoro_work_minutes: int | None = None
+    pomodoro_break_minutes: int | None = None
+    pomodoro_long_break_minutes: int | None = None
+    pomodoro_cycles: int | None = None
 
     @field_validator(
         "name",
@@ -133,27 +133,27 @@ class ProfileUpdate(BaseModel):
         "pomodoro_cycles",
     )
     @classmethod
-    def validate_pomodoro(cls, v: Optional[int]) -> Optional[int]:
+    def validate_pomodoro(cls, v: int | None) -> int | None:
         return _validate_pomodoro(v)
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Name")
 
     @field_validator("color_start", "color_end")
     @classmethod
-    def validate_color(cls, v: Optional[str]) -> Optional[str]:
+    def validate_color(cls, v: str | None) -> str | None:
         return validate_hex_color(v)
 
     @field_validator("default_landing")
     @classmethod
-    def validate_default_landing(cls, v: Optional[str]) -> Optional[str]:
+    def validate_default_landing(cls, v: str | None) -> str | None:
         return _validate_default_landing(v)
 
 
 class ProfileList(BaseModel):
-    profiles: List[ProfileRead] = []
+    profiles: list[ProfileRead] = []
     total: int
     limit: int
     offset: int

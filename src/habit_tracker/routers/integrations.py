@@ -101,13 +101,13 @@ async def create_integration_connection(
     requires **organization** + **project**; GitHub optionally takes a
     **default_repo** ("owner/repo") used when publishing.
     """
-    await get_owned_profile(db, connection.profile_id, current_user, "integration connection")
+    await get_owned_profile(
+        db, connection.profile_id, current_user, "integration connection"
+    )
 
     data = connection.model_dump()
     token = data.pop("token")
-    db_connection = IntegrationConnection(
-        **data, encrypted_token=encrypt_secret(token)
-    )
+    db_connection = IntegrationConnection(**data, encrypted_token=encrypt_secret(token))
     db.add(db_connection)
     await db.commit()
     await db.refresh(db_connection)
@@ -148,7 +148,9 @@ async def patch_integration_connection(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise integrity_conflict("Integration connection change violates a database constraint")
+        raise integrity_conflict(
+            "Integration connection change violates a database constraint"
+        )
     await db.refresh(db_connection)
     return IntegrationConnectionRead.model_validate(db_connection)
 
@@ -162,7 +164,9 @@ async def delete_integration_connection(
     db_connection = await _get_connection_and_authorize(db, connection_id, current_user)
     await db.delete(db_connection)
     await db.commit()
-    return JSONResponse(content={"detail": "Integration connection deleted successfully"})
+    return JSONResponse(
+        content={"detail": "Integration connection deleted successfully"}
+    )
 
 
 @router.post("/{connection_id}/sync", summary="Pull assigned open items into tasks")
@@ -226,7 +230,9 @@ async def sync_integration_connection(
         except IntegrityError:
             # Lost a race — the item now exists.
             skipped += 1
-        except Exception as exc:  # noqa: BLE001 - per-item isolation
+        except Exception as exc:  # noqa: BLE001 - one bad item from the
+            # external provider must not abort the rest of the sync; the
+            # failure is recorded per-item and the loop continues.
             errors.append(f"{item.external_ref}: {exc}")
 
     connection.last_synced_at = datetime.now()
@@ -243,7 +249,9 @@ async def sync_integration_connection(
     )
 
 
-@router.post("/{connection_id}/publish", summary="Publish a task as a new external item")
+@router.post(
+    "/{connection_id}/publish", summary="Publish a task as a new external item"
+)
 async def publish_task(
     connection_id: int,
     request: PublishRequest,
@@ -258,7 +266,9 @@ async def publish_task(
 
     task = await db.get(Task, request.task_id)
     if not task:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
     if task.profile_id != connection.profile_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

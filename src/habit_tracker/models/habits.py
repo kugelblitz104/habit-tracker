@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional, overload
+from typing import overload
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
@@ -15,7 +15,7 @@ from habit_tracker.models._validators import (
 def _validate_positive(v: int) -> int: ...
 @overload
 def _validate_positive(v: None) -> None: ...
-def _validate_positive(v: Optional[int]) -> Optional[int]:
+def _validate_positive(v: int | None) -> int | None:
     if v is not None and v <= 0:
         raise ValueError("Frequency and range must be positive integers")
     return v
@@ -29,12 +29,12 @@ class HabitBase(BaseModel):
     frequency: int
     range: int
     reminder: bool = False
-    notes: Optional[str] = None
+    notes: str | None = None
     archived: bool = False
     sort_order: int = 0
-    category: Optional[str] = None
+    category: str | None = None
     # Optional for back-compat - routers resolve the user's default profile
-    profile_id: Optional[int] = None
+    profile_id: int | None = None
 
     @field_validator("color")
     @classmethod
@@ -62,17 +62,17 @@ class HabitRead(_StampedRead, HabitBase):
 
 
 class HabitUpdate(BaseModel):
-    name: Optional[str] = None
-    question: Optional[str] = None
-    color: Optional[str] = None
-    frequency: Optional[int] = None
-    range: Optional[int] = None
-    reminder: Optional[bool] = None
-    notes: Optional[str] = None
-    archived: Optional[bool] = None
-    sort_order: Optional[int] = None
-    category: Optional[str] = None
-    profile_id: Optional[int] = None
+    name: str | None = None
+    question: str | None = None
+    color: str | None = None
+    frequency: int | None = None
+    range: int | None = None
+    reminder: bool | None = None
+    notes: str | None = None
+    archived: bool | None = None
+    sort_order: int | None = None
+    category: str | None = None
+    profile_id: int | None = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
     @field_validator(
@@ -93,22 +93,22 @@ class HabitUpdate(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Name")
 
     @field_validator("color")
     @classmethod
-    def validate_color(cls, v: Optional[str]) -> Optional[str]:
+    def validate_color(cls, v: str | None) -> str | None:
         return validate_hex_color(v)
 
     @field_validator("frequency", "range")
     @classmethod
-    def validate_frequency_and_range(cls, v: Optional[int]) -> Optional[int]:
+    def validate_frequency_and_range(cls, v: int | None) -> int | None:
         return _validate_positive(v)
 
 
 class HabitList(BaseModel):
-    habits: List[HabitRead] = []
+    habits: list[HabitRead] = []
     total: int
     limit: int
     offset: int
@@ -143,7 +143,7 @@ class HabitKPIs(BaseModel):
     longest_streak: int = Field(
         ..., description="Length of the longest streak on record"
     )
-    longest_streak_end_date: Optional[date] = Field(
+    longest_streak_end_date: date | None = Field(
         None,
         description="End date of the longest streak (for a 'days · Mon' sublabel); "
         "None if there is no streak",
@@ -156,10 +156,10 @@ class HabitKPIs(BaseModel):
         ...,
         description="Completion rate (0.0-1.0) since the habit's effective start date",
     )
-    last_completed_date: Optional[date] = Field(
+    last_completed_date: date | None = Field(
         None, description="Date of the most recent completion, or None"
     )
-    weekday_completion_rates: List[float] = Field(
+    weekday_completion_rates: list[float] = Field(
         ...,
         description="Length-7 list of completion rates (0.0-1.0), one per weekday, "
         "indexed by Python date.weekday(): index 0 = Monday ... 6 = Sunday. "

@@ -15,9 +15,7 @@ from tests.factories import (
 class TestAdminAccess:
     """Tests for admin access rights."""
 
-    async def test_admin_can_access_all_users(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_access_all_users(self, client, db_session, login_as):
         """Admin can view all users."""
         admin = AdminUserFactory()
         user1 = UserFactory()
@@ -34,9 +32,7 @@ class TestAdminAccess:
         response = await client.get(f"/users/{user2.id}")
         assert response.status_code == 200
 
-    async def test_admin_can_modify_all_users(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_modify_all_users(self, client, db_session, login_as):
         """Admin can update any user."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -62,9 +58,7 @@ class TestAdminAccess:
         response = await client.delete(f"/users/{user.id}")
         assert response.status_code == 200
 
-    async def test_admin_can_access_all_habits(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_access_all_habits(self, client, db_session, login_as):
         """Admin can view all habits."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -78,9 +72,7 @@ class TestAdminAccess:
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
 
-    async def test_admin_can_modify_all_habits(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_modify_all_habits(self, client, db_session, login_as):
         """Admin can update any habit."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -98,9 +90,7 @@ class TestAdminAccess:
         assert response.status_code == 200
         assert response.json()["name"] == "AdminModified"
 
-    async def test_admin_can_access_all_trackers(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_access_all_trackers(self, client, db_session, login_as):
         """Admin can view all trackers."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -121,9 +111,7 @@ class TestAdminAccess:
 class TestRegularUserAccess:
     """Tests for regular user access rights."""
 
-    async def test_user_can_only_see_own_data(
-        self, client, db_session, login_as
-    ):
+    async def test_user_can_only_see_own_data(self, client, db_session, login_as):
         """User sees only their own data."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -139,9 +127,7 @@ class TestRegularUserAccess:
         response = await client.get(f"/users/{user2.id}")
         assert response.status_code == 403
 
-    async def test_user_cannot_access_other_habits(
-        self, client, db_session, login_as
-    ):
+    async def test_user_cannot_access_other_habits(self, client, db_session, login_as):
         """User denied access to other's habits."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -155,9 +141,7 @@ class TestRegularUserAccess:
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 403
 
-    async def test_user_cannot_modify_other_habits(
-        self, client, db_session, login_as
-    ):
+    async def test_user_cannot_modify_other_habits(self, client, db_session, login_as):
         """User denied modification of other's habits."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -246,9 +230,7 @@ class TestAdminDependency:
 class TestOwnerDependency:
     """Tests for owner authorization dependency."""
 
-    async def test_owner_can_access_own_resource(
-        self, client, db_session, login_as
-    ):
+    async def test_owner_can_access_own_resource(self, client, db_session, login_as):
         """Owner can access their own resources."""
         user = UserFactory()
         await db_session.commit()
@@ -272,9 +254,7 @@ class TestOwnerDependency:
         response = await client.get(f"/habits/{habit_id}")
         assert response.status_code == 200
 
-    async def test_non_owner_cannot_access_resource(
-        self, client, db_session, login_as
-    ):
+    async def test_non_owner_cannot_access_resource(self, client, db_session, login_as):
         """Non-owner cannot access others' resources."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -301,9 +281,7 @@ class TestOwnerDependency:
         response = await client.get(f"/habits/{habit_id}")
         assert response.status_code == 403
 
-    async def test_admin_can_access_any_resource(
-        self, client, db_session, login_as
-    ):
+    async def test_admin_can_access_any_resource(self, client, db_session, login_as):
         """Admin can access any user's resources."""
         user = UserFactory()
         admin = AdminUserFactory()

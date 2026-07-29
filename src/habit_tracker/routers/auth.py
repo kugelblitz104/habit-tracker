@@ -98,9 +98,7 @@ async def login(
     # both columns are unique, so a single OR lookup resolves the account.
     identifier = form_data.username
     user = await db.execute(
-        select(User).filter(
-            (User.username == identifier) | (User.email == identifier)
-        )
+        select(User).filter((User.username == identifier) | (User.email == identifier))
     )
     user = user.scalar_one_or_none()
 
@@ -179,8 +177,7 @@ async def forgot_password(
 
     return {
         "message": (
-            "If an account exists for that email, a password reset link has "
-            "been sent."
+            "If an account exists for that email, a password reset link has been sent."
         )
     }
 

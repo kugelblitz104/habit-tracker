@@ -1,6 +1,7 @@
 """Tests for profile management endpoints."""
 
 from datetime import datetime, timedelta
+from typing import ClassVar
 
 from sqlalchemy import select
 
@@ -62,9 +63,7 @@ class TestListProfiles:
         names = [p["name"] for p in response.json()["profiles"]]
         assert names == ["Oldest", "Middle", "Newest"]
 
-    async def test_list_profiles_admin_with_user_id(
-        self, client, db_session, login_as
-    ):
+    async def test_list_profiles_admin_with_user_id(self, client, db_session, login_as):
         """Admin can list another user's profiles via user_id."""
         admin = AdminUserFactory(default_profile=False)
         user = UserFactory(default_profile=False)
@@ -98,9 +97,7 @@ class TestListProfiles:
         response = await client.get("/profiles/", params={"user_id": other_user.id})
         assert response.status_code == 403
 
-    async def test_list_profiles_unauthenticated(
-        self, client, db_session
-    ):
+    async def test_list_profiles_unauthenticated(self, client, db_session):
         """Unauthenticated request is rejected (401)."""
         response = await client.get("/profiles/")
         assert response.status_code == 401
@@ -162,9 +159,7 @@ class TestCreateProfile:
         assert data["week_start_monday"] is False
         assert data["use_habit_color_accent"] is True
 
-    async def test_create_profile_duplicate_name(
-        self, client, db_session, login_as
-    ):
+    async def test_create_profile_duplicate_name(self, client, db_session, login_as):
         """Duplicate profile name for the same user is rejected (409)."""
         user = UserFactory()
         await db_session.commit()
@@ -193,9 +188,7 @@ class TestCreateProfile:
         response = await client.post("/profiles/", json={"name": "Work"})
         assert response.status_code == 201
 
-    async def test_create_profile_invalid_color(
-        self, client, db_session, login_as
-    ):
+    async def test_create_profile_invalid_color(self, client, db_session, login_as):
         """Invalid gradient color is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -302,9 +295,7 @@ class TestGetProfile:
 class TestPatchProfile:
     """Tests for PATCH /profiles/{profile_id} endpoint."""
 
-    async def test_patch_profile_partial_update(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_partial_update(self, client, db_session, login_as):
         """Updating one field leaves the others untouched."""
         user = UserFactory()
         await db_session.commit()
@@ -325,9 +316,7 @@ class TestPatchProfile:
         assert data["color_start"] == "#112233"
         assert data["default_landing"] == "habits"
 
-    async def test_patch_profile_sets_updated_date(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_sets_updated_date(self, client, db_session, login_as):
         """Patching a profile stamps its updated_date."""
         user = UserFactory()
         await db_session.commit()
@@ -343,9 +332,7 @@ class TestPatchProfile:
         assert response.status_code == 200
         assert response.json()["updated_date"] is not None
 
-    async def test_patch_profile_duplicate_name(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_duplicate_name(self, client, db_session, login_as):
         """Renaming to another of the user's profile names is rejected (409)."""
         user = UserFactory()
         await db_session.commit()
@@ -385,9 +372,7 @@ class TestPatchProfile:
         assert data["calendar_enabled"] is False
         assert data["publish_to_azure"] is True
 
-    async def test_patch_profile_week_start_monday(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_week_start_monday(self, client, db_session, login_as):
         """week_start_monday can be flipped off and persists on read."""
         user = UserFactory()
         await db_session.commit()
@@ -584,9 +569,7 @@ class TestDeleteProfile:
 class TestRegisterCreatesDefaultProfile:
     """Tests for the default profile created by POST /auth/register."""
 
-    async def test_register_creates_personal_profile(
-        self, client, db_session
-    ):
+    async def test_register_creates_personal_profile(self, client, db_session):
         """Registering creates exactly one 'Personal' profile for the user."""
         response = await client.post(
             "/auth/register",
@@ -616,7 +599,7 @@ class TestRegisterCreatesDefaultProfile:
 class TestHabitProfileIntegration:
     """Tests for habit endpoints' profile resolution and filtering."""
 
-    HABIT_PAYLOAD = {
+    HABIT_PAYLOAD: ClassVar[dict[str, str | int]] = {
         "name": "Drink Water",
         "question": "Did you drink 8 glasses?",
         "color": "#00FF00",
@@ -683,9 +666,7 @@ class TestHabitProfileIntegration:
         )
         assert response.status_code == 400
 
-    async def test_list_user_habits_profile_filter(
-        self, client, db_session, login_as
-    ):
+    async def test_list_user_habits_profile_filter(self, client, db_session, login_as):
         """GET /users/{id}/habits?profile_id only returns that profile's habits."""
         user = UserFactory()
         await db_session.commit()

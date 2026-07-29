@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -111,11 +111,11 @@ async def list_user_habits(
         le=100,
         description="Maximum number of habits to return (1-100)",
     ),
-    profile_id: Optional[int] = Query(
+    profile_id: int | None = Query(
         default=None,
         description="Only habits belonging to this profile",
     ),
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, "

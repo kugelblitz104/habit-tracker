@@ -56,9 +56,7 @@ class TestRenderTasksMarkdown:
             {},
             today=today,
         )
-        assert (
-            doc.index("Priority two") < doc.index("Due near") < doc.index("Due far")
-        )
+        assert doc.index("Priority two") < doc.index("Due near") < doc.index("Due far")
 
     def test_subtasks_nest_under_parent_not_top_level(self):
         """Subtasks render indented under their parent, never top-level."""
@@ -146,9 +144,7 @@ class TestRenderTasksMarkdown:
 class TestExportTasksMarkdown:
     """Tests for GET /tasks/export endpoint."""
 
-    async def test_export_groups_tasks_by_band(
-        self, client, db_session, login_as
-    ):
+    async def test_export_groups_tasks_by_band(self, client, db_session, login_as):
         """Tasks land in Now/Soon/Whenever/Completed sections by band."""
         user = UserFactory()
         await db_session.commit()
@@ -277,13 +273,18 @@ class TestExportTasksMarkdown:
         assert response.status_code == 200
         body = response.text
         assert "- [ ] Bare task" in body
-        for detail in ("Status:", "Priority:", "Due:", "Scheduled:", "Project:",
-                       "Blocked:", "Notes:"):
+        for detail in (
+            "Status:",
+            "Priority:",
+            "Due:",
+            "Scheduled:",
+            "Project:",
+            "Blocked:",
+            "Notes:",
+        ):
             assert detail not in body
 
-    async def test_export_renders_set_detail_fields(
-        self, client, db_session, login_as
-    ):
+    async def test_export_renders_set_detail_fields(self, client, db_session, login_as):
         """Status/priority/due/scheduled/project/block reason all render."""
         user = UserFactory()
         await db_session.commit()
@@ -327,9 +328,7 @@ class TestExportTasksMarkdown:
         assert "  - Priority: Low" in body
         assert f"  - Scheduled: {scheduled.isoformat()} 09:15" in body
 
-    async def test_export_multiline_notes_indented(
-        self, client, db_session, login_as
-    ):
+    async def test_export_multiline_notes_indented(self, client, db_session, login_as):
         """Every notes line is indented under the task's Notes bullet."""
         user = UserFactory()
         await db_session.commit()
@@ -351,9 +350,7 @@ class TestExportTasksMarkdown:
             in response.text
         )
 
-    async def test_export_empty_profile_valid_doc(
-        self, client, db_session, login_as
-    ):
+    async def test_export_empty_profile_valid_doc(self, client, db_session, login_as):
         """A profile without tasks exports header only, sections omitted."""
         user = UserFactory()
         await db_session.commit()
@@ -393,9 +390,7 @@ class TestExportTasksMarkdown:
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 403
 
-    async def test_export_content_type_is_markdown(
-        self, client, db_session, login_as
-    ):
+    async def test_export_content_type_is_markdown(self, client, db_session, login_as):
         """The response is raw text/markdown, not JSON-wrapped."""
         user = UserFactory()
         await db_session.commit()
@@ -421,9 +416,7 @@ class TestActiveSortKeyMatchesListEndpointOrdering:
     sorting the same set in Python with ``_active_sort_key`` agrees.
     """
 
-    async def test_sql_and_python_orderings_agree(
-        self, client, db_session
-    ):
+    async def test_sql_and_python_orderings_agree(self, client, db_session):
         user = UserFactory()
         await db_session.commit()
         profile = ProfileFactory(user=user, name="Personal")
@@ -434,31 +427,45 @@ class TestActiveSortKeyMatchesListEndpointOrdering:
         # Deliberately scrambled priority / due_date / created_date so a
         # coincidental agreement can't hide a real ordering bug.
         TaskFactory(
-            profile=profile, title="Low, due soon, created late",
-            priority=1, due_date=today + timedelta(days=1),
+            profile=profile,
+            title="Low, due soon, created late",
+            priority=1,
+            due_date=today + timedelta(days=1),
             created_date=base + timedelta(minutes=5),
         )
         TaskFactory(
-            profile=profile, title="High, no due date, created first",
-            priority=3, due_date=None, created_date=base,
+            profile=profile,
+            title="High, no due date, created first",
+            priority=3,
+            due_date=None,
+            created_date=base,
         )
         TaskFactory(
-            profile=profile, title="High, due far, created middle",
-            priority=3, due_date=today + timedelta(days=10),
+            profile=profile,
+            title="High, due far, created middle",
+            priority=3,
+            due_date=today + timedelta(days=10),
             created_date=base + timedelta(minutes=1),
         )
         TaskFactory(
-            profile=profile, title="Low, no due date, created early",
-            priority=1, due_date=None, created_date=base + timedelta(seconds=1),
+            profile=profile,
+            title="Low, no due date, created early",
+            priority=1,
+            due_date=None,
+            created_date=base + timedelta(seconds=1),
         )
         TaskFactory(
-            profile=profile, title="Medium, due near, created last",
-            priority=2, due_date=today + timedelta(days=2),
+            profile=profile,
+            title="Medium, due near, created last",
+            priority=2,
+            due_date=today + timedelta(days=2),
             created_date=base + timedelta(minutes=10),
         )
         TaskFactory(
-            profile=profile, title="High, due near, created last",
-            priority=3, due_date=today + timedelta(days=1),
+            profile=profile,
+            title="High, due near, created last",
+            priority=3,
+            due_date=today + timedelta(days=1),
             created_date=base + timedelta(minutes=20),
         )
         await db_session.commit()

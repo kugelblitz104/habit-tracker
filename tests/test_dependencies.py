@@ -54,9 +54,7 @@ class TestDatabaseDependency:
         get_response = await client.get(f"/habits/{habit_id}")
         assert get_response.status_code == 200
 
-    async def test_database_rollback_on_error(
-        self, client, db_session, login_as
-    ):
+    async def test_database_rollback_on_error(self, client, db_session, login_as):
         """Database rolls back on error."""
         user = UserFactory()
         await db_session.commit()
@@ -93,9 +91,7 @@ class TestDatabaseDependency:
 class TestAuthDependency:
     """Tests for authentication dependency."""
 
-    async def test_current_user_from_valid_token(
-        self, client, db_session, login_as
-    ):
+    async def test_current_user_from_valid_token(self, client, db_session, login_as):
         """Current user is extracted from valid token."""
         user = UserFactory()
         await db_session.commit()
@@ -155,9 +151,7 @@ class TestAuthorizationHelperFunctions:
         # Should not raise exception
         authorize_resource_access(admin, other_user.id, "test")
 
-    async def test_authorize_resource_access_unauthorized(
-        self, db_session
-    ):
+    async def test_authorize_resource_access_unauthorized(self, db_session):
         """Unauthorized access raises 403."""
         from fastapi import HTTPException
 

@@ -4,8 +4,6 @@ Everything here is a plain helper called from inside a route function - unlike
 `core/dependencies.py`, nothing here is itself a FastAPI `Depends`.
 """
 
-from typing import Optional
-
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import ColumnElement, delete, func, select
@@ -23,7 +21,7 @@ async def bulk_delete_in_profile(
     *,
     resource_name: str,
     detail: str,
-    where: Optional[ColumnElement[bool]] = None,
+    where: ColumnElement[bool] | None = None,
 ) -> JSONResponse:
     """
     Delete every row of `model` scoped to a profile.
@@ -59,7 +57,9 @@ async def bulk_delete_in_profile(
     ).scalar() or 0
     await db.execute(delete(model).where(clause))
     await db.commit()
-    return JSONResponse(content={"detail": detail.format(count=count), "deleted": count})
+    return JSONResponse(
+        content={"detail": detail.format(count=count), "deleted": count}
+    )
 
 
 def integrity_conflict(detail: str) -> HTTPException:

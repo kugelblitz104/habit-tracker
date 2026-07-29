@@ -33,9 +33,7 @@ class TestListHabitTrackers:
         data = response.json()
         assert len(data["trackers"]) == 2
 
-    async def test_list_habit_trackers_pagination(
-        self, client, db_session, login_as
-    ):
+    async def test_list_habit_trackers_pagination(self, client, db_session, login_as):
         """Verify pagination with limit parameter."""
         user = UserFactory()
         await db_session.commit()
@@ -94,9 +92,7 @@ class TestListHabitTrackers:
         assert len(data["trackers"]) == 0
         assert data["total"] == 0
 
-    async def test_list_habit_trackers_unauthorized(
-        self, client, db_session, login_as
-    ):
+    async def test_list_habit_trackers_unauthorized(self, client, db_session, login_as):
         """User cannot access other's habit trackers (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -135,9 +131,7 @@ class TestListHabitTrackers:
         assert data["limit"] == 5
         assert len(data["trackers"]) == 5
 
-    async def test_list_habit_trackers_custom_limit(
-        self, client, db_session, login_as
-    ):
+    async def test_list_habit_trackers_custom_limit(self, client, db_session, login_as):
         """Test with custom limit value."""
         user = UserFactory()
         await db_session.commit()
@@ -207,9 +201,7 @@ class TestListHabitTrackersLite:
         assert data["end_date"] == date.today().isoformat()
         assert data["has_previous"] is False
 
-    async def test_list_trackers_lite_with_end_date(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_with_end_date(self, client, db_session, login_as):
         """List trackers with specific end_date."""
         user = UserFactory()
         await db_session.commit()
@@ -282,9 +274,7 @@ class TestListHabitTrackersLite:
         data = response.json()
         assert data["has_previous"] is False
 
-    async def test_list_trackers_lite_pagination(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_pagination(self, client, db_session, login_as):
         """Test paginating through trackers with different end_dates."""
         user = UserFactory()
         await db_session.commit()
@@ -316,9 +306,7 @@ class TestListHabitTrackersLite:
         assert data["total"] == 30
         assert data["has_previous"] is False
 
-    async def test_list_trackers_lite_empty_range(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_empty_range(self, client, db_session, login_as):
         """Returns empty list when no trackers in date range."""
         user = UserFactory()
         await db_session.commit()
@@ -339,9 +327,7 @@ class TestListHabitTrackersLite:
         assert len(data["trackers"]) == 0
         assert data["has_previous"] is True  # There is an older tracker
 
-    async def test_list_trackers_lite_unauthorized(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_unauthorized(self, client, db_session, login_as):
         """User cannot list other user's trackers (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -367,9 +353,7 @@ class TestListHabitTrackersLite:
         response = await client.get("/habits/99999/trackers/lite")
         assert response.status_code == 404
 
-    async def test_list_trackers_lite_has_note_flag(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_has_note_flag(self, client, db_session, login_as):
         """Verify has_note flag is correctly set."""
         user = UserFactory()
         await db_session.commit()
@@ -434,9 +418,7 @@ class TestListHabitTrackersLite:
             assert response.status_code == 200
             assert response.json()["end_date"] == expected_today.isoformat()
 
-    async def test_list_trackers_lite_invalid_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_list_trackers_lite_invalid_tz(self, client, db_session, login_as):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()
@@ -551,5 +533,3 @@ class TestListHabitTrackersLite:
 
         assert date.today().isoformat() in data["auto_skipped_dates"]
         assert [t["dated"] for t in data["trackers"]] == [date.today().isoformat()]
-
-

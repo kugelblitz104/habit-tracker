@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
@@ -121,7 +121,9 @@ async def create_calendar_connection(
     - **provider**: Optional free-form label ("Google", "iCloud", ...)
     - **enabled**: Whether the calendar's events are included (default: true)
     """
-    await get_owned_profile(db, connection.profile_id, current_user, "calendar connection")
+    await get_owned_profile(
+        db, connection.profile_id, current_user, "calendar connection"
+    )
 
     db_connection = CalendarConnection(**connection.model_dump())
     db.add(db_connection)
@@ -138,7 +140,7 @@ async def list_calendar_events(
     current_user: Annotated[User, Depends(get_current_user)],
     fetcher: Annotated[IcsFetcher, Depends(get_ics_fetcher)],
     profile_id: int = Query(description="The profile whose calendar events to list"),
-    target_date: Optional[date] = Query(
+    target_date: date | None = Query(
         default=None, description="The day to list events for (default: today)"
     ),
     days: int = Query(
@@ -150,7 +152,7 @@ async def list_calendar_events(
             "(default: 1, max: 14)"
         ),
     ),
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, the "
@@ -286,7 +288,9 @@ async def patch_calendar_connection(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise integrity_conflict("Calendar connection change violates a database constraint")
+        raise integrity_conflict(
+            "Calendar connection change violates a database constraint"
+        )
     await db.refresh(db_connection)
 
     return CalendarConnectionRead.model_validate(db_connection)
@@ -308,6 +312,4 @@ async def delete_calendar_connection(
 
     await db.delete(db_connection)
     await db.commit()
-    return JSONResponse(
-        content={"detail": "Calendar connection deleted successfully"}
-    )
+    return JSONResponse(content={"detail": "Calendar connection deleted successfully"})

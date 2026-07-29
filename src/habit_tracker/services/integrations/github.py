@@ -1,7 +1,6 @@
 """GitHub issues client (PAT auth)."""
 
 import logging
-from typing import List, Optional
 
 import httpx
 
@@ -20,7 +19,7 @@ _MAX_ITEMS = 200
 
 
 class GitHubClient:
-    def __init__(self, token: str, default_repo: Optional[str] = None):
+    def __init__(self, token: str, default_repo: str | None = None):
         self.token = token
         self.default_repo = default_repo
 
@@ -32,7 +31,7 @@ class GitHubClient:
             "User-Agent": "habit-tracker-integration",
         }
 
-    async def list_open_assigned(self) -> List[ExternalItem]:
+    async def list_open_assigned(self) -> list[ExternalItem]:
         try:
             async with httpx.AsyncClient(
                 timeout=TIMEOUT_SECONDS, follow_redirects=True, headers=self._headers()
@@ -49,7 +48,7 @@ class GitHubClient:
                 transport_error_message(exc, "GitHub", API_BASE)
             ) from exc
 
-        items: List[ExternalItem] = []
+        items: list[ExternalItem] = []
         for issue in resp.json()[:_MAX_ITEMS]:
             # The /issues feed includes pull requests; exclude them.
             if "pull_request" in issue:

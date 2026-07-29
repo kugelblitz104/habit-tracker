@@ -146,9 +146,11 @@ class HabitFactory(BaseFactory):
     # Reuse the user's existing (default) profile so a user's habits share
     # one profile; only create a profile if the user somehow has none.
     profile = LazyAttribute(
-        lambda habit: habit.user.profiles[0]
-        if habit.user.profiles
-        else ProfileFactory(user=habit.user)
+        lambda habit: (
+            habit.user.profiles[0]
+            if habit.user.profiles
+            else ProfileFactory(user=habit.user)
+        )
     )
     created_date = LazyFunction(datetime.now)
 

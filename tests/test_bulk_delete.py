@@ -34,9 +34,7 @@ class TestBulkDeleteAuth:
             response = await client.delete(path)
             assert response.status_code == 422, path
 
-    async def test_foreign_profile_forbidden(
-        self, client, db_session, login_as
-    ):
+    async def test_foreign_profile_forbidden(self, client, db_session, login_as):
         user = UserFactory()
         other_user = UserFactory()
         await db_session.commit()
@@ -50,9 +48,7 @@ class TestBulkDeleteAuth:
             response = await client.delete(path, params={"profile_id": foreign.id})
             assert response.status_code == 403, path
 
-    async def test_unknown_profile_not_found(
-        self, client, db_session, login_as
-    ):
+    async def test_unknown_profile_not_found(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
         await login_as(user)

@@ -14,8 +14,8 @@ take the habit, its trackers and ``today`` so they stay pure and unit-testable.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
-from typing import Iterable
 
 from habit_tracker.constants import TrackerStatus
 from habit_tracker.models.habits import HabitKPIs, HabitStreak
@@ -209,9 +209,7 @@ def _weekday_completion_rates(
             completed[wd] += 1
         day += timedelta(days=1)
 
-    return [
-        completed[wd] / totals[wd] if totals[wd] > 0 else 0.0 for wd in range(7)
-    ]
+    return [completed[wd] / totals[wd] if totals[wd] > 0 else 0.0 for wd in range(7)]
 
 
 def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> HabitKPIs:
@@ -225,14 +223,10 @@ def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> Ha
         for t in trackers
         if t.status == TrackerStatus.COMPLETED and t.dated is not None
     }
-    total_completions = sum(
-        1 for t in trackers if t.status == TrackerStatus.COMPLETED
-    )
+    total_completions = sum(1 for t in trackers if t.status == TrackerStatus.COMPLETED)
     last_completed_date = max(completed_dates) if completed_dates else None
 
-    streaks = calculate_streaks(
-        trackers, frequency, range_, habit.created_date, today
-    )
+    streaks = calculate_streaks(trackers, frequency, range_, habit.created_date, today)
     current_streak = _current_streak_length(streaks, today)
 
     longest_streak = 0
@@ -248,9 +242,7 @@ def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> Ha
     thirty_day_rate = _completion_rate(
         completed_dates, frequency, range_, thirty_day_start, today
     )
-    overall_rate = _completion_rate(
-        completed_dates, frequency, range_, start, today
-    )
+    overall_rate = _completion_rate(completed_dates, frequency, range_, start, today)
     weekday_rates = _weekday_completion_rates(completed_dates, start, today)
 
     return HabitKPIs(

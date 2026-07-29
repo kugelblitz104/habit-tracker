@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
@@ -34,7 +34,9 @@ def _profile_integrity_error(exc: IntegrityError) -> HTTPException:
     (user_id, name) is actually the one that fired.
     """
     if "uix_profile_user_name" in str(exc.orig or exc):
-        return integrity_conflict("A profile with this name already exists for this user")
+        return integrity_conflict(
+            "A profile with this name already exists for this user"
+        )
     return integrity_conflict("Profile change violates a database constraint")
 
 
@@ -42,7 +44,7 @@ def _profile_integrity_error(exc: IntegrityError) -> HTTPException:
 async def list_profiles(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    user_id: Optional[int] = Query(
+    user_id: int | None = Query(
         default=None,
         description="List another user's profiles (admins only)",
     ),

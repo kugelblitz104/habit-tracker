@@ -8,7 +8,6 @@ generated OpenAPI schema.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -28,4 +27,4 @@ class _StampedRead(_FromORM):
 
     id: int
     created_date: datetime
-    updated_date: Optional[datetime] = None
+    updated_date: datetime | None = None

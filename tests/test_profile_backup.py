@@ -5,7 +5,11 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 
 from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
-from habit_tracker.models.backup import IntegrationConnectionBackup, ProfileBackup
+from habit_tracker.models.backup import (
+    IntegrationConnectionBackup,
+    ProfileBackup,
+    ProfileSettings,
+)
 from habit_tracker.schemas.db_models import (
     Countdown,
     Habit,
@@ -258,9 +262,11 @@ class TestImportRoundTrip:
         # Tasks: subtask points at the imported parent, both in the new profile,
         # and the project link is remapped into the new profile's project.
         tasks = (
-            (await db_session.execute(
-                select(Task).where(Task.profile_id == new_profile_id)
-            ))
+            (
+                await db_session.execute(
+                    select(Task).where(Task.profile_id == new_profile_id)
+                )
+            )
             .scalars()
             .all()
         )
@@ -279,9 +285,11 @@ class TestImportRoundTrip:
 
         # Countdown relinked to the imported parent task.
         countdown = (
-            (await db_session.execute(
-                select(Countdown).where(Countdown.profile_id == new_profile_id)
-            ))
+            (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
             .scalars()
             .one()
         )
@@ -289,9 +297,11 @@ class TestImportRoundTrip:
 
         # Time entries: one attached to the imported task, one to the project.
         entries = (
-            (await db_session.execute(
-                select(TimeEntry).where(TimeEntry.profile_id == new_profile_id)
-            ))
+            (
+                await db_session.execute(
+                    select(TimeEntry).where(TimeEntry.profile_id == new_profile_id)
+                )
+            )
             .scalars()
             .all()
         )
@@ -303,16 +313,20 @@ class TestImportRoundTrip:
 
         # Tracker hangs off the imported habit.
         new_habit = (
-            (await db_session.execute(
-                select(Habit).where(Habit.profile_id == new_profile_id)
-            ))
+            (
+                await db_session.execute(
+                    select(Habit).where(Habit.profile_id == new_profile_id)
+                )
+            )
             .scalars()
             .one()
         )
         tracker = (
-            (await db_session.execute(
-                select(Tracker).where(Tracker.habit_id == new_habit.id)
-            ))
+            (
+                await db_session.execute(
+                    select(Tracker).where(Tracker.habit_id == new_habit.id)
+                )
+            )
             .scalars()
             .one()
         )
@@ -320,11 +334,13 @@ class TestImportRoundTrip:
 
         # Integration recreated disabled + tokenless for re-auth.
         conn = (
-            (await db_session.execute(
-                select(IntegrationConnection).where(
-                    IntegrationConnection.profile_id == new_profile_id
+            (
+                await db_session.execute(
+                    select(IntegrationConnection).where(
+                        IntegrationConnection.profile_id == new_profile_id
+                    )
                 )
-            ))
+            )
             .scalars()
             .one()
         )
@@ -351,33 +367,31 @@ class TestImportRoundTrip:
         new_profile = await db_session.get(Profile, summary["profile_id"])
         assert new_profile.user_id == other.id
 
-    async def test_import_rejects_unknown_format(
-        self, client, db_session, login_as
-    ):
+    async def test_import_rejects_unknown_format(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
         await login_as(user)
 
         backup = ProfileBackup(
             exported_at=datetime(2026, 7, 24, 12, 0),
-            profile={
-                "name": "X",
-                "color_start": "#e0763f",
-                "color_end": "#c14e6a",
-                "habits_enabled": True,
-                "countdowns_enabled": True,
-                "insights_enabled": True,
-                "calendar_enabled": True,
-                "publish_to_azure": False,
-                "default_landing": "today",
-                "week_start_monday": True,
-                "use_habit_color_accent": False,
-                "show_estimated_effort": False,
-                "pomodoro_work_minutes": 25,
-                "pomodoro_break_minutes": 5,
-                "pomodoro_long_break_minutes": 15,
-                "pomodoro_cycles": 4,
-            },
+            profile=ProfileSettings(
+                name="X",
+                color_start="#e0763f",
+                color_end="#c14e6a",
+                habits_enabled=True,
+                countdowns_enabled=True,
+                insights_enabled=True,
+                calendar_enabled=True,
+                publish_to_azure=False,
+                default_landing="today",
+                week_start_monday=True,
+                use_habit_color_accent=False,
+                show_estimated_effort=False,
+                pomodoro_work_minutes=25,
+                pomodoro_break_minutes=5,
+                pomodoro_long_break_minutes=15,
+                pomodoro_cycles=4,
+            ),
         )
         payload = backup.model_dump(mode="json")
         payload["format"] = "some-other-tool"
@@ -385,8 +399,6 @@ class TestImportRoundTrip:
         assert resp.status_code == 400
         assert "format" in resp.json()["detail"].lower()
 
-    async def test_import_requires_authentication(
-        self, client, db_session
-    ):
+    async def test_import_requires_authentication(self, client, db_session):
         resp = await client.post("/backup/profiles", json={})
         assert resp.status_code in (401, 422)

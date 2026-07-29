@@ -77,6 +77,4 @@ async def import_profile_backup(
         return await restore_profile_backup(db, current_user, backup)
     except BackupError as exc:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

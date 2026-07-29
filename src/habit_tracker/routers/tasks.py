@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -136,14 +136,14 @@ async def list_tasks(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     profile_id: int = Query(description="The profile whose tasks to list"),
-    project_id: Optional[int] = Query(
+    project_id: int | None = Query(
         default=None, description="Only tasks in this project"
     ),
-    band: Optional[str] = Query(
+    band: str | None = Query(
         default=None,
         description="Only tasks in this computed band (now, soon, whenever, hidden)",
     ),
-    task_status: Optional[int] = Query(
+    task_status: int | None = Query(
         default=None, alias="status", description="Only tasks with this status value"
     ),
     include_closed: bool = Query(
@@ -465,7 +465,7 @@ async def patch_task(
     # check below are each only conditionally reached, and the first raises
     # before the second when both apply, so at most one query ever runs -
     # this just avoids writing the same query twice.
-    _cached_subtask_total: Optional[int] = None
+    _cached_subtask_total: int | None = None
 
     async def subtask_total() -> int:
         nonlocal _cached_subtask_total
@@ -493,9 +493,7 @@ async def patch_task(
     )
 
     # Validate the resulting project (moved or kept) against the resulting profile
-    target_project_id = (
-        task_data["project_id"] if "project_id" in task_data else db_task.project_id
-    )
+    target_project_id = task_data.get("project_id", db_task.project_id)
     if target_project_id is not None:
         project = await db.get(Project, target_project_id)
         if not project or project.profile_id != target_profile_id:
@@ -507,19 +505,20 @@ async def patch_task(
     # A profile move may not leave subtasks behind: a task that has subtasks
     # cannot move (mirrors the project rule - profile coherence is enforced,
     # never silently fixed)
-    if new_profile_id is not None and new_profile_id != db_task.profile_id:
-        if await subtask_total():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot move a task with subtasks to another profile",
-            )
+    if (
+        new_profile_id is not None
+        and new_profile_id != db_task.profile_id
+        and await subtask_total()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot move a task with subtasks to another profile",
+        )
 
     # Validate the resulting parent (moved or kept) against the resulting
     # profile - so moving a subtask to another profile fails unless parent_id
     # is nulled in the same request
-    target_parent_id = (
-        task_data["parent_id"] if "parent_id" in task_data else db_task.parent_id
-    )
+    target_parent_id = task_data.get("parent_id", db_task.parent_id)
     if target_parent_id is not None:
         if target_parent_id == task_id:
             raise HTTPException(
@@ -535,12 +534,11 @@ async def patch_task(
         # ONE level deep: a task that has subtasks cannot itself become a
         # subtask (only reachable when parent_id is being set - an existing
         # subtask can never have subtasks of its own)
-        if "parent_id" in task_data:
-            if await subtask_total():
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="A task with subtasks cannot itself become a subtask",
-                )
+        if "parent_id" in task_data and await subtask_total():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A task with subtasks cannot itself become a subtask",
+            )
 
     # Status transitions: entering done/cancelled stamps closed_date (unless
     # already closed); leaving them for an active status clears it

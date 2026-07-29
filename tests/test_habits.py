@@ -72,9 +72,7 @@ class TestCreateHabit:
         assert data["notes"] == "Morning workout routine"
         assert data["sort_order"] == 10
 
-    async def test_create_habit_auto_assigns_user(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_auto_assigns_user(self, client, db_session, login_as):
         """Verify habit is assigned to current user."""
         user = UserFactory()
         await db_session.commit()
@@ -97,9 +95,7 @@ class TestCreateHabit:
         habit = await db_session.get(Habit, habit_id)
         assert habit.user_id == user.id
 
-    async def test_create_habit_invalid_color(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_invalid_color(self, client, db_session, login_as):
         """Reject invalid color format (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -118,9 +114,7 @@ class TestCreateHabit:
         )
         assert response.status_code == 422
 
-    async def test_create_habit_negative_frequency(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_negative_frequency(self, client, db_session, login_as):
         """Reject negative frequency (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -139,9 +133,7 @@ class TestCreateHabit:
         )
         assert response.status_code == 422
 
-    async def test_create_habit_negative_range(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_negative_range(self, client, db_session, login_as):
         """Reject negative range (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -160,9 +152,7 @@ class TestCreateHabit:
         )
         assert response.status_code == 422
 
-    async def test_create_habit_zero_frequency(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_zero_frequency(self, client, db_session, login_as):
         """Reject zero frequency (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -221,9 +211,7 @@ class TestCreateHabit:
         )
         assert response.status_code == 422
 
-    async def test_create_habit_with_sort_order(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_with_sort_order(self, client, db_session, login_as):
         """Create habit with custom sort order."""
         user = UserFactory()
         await db_session.commit()
@@ -244,9 +232,7 @@ class TestCreateHabit:
         assert response.status_code == 201
         assert response.json()["sort_order"] == 99
 
-    async def test_create_habit_archived_flag(
-        self, client, db_session, login_as
-    ):
+    async def test_create_habit_archived_flag(self, client, db_session, login_as):
         """Create habit with archived flag."""
         user = UserFactory()
         await db_session.commit()
@@ -325,9 +311,7 @@ class TestGetHabit:
         response = await client.get("/habits/99999")
         assert response.status_code == 404
 
-    async def test_get_habit_includes_today_status(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_includes_today_status(self, client, db_session, login_as):
         """Verify completed_today and skipped_today fields."""
         user = UserFactory()
         await db_session.commit()
@@ -385,9 +369,7 @@ class TestGetHabit:
         assert data["completed_today"] is False
         assert data["skipped_today"] is False
 
-    async def test_get_habit_today_status_honors_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_get_habit_today_status_honors_tz(self, client, db_session, login_as):
         """completed_today is computed against "today" in the requested zone.
 
         Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
@@ -414,9 +396,7 @@ class TestGetHabit:
         assert response.status_code == 200
         assert response.json()["completed_today"] is True
 
-        response = await client.get(
-            f"/habits/{habit.id}", params={"tz": other_tz_name}
-        )
+        response = await client.get(f"/habits/{habit.id}", params={"tz": other_tz_name})
         assert response.status_code == 200
         assert response.json()["completed_today"] is False
 
@@ -430,9 +410,7 @@ class TestGetHabit:
 
         await login_as(user)
 
-        response = await client.get(
-            f"/habits/{habit.id}", params={"tz": "Not/AZone"}
-        )
+        response = await client.get(f"/habits/{habit.id}", params={"tz": "Not/AZone"})
         assert response.status_code == 422
         assert "Invalid timezone" in response.json()["detail"]
 
@@ -469,9 +447,7 @@ class TestUpdateHabitPut:
         assert data["name"] == "Updated"
         assert data["question"] == "Updated question?"
 
-    async def test_update_other_user_habit_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_other_user_habit_put(self, client, db_session, login_as):
         """User cannot update other's habit (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -494,9 +470,7 @@ class TestUpdateHabitPut:
         )
         assert response.status_code == 403
 
-    async def test_update_habit_all_fields_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_all_fields_put(self, client, db_session, login_as):
         """Verify all fields are updated."""
         user = UserFactory()
         await db_session.commit()
@@ -570,9 +544,7 @@ class TestUpdateHabitPut:
         assert response.status_code == 200
         assert response.json()["color"] == "#FF5733"
 
-    async def test_update_habit_frequency_range_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_frequency_range_put(self, client, db_session, login_as):
         """Update frequency and range."""
         user = UserFactory()
         await db_session.commit()
@@ -629,9 +601,7 @@ class TestUpdateHabitPut:
         assert response.status_code == 200
         assert response.json()["archived"] is True
 
-    async def test_update_nonexistent_habit_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_nonexistent_habit_put(self, client, db_session, login_as):
         """Return 404 for non-existent habit."""
         user = UserFactory()
         await db_session.commit()
@@ -658,9 +628,7 @@ class TestUpdateHabitPut:
 class TestUpdateHabitPatch:
     """Tests for PATCH /habits/{habit_id} endpoint."""
 
-    async def test_update_habit_single_field_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_single_field_patch(self, client, db_session, login_as):
         """Update only one field."""
         user = UserFactory()
         await db_session.commit()
@@ -715,9 +683,7 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["name"] == "New Name"
 
-    async def test_update_habit_question_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_question_patch(self, client, db_session, login_as):
         """Update habit question."""
         user = UserFactory()
         await db_session.commit()
@@ -751,9 +717,7 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["notes"] == "Updated notes"
 
-    async def test_update_habit_reminder_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_reminder_patch(self, client, db_session, login_as):
         """Toggle reminder setting."""
         user = UserFactory()
         await db_session.commit()
@@ -770,9 +734,7 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["reminder"] is True
 
-    async def test_update_habit_sort_order_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_habit_sort_order_patch(self, client, db_session, login_as):
         """Update sort order."""
         user = UserFactory()
         await db_session.commit()
@@ -789,9 +751,7 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["sort_order"] == 50
 
-    async def test_update_other_user_habit_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_other_user_habit_patch(self, client, db_session, login_as):
         """User cannot update other's habit (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -1069,9 +1029,7 @@ class TestSortHabits:
         )
         assert response.status_code == 403
 
-    async def test_sort_habits_mixed_ownership(
-        self, client, db_session, login_as
-    ):
+    async def test_sort_habits_mixed_ownership(self, client, db_session, login_as):
         """Cannot sort habits when some belong to other users (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -1092,9 +1050,7 @@ class TestSortHabits:
         )
         assert response.status_code == 403
 
-    async def test_sort_habits_unauthenticated(
-        self, client, db_session
-    ):
+    async def test_sort_habits_unauthenticated(self, client, db_session):
         """Unauthenticated users cannot sort habits (401)."""
         user = UserFactory()
         await db_session.commit()

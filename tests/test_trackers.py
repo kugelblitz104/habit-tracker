@@ -107,9 +107,7 @@ class TestCreateTracker:
         data = response.json()
         assert data["note"] == "Felt great today!"
 
-    async def test_create_tracker_custom_date(
-        self, client, db_session, login_as
-    ):
+    async def test_create_tracker_custom_date(self, client, db_session, login_as):
         """Create tracker for specific date."""
         user = UserFactory()
         await db_session.commit()
@@ -156,9 +154,7 @@ class TestCreateTracker:
         )
         assert response.status_code == 403
 
-    async def test_create_tracker_nonexistent_habit(
-        self, client, db_session, login_as
-    ):
+    async def test_create_tracker_nonexistent_habit(self, client, db_session, login_as):
         """Return 404 for non-existent habit."""
         user = UserFactory()
         await db_session.commit()
@@ -200,9 +196,7 @@ class TestCreateTracker:
         # Currently the API accepts any integer (no validation)
         assert response.status_code in [201, 422]
 
-    async def test_create_tracker_duplicate_date(
-        self, client, db_session, login_as
-    ):
+    async def test_create_tracker_duplicate_date(self, client, db_session, login_as):
         """Handle duplicate tracker for same date."""
         user = UserFactory()
         await db_session.commit()
@@ -326,9 +320,7 @@ class TestUpdateTrackerPut:
         assert data["status"] == TrackerStatus.SKIPPED
         assert data["note"] == "Updated note"
 
-    async def test_update_other_user_tracker_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_other_user_tracker_put(self, client, db_session, login_as):
         """User cannot update other's tracker (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -376,9 +368,7 @@ class TestUpdateTrackerPut:
         assert response.status_code == 200
         assert response.json()["status"] == TrackerStatus.COMPLETED
 
-    async def test_update_tracker_skip_status_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_tracker_skip_status_put(self, client, db_session, login_as):
         """Update skip status."""
         user = UserFactory()
         await db_session.commit()
@@ -449,9 +439,7 @@ class TestUpdateTrackerPut:
         assert response.status_code == 200
         assert response.json()["note"] == "Updated note"
 
-    async def test_update_nonexistent_tracker_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_nonexistent_tracker_put(self, client, db_session, login_as):
         """Return 404 for non-existent tracker."""
         user = UserFactory()
         await db_session.commit()
@@ -537,9 +525,7 @@ class TestUpdateTrackerPatch:
         assert response.status_code == 200
         assert response.json()["status"] == TrackerStatus.SKIPPED
 
-    async def test_update_tracker_add_note_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_tracker_add_note_patch(self, client, db_session, login_as):
         """Add note to existing tracker."""
         user = UserFactory()
         await db_session.commit()
@@ -559,9 +545,7 @@ class TestUpdateTrackerPatch:
         assert response.status_code == 200
         assert response.json()["note"] == "Added note"
 
-    async def test_update_tracker_clear_note_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_tracker_clear_note_patch(self, client, db_session, login_as):
         """Clear note from tracker."""
         user = UserFactory()
         await db_session.commit()
@@ -607,9 +591,7 @@ class TestUpdateTrackerPatch:
         assert data["status"] == TrackerStatus.NOT_COMPLETED
         assert data["note"] == "Updated"
 
-    async def test_update_other_user_tracker_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_other_user_tracker_patch(self, client, db_session, login_as):
         """User cannot update other's tracker (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -690,9 +672,7 @@ class TestDeleteTracker:
         response = await client.delete(f"/trackers/{tracker_id}")
         assert response.status_code == 200
 
-    async def test_delete_nonexistent_tracker(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_nonexistent_tracker(self, client, db_session, login_as):
         """Return 404 for non-existent tracker."""
         user = UserFactory()
         await db_session.commit()

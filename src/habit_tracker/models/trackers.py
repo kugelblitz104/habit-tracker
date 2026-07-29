@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional, overload
+from typing import overload
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
@@ -14,7 +14,7 @@ _STATUS_VALUES = [s.value for s in TrackerStatus]
 def _validate_status(v: int) -> int: ...
 @overload
 def _validate_status(v: None) -> None: ...
-def _validate_status(v: Optional[int]) -> Optional[int]:
+def _validate_status(v: int | None) -> int | None:
     return validate_membership(
         v, _STATUS_VALUES, "Status must be a valid TrackerStatus value"
     )
@@ -25,7 +25,7 @@ class TrackerBase(BaseModel):
     habit_id: int
     dated: date = Field(default_factory=date.today)
     status: int = Field()
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class TrackerCreate(TrackerBase):
@@ -46,9 +46,9 @@ class TrackerLite(_FromORM):
 
 
 class TrackerUpdate(BaseModel):
-    dated: Optional[date] = None
-    status: Optional[int] = None  # 0=not completed, 1=skipped, 2=completed
-    note: Optional[str] = None
+    dated: date | None = None
+    status: int | None = None  # 0=not completed, 1=skipped, 2=completed
+    note: str | None = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
     @field_validator("dated", "status")
@@ -60,12 +60,12 @@ class TrackerUpdate(BaseModel):
 
     @field_validator("status")
     @classmethod
-    def validate_status(cls, v: Optional[int]) -> Optional[int]:
+    def validate_status(cls, v: int | None) -> int | None:
         return _validate_status(v)
 
 
 class TrackerList(BaseModel):
-    trackers: List[TrackerRead] = []
+    trackers: list[TrackerRead] = []
     total: int
     limit: int
     offset: int
@@ -74,11 +74,11 @@ class TrackerList(BaseModel):
 class TrackerLiteList(BaseModel):
     """Lightweight tracker list for efficient data fetching with date-based pagination."""
 
-    trackers: List[TrackerLite] = []
+    trackers: list[TrackerLite] = []
     total: int
     end_date: date
     days: int
     has_previous: bool = False  # Indicates if there are older trackers
-    auto_skipped_dates: List[date] = Field(
+    auto_skipped_dates: list[date] = Field(
         default_factory=list,
     )

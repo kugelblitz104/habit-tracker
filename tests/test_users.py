@@ -79,9 +79,7 @@ class TestGetUser:
 class TestListUsers:
     """Tests for GET /users/ endpoint."""
 
-    async def test_list_users_as_regular_user(
-        self, client, db_session, login_as
-    ):
+    async def test_list_users_as_regular_user(self, client, db_session, login_as):
         """Regular user sees only themselves."""
         user1 = UserFactory()
         UserFactory()
@@ -157,9 +155,7 @@ class TestListUsers:
         response = await client.get("/users/?limit=101")
         assert response.status_code == 422  # Validation error
 
-    async def test_list_users_returns_total_count(
-        self, client, db_session, login_as
-    ):
+    async def test_list_users_returns_total_count(self, client, db_session, login_as):
         """Verify total count in response."""
         admin = AdminUserFactory()
         for _ in range(7):
@@ -204,9 +200,7 @@ class TestUpdateUserPut:
         assert data["last_name"] == "User"
         assert data["email"] == "updated@example.com"
 
-    async def test_update_other_user_as_regular_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_other_user_as_regular_put(self, client, db_session, login_as):
         """Regular user cannot update other profiles (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -251,9 +245,7 @@ class TestUpdateUserPut:
         data = response.json()
         assert data["username"] == "adminupdated"
 
-    async def test_update_user_all_fields_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_user_all_fields_put(self, client, db_session, login_as):
         """Verify all fields are updated."""
         user = UserFactory(
             username="original",
@@ -283,9 +275,7 @@ class TestUpdateUserPut:
         assert data["last_name"] == "Name"
         assert data["email"] == "new@example.com"
 
-    async def test_update_nonexistent_user_put(
-        self, client, db_session, login_as
-    ):
+    async def test_update_nonexistent_user_put(self, client, db_session, login_as):
         """Return 404 for non-existent user."""
         admin = AdminUserFactory()
         await db_session.commit()
@@ -354,9 +344,7 @@ class TestUpdateUserPatch:
         assert data["first_name"] == "Patched"
         assert data["username"] == "patchuser"  # Unchanged
 
-    async def test_update_user_single_field_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_user_single_field_patch(self, client, db_session, login_as):
         """Update only one field."""
         user = UserFactory()
         original_username = user.username
@@ -393,9 +381,7 @@ class TestUpdateUserPatch:
         assert data["first_name"] == "Multi"
         assert data["last_name"] == "Update"
 
-    async def test_update_user_username_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_user_username_patch(self, client, db_session, login_as):
         """Update username."""
         user = UserFactory()
         await db_session.commit()
@@ -444,9 +430,7 @@ class TestUpdateUserPatch:
         assert data["first_name"] == "NewFirst"
         assert data["last_name"] == "NewLast"
 
-    async def test_update_user_password_patch(
-        self, client, db_session, login_as
-    ):
+    async def test_update_user_password_patch(self, client, db_session, login_as):
         """Verify password can be updated via PATCH."""
         user = UserFactory()
         await db_session.commit()
@@ -506,9 +490,7 @@ class TestDeleteUser:
         result = await db_session.execute(select(User).filter(User.id == user_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_other_user_as_regular(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_other_user_as_regular(self, client, db_session, login_as):
         """Regular user cannot delete other accounts (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -549,9 +531,7 @@ class TestDeleteUser:
         response = await client.delete("/users/99999")
         assert response.status_code == 404
 
-    async def test_delete_user_cascades_to_habits(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_user_cascades_to_habits(self, client, db_session, login_as):
         """Verify habits are deleted with user."""
         user = UserFactory()
         await db_session.commit()
@@ -571,9 +551,7 @@ class TestDeleteUser:
         result = await db_session.execute(select(Habit).filter(Habit.id == habit_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_user_cascades_to_trackers(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_user_cascades_to_trackers(self, client, db_session, login_as):
         """Verify trackers are deleted with user."""
         user = UserFactory()
         await db_session.commit()
@@ -655,9 +633,7 @@ class TestListUserHabits:
         data = response.json()
         assert data["total"] == 1
 
-    async def test_list_user_habits_pagination(
-        self, client, db_session, login_as
-    ):
+    async def test_list_user_habits_pagination(self, client, db_session, login_as):
         """Verify pagination with limit parameter."""
         user = UserFactory()
         await db_session.commit()
@@ -691,9 +667,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Create trackers for today
-        TrackerFactory(
-            habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED
-        )
+        TrackerFactory(habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED)
         TrackerFactory(habit=habit2, dated=date.today(), status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
@@ -740,9 +714,7 @@ class TestListUserHabits:
 
         await login_as(user)
 
-        response = await client.get(
-            f"/users/{user.id}/habits", params={"tz": tz_name}
-        )
+        response = await client.get(f"/users/{user.id}/habits", params={"tz": tz_name})
         assert response.status_code == 200
         assert response.json()["habits"][0]["completed_today"] is True
 
@@ -752,9 +724,7 @@ class TestListUserHabits:
         assert response.status_code == 200
         assert response.json()["habits"][0]["completed_today"] is False
 
-    async def test_list_user_habits_invalid_tz(
-        self, client, db_session, login_as
-    ):
+    async def test_list_user_habits_invalid_tz(self, client, db_session, login_as):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()

@@ -93,9 +93,7 @@ class TestListCalendarConnections:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        CalendarConnectionFactory(
-            profile=profile, cached_ics=CANNED_ICS, etag='"v1"'
-        )
+        CalendarConnectionFactory(profile=profile, cached_ics=CANNED_ICS, etag='"v1"')
         await db_session.commit()
 
         await login_as(user)
@@ -238,9 +236,7 @@ class TestCreateCalendarConnection:
         )
         assert response.status_code == 404
 
-    async def test_create_connection_invalid_url(
-        self, client, db_session, login_as
-    ):
+    async def test_create_connection_invalid_url(self, client, db_session, login_as):
         """A URL that is not http(s)/webcal is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -261,9 +257,7 @@ class TestCreateCalendarConnection:
         )
         assert response.status_code == 422
 
-    async def test_create_connection_invalid_color(
-        self, client, db_session, login_as
-    ):
+    async def test_create_connection_invalid_color(self, client, db_session, login_as):
         """Invalid color is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -307,9 +301,7 @@ class TestGetCalendarConnection:
         assert data["id"] == connection.id
         assert data["name"] == "Work"
 
-    async def test_get_nonexistent_connection(
-        self, client, db_session, login_as
-    ):
+    async def test_get_nonexistent_connection(self, client, db_session, login_as):
         """Return 404 for non-existent connection."""
         user = UserFactory()
         await db_session.commit()
@@ -319,9 +311,7 @@ class TestGetCalendarConnection:
         response = await client.get("/calendar-connections/99999")
         assert response.status_code == 404
 
-    async def test_get_other_user_connection(
-        self, client, db_session, login_as
-    ):
+    async def test_get_other_user_connection(self, client, db_session, login_as):
         """User cannot access a connection in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -382,9 +372,7 @@ class TestPatchCalendarConnection:
         assert response.status_code == 200
         assert response.json()["enabled"] is False
 
-    async def test_patch_url_change_clears_cache(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_url_change_clears_cache(self, client, db_session, login_as):
         """Changing the URL clears cached_ics/etag/last_fetched_at/last_error."""
         user = UserFactory()
         await db_session.commit()
@@ -416,9 +404,7 @@ class TestPatchCalendarConnection:
         assert connection.last_fetched_at is None
         assert connection.last_error is None
 
-    async def test_patch_same_url_keeps_cache(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_same_url_keeps_cache(self, client, db_session, login_as):
         """Re-sending the same URL does not throw the cache away."""
         user = UserFactory()
         await db_session.commit()
@@ -447,9 +433,7 @@ class TestPatchCalendarConnection:
         assert connection.cached_ics == CANNED_ICS
         assert connection.etag == '"v1"'
 
-    async def test_patch_connection_null_name(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_connection_null_name(self, client, db_session, login_as):
         """An explicit null for the non-nullable name is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -467,9 +451,7 @@ class TestPatchCalendarConnection:
         )
         assert response.status_code == 422
 
-    async def test_patch_other_user_connection(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_other_user_connection(self, client, db_session, login_as):
         """User cannot patch a connection in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -509,15 +491,11 @@ class TestDeleteCalendarConnection:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(CalendarConnection).filter(
-                CalendarConnection.id == connection.id
-            )
+            select(CalendarConnection).filter(CalendarConnection.id == connection.id)
         )
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_other_user_connection(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_other_user_connection(self, client, db_session, login_as):
         """User cannot delete a connection in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -534,9 +512,7 @@ class TestDeleteCalendarConnection:
         response = await client.delete(f"/calendar-connections/{connection.id}")
         assert response.status_code == 403
 
-    async def test_delete_nonexistent_connection(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_nonexistent_connection(self, client, db_session, login_as):
         """Return 404 for non-existent connection."""
         user = UserFactory()
         await db_session.commit()
@@ -550,9 +526,7 @@ class TestDeleteCalendarConnection:
 class TestCalendarEvents:
     """Tests for GET /calendar-connections/events endpoint."""
 
-    async def test_events_normalized_and_ordered(
-        self, client, db_session, login_as
-    ):
+    async def test_events_normalized_and_ordered(self, client, db_session, login_as):
         """Events are normalized, recurrence-expanded, all-day first, then by
         start; events on other days are excluded."""
         user = UserFactory()
@@ -598,9 +572,7 @@ class TestCalendarEvents:
         assert timed["end"] == "2026-07-09T15:00:00-04:00"
         assert timed["location"] == "Room 4"
 
-    async def test_events_default_date_is_today(
-        self, client, db_session, login_as
-    ):
+    async def test_events_default_date_is_today(self, client, db_session, login_as):
         """Without target_date the endpoint returns today's events."""
         user = UserFactory()
         await db_session.commit()
@@ -690,9 +662,7 @@ class TestCalendarEvents:
         assert fetcher.urls == [enabled.url]
         assert {e["connection_id"] for e in data["events"]} == {enabled.id}
 
-    async def test_events_cache_hit_within_ttl(
-        self, client, db_session, login_as
-    ):
+    async def test_events_cache_hit_within_ttl(self, client, db_session, login_as):
         """Two events calls within the TTL fetch the feed exactly once."""
         user = UserFactory()
         await db_session.commit()
@@ -767,9 +737,7 @@ class TestCalendarEvents:
         assert connection.cached_ics == CANNED_ICS  # stale cache kept
         assert connection.last_fetched_at > stale  # attempt time recorded
 
-    async def test_events_failure_backoff(
-        self, client, db_session, login_as
-    ):
+    async def test_events_failure_backoff(self, client, db_session, login_as):
         """A failed feed is not re-attempted within the 5-minute error TTL
         (stale cache still served), but IS re-attempted once the backoff has
         elapsed."""
@@ -1003,9 +971,7 @@ class TestCalendarEvents:
         assert len(data["errors"]) == 1
         assert data["errors"][0].startswith("Broken:")
 
-    async def test_events_tz_day_boundaries(
-        self, client, db_session, login_as
-    ):
+    async def test_events_tz_day_boundaries(self, client, db_session, login_as):
         """A UTC-encoded evening event (2026-07-10T01:00Z == 2026-07-09 21:00
         in New York) belongs to 2026-07-09 when tz=America/New_York, but not
         when tz is omitted or UTC."""
@@ -1084,9 +1050,7 @@ class TestCalendarEvents:
         assert all_day["title"] == "All day thing"
         assert all_day["all_day"] is True
 
-    async def test_events_invalid_tz_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_events_invalid_tz_rejected(self, client, db_session, login_as):
         """An invalid IANA timezone name is rejected with 422."""
         user = UserFactory()
         await db_session.commit()
@@ -1156,9 +1120,7 @@ class TestCalendarEvents:
         assert data["errors"] == []
         assert fetcher.calls == 0
 
-    async def test_events_multi_day_window(
-        self, client, db_session, login_as
-    ):
+    async def test_events_multi_day_window(self, client, db_session, login_as):
         """days=2 returns both days' events, each stamped with the event_date
         it belongs to, ordered by (event_date, all-day first, start); the feed
         is still fetched only once per connection."""
@@ -1261,9 +1223,7 @@ class TestCalendarEvents:
         )
         assert response.status_code == 422
 
-    async def test_events_default_days_single_day(
-        self, client, db_session, login_as
-    ):
+    async def test_events_default_days_single_day(self, client, db_session, login_as):
         """Without days the endpoint returns exactly the single-day events as
         before, each stamped with event_date == target_date."""
         user = UserFactory()
@@ -1289,6 +1249,4 @@ class TestCalendarEvents:
         titles = [e["title"] for e in data["events"]]
         assert titles == ["All day thing", "Weekly standup", "Timed meeting"]
         assert "Tomorrow only" not in titles
-        assert all(
-            e["event_date"] == TARGET_DATE.isoformat() for e in data["events"]
-        )
+        assert all(e["event_date"] == TARGET_DATE.isoformat() for e in data["events"])

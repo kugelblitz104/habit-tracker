@@ -1,11 +1,12 @@
 from datetime import date, datetime, timedelta
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -26,7 +27,6 @@ from habit_tracker.models import (
     TrackerLiteList,
     TrackerRead,
 )
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 from habit_tracker.services.habit_stats import (
     auto_skip_lookback_start,
@@ -139,7 +139,7 @@ async def read_habit(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, "
@@ -218,7 +218,7 @@ async def list_habit_trackers_lite(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    end_date: Optional[date] = Query(
+    end_date: date | None = Query(
         default=None,
         description="End date for the date range (defaults to today). Format: YYYY-MM-DD",
     ),
@@ -228,7 +228,7 @@ async def list_habit_trackers_lite(
         le=3660,
         description="Number of days to fetch (1-3660, default: 42 = 6 weeks)",
     ),
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, "
@@ -340,7 +340,7 @@ async def read_habit_kpis(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, "
@@ -361,9 +361,7 @@ async def read_habit_kpis(
     """
     habit = await get_owned_habit(db, habit_id, current_user)
 
-    result = await db.execute(
-        select(Tracker).filter(Tracker.habit_id == habit_id)
-    )
+    result = await db.execute(select(Tracker).filter(Tracker.habit_id == habit_id))
     trackers = result.scalars().all()
 
     today = resolve_today(tz)
@@ -375,7 +373,7 @@ async def read_habit_streaks(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
-    tz: Optional[str] = Query(
+    tz: str | None = Query(
         default=None,
         description=(
             "IANA timezone name (e.g. 'America/New_York'). When provided, "
@@ -397,9 +395,7 @@ async def read_habit_streaks(
     """
     habit = await get_owned_habit(db, habit_id, current_user)
 
-    result = await db.execute(
-        select(Tracker).filter(Tracker.habit_id == habit_id)
-    )
+    result = await db.execute(select(Tracker).filter(Tracker.habit_id == habit_id))
     trackers = result.scalars().all()
 
     today = resolve_today(tz)

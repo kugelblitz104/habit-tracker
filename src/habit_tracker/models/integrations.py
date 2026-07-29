@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import (
     BaseModel,
@@ -32,14 +31,14 @@ class IntegrationConnectionBase(BaseModel):
     provider: str
     name: str
     # Azure DevOps
-    organization: Optional[str] = None
-    project: Optional[str] = None
-    work_item_type: Optional[str] = None
+    organization: str | None = None
+    project: str | None = None
+    work_item_type: str | None = None
     # Optional host root for on-prem Azure DevOps Server / TFS (e.g.
     # "https://tfs.example.com"); leave unset for the public cloud.
-    base_url: Optional[str] = None
+    base_url: str | None = None
     # GitHub
-    default_repo: Optional[str] = None
+    default_repo: str | None = None
     enabled: bool = True
 
     @field_validator("provider")
@@ -54,7 +53,7 @@ class IntegrationConnectionBase(BaseModel):
 
     @field_validator("default_repo")
     @classmethod
-    def validate_default_repo(cls, v: Optional[str]) -> Optional[str]:
+    def validate_default_repo(cls, v: str | None) -> str | None:
         # Empty string -> treat as unset; otherwise must look like "owner/repo".
         if v is None or not v.strip():
             return None
@@ -62,7 +61,7 @@ class IntegrationConnectionBase(BaseModel):
 
     @field_validator("base_url")
     @classmethod
-    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_base_url(cls, v: str | None) -> str | None:
         return normalize_base_url(v)
 
     @model_validator(mode="after")
@@ -93,22 +92,22 @@ class IntegrationConnectionRead(IntegrationConnectionBase, _FromORM):
     id: int
     profile_id: int
     has_token: bool = False
-    last_synced_at: Optional[datetime] = None
-    last_error: Optional[str] = None
+    last_synced_at: datetime | None = None
+    last_error: str | None = None
     created_date: datetime
-    updated_date: Optional[datetime] = None
+    updated_date: datetime | None = None
 
 
 class IntegrationConnectionUpdate(BaseModel):
-    name: Optional[str] = None
-    organization: Optional[str] = None
-    project: Optional[str] = None
-    work_item_type: Optional[str] = None
-    base_url: Optional[str] = None
-    default_repo: Optional[str] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    organization: str | None = None
+    project: str | None = None
+    work_item_type: str | None = None
+    base_url: str | None = None
+    default_repo: str | None = None
+    enabled: bool | None = None
     # Provide to rotate the PAT; omit to leave it unchanged.
-    token: Optional[str] = None
+    token: str | None = None
 
     @field_validator("name", "enabled")
     @classmethod
@@ -117,29 +116,29 @@ class IntegrationConnectionUpdate(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Name")
 
     @field_validator("token")
     @classmethod
-    def validate_token(cls, v: Optional[str]) -> Optional[str]:
+    def validate_token(cls, v: str | None) -> str | None:
         return non_empty_token(v)
 
     @field_validator("default_repo")
     @classmethod
-    def validate_default_repo(cls, v: Optional[str]) -> Optional[str]:
+    def validate_default_repo(cls, v: str | None) -> str | None:
         if v is None or not v.strip():
             return v
         return validate_owner_repo(v.strip())
 
     @field_validator("base_url")
     @classmethod
-    def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_base_url(cls, v: str | None) -> str | None:
         return normalize_base_url(v)
 
 
 class IntegrationConnectionList(BaseModel):
-    integration_connections: List[IntegrationConnectionRead] = []
+    integration_connections: list[IntegrationConnectionRead] = []
     total: int
     limit: int
     offset: int
@@ -152,8 +151,8 @@ class IntegrationSyncResult(BaseModel):
     message: str
     tasks_imported: int = 0
     tasks_skipped: int = 0
-    details: List[str] = []  # external refs of imported items
-    errors: List[str] = []
+    details: list[str] = []  # external refs of imported items
+    errors: list[str] = []
 
 
 class PublishRequest(BaseModel):

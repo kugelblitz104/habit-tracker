@@ -28,9 +28,7 @@ class TestListCountdowns:
         response = await client.get("/countdowns/")
         assert response.status_code == 422
 
-    async def test_list_countdowns_unknown_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_list_countdowns_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
@@ -40,9 +38,7 @@ class TestListCountdowns:
         response = await client.get("/countdowns/", params={"profile_id": 99999})
         assert response.status_code == 404
 
-    async def test_list_countdowns_foreign_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_list_countdowns_foreign_profile(self, client, db_session, login_as):
         """Cannot list countdowns of another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -53,9 +49,7 @@ class TestListCountdowns:
 
         await login_as(user)
 
-        response = await client.get(
-            "/countdowns/", params={"profile_id": foreign.id}
-        )
+        response = await client.get("/countdowns/", params={"profile_id": foreign.id})
         assert response.status_code == 403
 
     async def test_list_countdowns_scoped_to_profile(
@@ -76,9 +70,7 @@ class TestListCountdowns:
 
         await login_as(user)
 
-        response = await client.get(
-            "/countdowns/", params={"profile_id": profile.id}
-        )
+        response = await client.get("/countdowns/", params={"profile_id": profile.id})
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 2
@@ -109,9 +101,7 @@ class TestListCountdowns:
 
         await login_as(user)
 
-        response = await client.get(
-            "/countdowns/", params={"profile_id": profile.id}
-        )
+        response = await client.get("/countdowns/", params={"profile_id": profile.id})
         assert response.status_code == 200
         ids = [c["id"] for c in response.json()["countdowns"]]
         assert ids == [soonest.id, middle.id, later.id]
@@ -175,9 +165,7 @@ class TestCreateCountdown:
         assert data["repeat"] == "none"
         assert data["show_occurrence"] is False
 
-    async def test_create_countdown_foreign_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_foreign_profile(self, client, db_session, login_as):
         """Cannot create a countdown in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -198,9 +186,7 @@ class TestCreateCountdown:
         )
         assert response.status_code == 403
 
-    async def test_create_countdown_unknown_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
@@ -213,9 +199,7 @@ class TestCreateCountdown:
         )
         assert response.status_code == 404
 
-    async def test_create_countdown_with_task_link(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_with_task_link(self, client, db_session, login_as):
         """A countdown can link a task in the same profile."""
         user = UserFactory()
         await db_session.commit()
@@ -294,9 +278,7 @@ class TestCreateCountdown:
         )
         assert response.status_code == 400
 
-    async def test_create_countdown_invalid_color(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_invalid_color(self, client, db_session, login_as):
         """Invalid color is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -317,9 +299,7 @@ class TestCreateCountdown:
         )
         assert response.status_code == 422
 
-    async def test_create_countdown_invalid_repeat(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_invalid_repeat(self, client, db_session, login_as):
         """An unrecognized repeat value is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -387,9 +367,7 @@ class TestCreateCountdown:
             assert response.status_code == 201, repeat
             assert response.json()["repeat"] == repeat
 
-    async def test_create_countdown_show_occurrence(
-        self, client, db_session, login_as
-    ):
+    async def test_create_countdown_show_occurrence(self, client, db_session, login_as):
         """show_occurrence is accepted and echoed back."""
         user = UserFactory()
         await db_session.commit()

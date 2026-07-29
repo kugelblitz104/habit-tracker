@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -29,16 +28,16 @@ class UserRead(_StampedRead, UserBase):
 
 
 class UserUpdate(BaseModel):
-    username: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[EmailStr] = None
-    plaintext_password: Optional[str] = None
+    username: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: EmailStr | None = None
+    plaintext_password: str | None = None
     updated_date: datetime = Field(default_factory=datetime.now)
 
 
 class UserList(BaseModel):
-    users: List[UserRead] = []
+    users: list[UserRead] = []
     total: int
     limit: int
     offset: int

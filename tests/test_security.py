@@ -1,6 +1,6 @@
 """Tests for security functions."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 
@@ -154,7 +154,7 @@ class TestTokenDecoding:
             {
                 "sub": str(user_id),
                 "type": "access",
-                "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+                "exp": datetime.now(UTC) - timedelta(hours=1),
             },
             settings.secret_key,
             algorithm=settings.algorithm,
@@ -184,7 +184,7 @@ class TestTokenDecoding:
             {
                 "sub": str(user_id),
                 "type": "access",
-                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+                "exp": datetime.now(UTC) + timedelta(hours=1),
             },
             "wrong_secret_key",
             algorithm=settings.algorithm,
@@ -200,12 +200,12 @@ class TestTokenExpiry:
     def test_token_expiry_times(self):
         """Verify tokens have correct expiry times."""
         user_id = 123
-        before_creation = datetime.now(timezone.utc)
+        before_creation = datetime.now(UTC)
 
         access_token = create_access_token(data={"sub": str(user_id)})
         refresh_token = create_refresh_token(data={"sub": str(user_id)})
 
-        after_creation = datetime.now(timezone.utc)
+        after_creation = datetime.now(UTC)
 
         # Decode tokens
         access_payload = jwt.decode(
@@ -217,7 +217,7 @@ class TestTokenExpiry:
 
         # Access token expiry should be around access_token_expiry_minutes from now
         # Add 1 second tolerance for test execution time
-        access_exp = datetime.fromtimestamp(access_payload["exp"], tz=timezone.utc)
+        access_exp = datetime.fromtimestamp(access_payload["exp"], tz=UTC)
         expected_access_exp_min = (
             before_creation
             + timedelta(minutes=settings.access_token_expiry_minutes)
@@ -232,7 +232,7 @@ class TestTokenExpiry:
 
         # Refresh token expiry should be around refresh_token_expiry_days from now
         # Add 1 second tolerance for test execution time
-        refresh_exp = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+        refresh_exp = datetime.fromtimestamp(refresh_payload["exp"], tz=UTC)
         expected_refresh_exp_min = (
             before_creation
             + timedelta(days=settings.refresh_token_expiry_days)
@@ -309,8 +309,7 @@ class TestCORS:
         )
         assert response.status_code == 200
         assert (
-            response.headers["access-control-allow-origin"]
-            == "http://localhost:5173"
+            response.headers["access-control-allow-origin"] == "http://localhost:5173"
         )
         assert response.headers["access-control-allow-credentials"] == "true"
 

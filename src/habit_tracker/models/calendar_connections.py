@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import List, Optional, overload
+from typing import overload
 
 from pydantic import BaseModel, ValidationInfo, field_validator
 
@@ -15,7 +15,7 @@ from habit_tracker.models._validators import (
 def _validate_calendar_url(v: str) -> str: ...
 @overload
 def _validate_calendar_url(v: None) -> None: ...
-def _validate_calendar_url(v: Optional[str]) -> Optional[str]:
+def _validate_calendar_url(v: str | None) -> str | None:
     if v is None:
         return v
     if not v.strip():
@@ -31,7 +31,7 @@ class CalendarConnectionBase(BaseModel):
     name: str
     color: str
     url: str
-    provider: Optional[str] = None
+    provider: str | None = None
     enabled: bool = True
 
     @field_validator("name")
@@ -71,17 +71,17 @@ class CalendarConnectionRead(CalendarConnectionBase, _FromORM):
     id: int
     profile_id: int
     created_date: datetime
-    updated_date: Optional[datetime] = None
-    last_fetched_at: Optional[datetime] = None
-    last_error: Optional[str] = None
+    updated_date: datetime | None = None
+    last_fetched_at: datetime | None = None
+    last_error: str | None = None
 
 
 class CalendarConnectionUpdate(BaseModel):
-    name: Optional[str] = None
-    color: Optional[str] = None
-    url: Optional[str] = None
-    provider: Optional[str] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    color: str | None = None
+    url: str | None = None
+    provider: str | None = None
+    enabled: bool | None = None
 
     @field_validator("name", "color", "url", "enabled")
     @classmethod
@@ -90,22 +90,22 @@ class CalendarConnectionUpdate(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+    def validate_name(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Name")
 
     @field_validator("color")
     @classmethod
-    def validate_color(cls, v: Optional[str]) -> Optional[str]:
+    def validate_color(cls, v: str | None) -> str | None:
         return validate_hex_color(v)
 
     @field_validator("url")
     @classmethod
-    def validate_url(cls, v: Optional[str]) -> Optional[str]:
+    def validate_url(cls, v: str | None) -> str | None:
         return _validate_calendar_url(v)
 
 
 class CalendarConnectionList(BaseModel):
-    calendar_connections: List[CalendarConnectionRead] = []
+    calendar_connections: list[CalendarConnectionRead] = []
     total: int
     limit: int
     offset: int
@@ -116,14 +116,14 @@ class CalendarEventRead(BaseModel):
     calendar_name: str
     color: str
     title: str
-    location: Optional[str] = None
+    location: str | None = None
     all_day: bool
     event_date: date
     start: datetime
-    end: Optional[datetime] = None
+    end: datetime | None = None
 
 
 class CalendarEventList(BaseModel):
-    events: List[CalendarEventRead] = []
+    events: list[CalendarEventRead] = []
     date: date
-    errors: List[str] = []
+    errors: list[str] = []

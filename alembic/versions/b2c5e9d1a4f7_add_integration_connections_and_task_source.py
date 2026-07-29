@@ -9,6 +9,7 @@ Revises: a1f4c7b9e2d3
 Create Date: 2026-07-14 00:00:00.000000
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -16,8 +17,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'b2c5e9d1a4f7'
-down_revision: Union[str, Sequence[str], None] = 'a1f4c7b9e2d3'
+revision: str = "b2c5e9d1a4f7"
+down_revision: Union[str, Sequence[str], None] = "a1f4c7b9e2d3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -66,9 +67,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_constraint(
-        "uix_task_profile_source_external_ref", "task", type_="unique"
-    )
+    op.drop_constraint("uix_task_profile_source_external_ref", "task", type_="unique")
     op.drop_column("task", "source")
 
     op.drop_index(

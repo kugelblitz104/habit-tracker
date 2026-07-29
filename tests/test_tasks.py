@@ -350,9 +350,7 @@ class TestListTasks:
         assert data["tasks"][0]["id"] == done.id
         assert data["tasks"][0]["band"] == "hidden"
 
-    async def test_list_tasks_band_membership(
-        self, client, db_session, login_as
-    ):
+    async def test_list_tasks_band_membership(self, client, db_session, login_as):
         """Band filter returns tasks whose computed band matches."""
         user = UserFactory()
         await db_session.commit()
@@ -453,9 +451,7 @@ class TestListTasks:
         assert data["total"] == 3
         assert [t["id"] for t in data["tasks"]] == [newest.id, middle.id, oldest.id]
 
-    async def test_list_tasks_active_ordering(
-        self, client, db_session, login_as
-    ):
+    async def test_list_tasks_active_ordering(self, client, db_session, login_as):
         """Active tasks order by priority desc, due date asc nulls last."""
         user = UserFactory()
         await db_session.commit()
@@ -655,9 +651,7 @@ class TestGetTask:
 class TestPatchTask:
     """Tests for PATCH /tasks/{task_id} endpoint."""
 
-    async def test_patch_task_priority_flips_band(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_task_priority_flips_band(self, client, db_session, login_as):
         """Raising priority to 3 moves the task from whenever to now."""
         user = UserFactory()
         await db_session.commit()
@@ -707,9 +701,7 @@ class TestPatchTask:
         assert data["scheduled_time"] == "13:00:00"
         assert data["band"] == "soon"
 
-    async def test_patch_task_clear_scheduled_date(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_task_clear_scheduled_date(self, client, db_session, login_as):
         """scheduled_date is nullable - PATCH scheduled_date=null clears it."""
         user = UserFactory()
         await db_session.commit()
@@ -718,9 +710,7 @@ class TestPatchTask:
         await db_session.commit()
 
         scheduled = date.today() + timedelta(days=2)
-        task = TaskFactory(
-            profile=profile, priority=0, scheduled_date=scheduled
-        )
+        task = TaskFactory(profile=profile, priority=0, scheduled_date=scheduled)
         await db_session.commit()
 
         await login_as(user)
@@ -840,9 +830,7 @@ class TestPatchTask:
         assert data["scheduled_time"] == "13:00:00"
         assert data["band"] == "soon"
 
-    async def test_patch_task_done_sets_closed_date(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_task_done_sets_closed_date(self, client, db_session, login_as):
         """Setting status to DONE stamps closed_date."""
         user = UserFactory()
         await db_session.commit()
@@ -1078,9 +1066,7 @@ class TestPatchTask:
         response = await client.patch(f"/tasks/{task.id}", json={"title": None})
         assert response.status_code == 422
 
-    async def test_patch_task_null_profile_id(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_task_null_profile_id(self, client, db_session, login_as):
         """An explicit null for the non-nullable profile_id is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -1159,9 +1145,7 @@ class TestSubtasks:
         assert response.status_code == 200
         assert response.json()["parent_id"] == parent.id
 
-    async def test_create_subtask_parent_not_found(
-        self, client, db_session, login_as
-    ):
+    async def test_create_subtask_parent_not_found(self, client, db_session, login_as):
         """A non-existent parent is rejected (400, mirrors project_id)."""
         user = UserFactory()
         await db_session.commit()
@@ -1205,9 +1189,7 @@ class TestSubtasks:
         assert response.status_code == 400
         assert "Parent task not found" in response.json()["detail"]
 
-    async def test_create_subtask_under_subtask(
-        self, client, db_session, login_as
-    ):
+    async def test_create_subtask_under_subtask(self, client, db_session, login_as):
         """Creating a subtask under a subtask is rejected (400, one level)."""
         user = UserFactory()
         await db_session.commit()
@@ -1232,9 +1214,7 @@ class TestSubtasks:
             },
         )
         assert response.status_code == 400
-        assert (
-            response.json()["detail"] == "Subtasks can only be nested one level deep"
-        )
+        assert response.json()["detail"] == "Subtasks can only be nested one level deep"
 
     async def test_patch_parent_onto_task_with_subtasks(
         self, client, db_session, login_as
@@ -1281,9 +1261,7 @@ class TestSubtasks:
         assert response.status_code == 400
         assert response.json()["detail"] == "A task cannot be its own parent"
 
-    async def test_patch_set_and_clear_parent(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_set_and_clear_parent(self, client, db_session, login_as):
         """PATCH can attach a task to a parent and detach it again."""
         user = UserFactory()
         await db_session.commit()
@@ -1330,13 +1308,9 @@ class TestSubtasks:
             f"/tasks/{task.id}", json={"parent_id": subtask.id}
         )
         assert response.status_code == 400
-        assert (
-            response.json()["detail"] == "Subtasks can only be nested one level deep"
-        )
+        assert response.json()["detail"] == "Subtasks can only be nested one level deep"
 
-    async def test_delete_parent_cascades_subtasks(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_parent_cascades_subtasks(self, client, db_session, login_as):
         """Deleting a parent task deletes its subtasks (ON DELETE CASCADE)."""
         user = UserFactory()
         await db_session.commit()
@@ -1405,9 +1379,7 @@ class TestSubtasks:
         assert by_id[lone.id]["subtask_count"] == 0
         assert by_id[lone.id]["subtask_done_count"] == 0
 
-    async def test_get_single_task_subtask_counts(
-        self, client, db_session, login_as
-    ):
+    async def test_get_single_task_subtask_counts(self, client, db_session, login_as):
         """GET /tasks/{id} carries the same counts as the list endpoint."""
         user = UserFactory()
         await db_session.commit()
@@ -1430,9 +1402,7 @@ class TestSubtasks:
         assert data["subtask_count"] == 2
         assert data["subtask_done_count"] == 1
 
-    async def test_patch_profile_move_with_subtasks(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_move_with_subtasks(self, client, db_session, login_as):
         """Moving a task that has subtasks to another profile fails (400)."""
         user = UserFactory()
         await db_session.commit()
@@ -1458,9 +1428,7 @@ class TestSubtasks:
             == "Cannot move a task with subtasks to another profile"
         )
 
-    async def test_patch_profile_move_of_subtask(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_profile_move_of_subtask(self, client, db_session, login_as):
         """Moving a subtask fails (400) unless parent_id is nulled with it."""
         user = UserFactory()
         await db_session.commit()
@@ -1636,9 +1604,7 @@ class TestSortTasks:
 class TestDeleteAllTasks:
     """Tests for DELETE /tasks/ (bulk delete, profile-scoped)."""
 
-    async def test_deletes_tasks_and_subtasks(
-        self, client, db_session, login_as
-    ):
+    async def test_deletes_tasks_and_subtasks(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
 

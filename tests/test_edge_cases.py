@@ -9,8 +9,6 @@ it belongs there, not here.
 
 from datetime import date, timedelta
 
-import pytest
-
 from habit_tracker.constants import TrackerStatus
 from tests.factories import (
     HabitFactory,
@@ -154,7 +152,6 @@ class TestEmptyResults:
         data = response.json()
         assert data["trackers"] == []
 
-    @pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
     async def test_habit_kpis_with_no_data(self, client, db_session, login_as):
         """Test KPIs with no completion data."""
         user = UserFactory()

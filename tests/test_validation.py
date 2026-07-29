@@ -28,9 +28,7 @@ class TestEmailValidation:
         )
         assert response.status_code == 201
 
-    async def test_invalid_email_missing_at_symbol(
-        self, client, db_session
-    ):
+    async def test_invalid_email_missing_at_symbol(self, client, db_session):
         """Email without @ is rejected."""
         response = await client.post(
             "/auth/register",
@@ -44,9 +42,7 @@ class TestEmailValidation:
         )
         assert response.status_code == 422
 
-    async def test_invalid_email_missing_domain(
-        self, client, db_session
-    ):
+    async def test_invalid_email_missing_domain(self, client, db_session):
         """Email without domain is rejected."""
         response = await client.post(
             "/auth/register",
@@ -60,9 +56,7 @@ class TestEmailValidation:
         )
         assert response.status_code == 422
 
-    async def test_invalid_email_special_characters(
-        self, client, db_session
-    ):
+    async def test_invalid_email_special_characters(self, client, db_session):
         """Email with invalid characters is rejected."""
         response = await client.post(
             "/auth/register",
@@ -137,9 +131,7 @@ class TestColorValidation:
         )
         assert response.status_code == 422
 
-    async def test_invalid_hex_color_wrong_length(
-        self, client, db_session, login_as
-    ):
+    async def test_invalid_hex_color_wrong_length(self, client, db_session, login_as):
         """Color with wrong length is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -158,9 +150,7 @@ class TestColorValidation:
         )
         assert response.status_code == 422
 
-    async def test_invalid_hex_color_invalid_chars(
-        self, client, db_session, login_as
-    ):
+    async def test_invalid_hex_color_invalid_chars(self, client, db_session, login_as):
         """Color with invalid characters is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -183,9 +173,7 @@ class TestColorValidation:
 class TestNumericValidation:
     """Tests for numeric value validation."""
 
-    async def test_negative_frequency_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_negative_frequency_rejected(self, client, db_session, login_as):
         """Negative frequency is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -261,9 +249,7 @@ class TestNumericValidation:
         )
         assert response.status_code == 422
 
-    async def test_negative_page_number_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_negative_page_number_rejected(self, client, db_session, login_as):
         """Negative page number is rejected or handled."""
         admin = AdminUserFactory()
         await db_session.commit()
@@ -353,9 +339,7 @@ class TestStringLengthValidation:
         )
         assert response.status_code == 422
 
-    async def test_whitespace_only_name_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_whitespace_only_name_rejected(self, client, db_session, login_as):
         """Whitespace-only name is rejected or trimmed."""
         user = UserFactory()
         await db_session.commit()
@@ -439,9 +423,7 @@ class TestStringBoundaries:
         assert response.status_code == 201
         assert "习惯" in response.json()["name"]
 
-    async def test_special_characters_in_name(
-        self, client, db_session, login_as
-    ):
+    async def test_special_characters_in_name(self, client, db_session, login_as):
         """Test habit with special characters."""
         user = UserFactory()
         await db_session.commit()
@@ -464,9 +446,7 @@ class TestStringBoundaries:
 class TestRequiredFieldValidation:
     """Tests for required field validation."""
 
-    async def test_missing_habit_name_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_missing_habit_name_rejected(self, client, db_session, login_as):
         """Missing habit name is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -484,9 +464,7 @@ class TestRequiredFieldValidation:
         )
         assert response.status_code == 422
 
-    async def test_missing_user_email_rejected(
-        self, client, db_session
-    ):
+    async def test_missing_user_email_rejected(self, client, db_session):
         """Missing email is rejected."""
         response = await client.post(
             "/auth/register",
@@ -534,9 +512,7 @@ class TestRequiredFieldValidation:
 class TestTypeValidation:
     """Tests for type validation."""
 
-    async def test_string_for_integer_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_string_for_integer_rejected(self, client, db_session, login_as):
         """String where integer expected is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -555,9 +531,7 @@ class TestTypeValidation:
         )
         assert response.status_code == 422
 
-    async def test_integer_for_string_handled(
-        self, client, db_session, login_as
-    ):
+    async def test_integer_for_string_handled(self, client, db_session, login_as):
         """Integer where string expected is handled."""
         user = UserFactory()
         await db_session.commit()
@@ -577,9 +551,7 @@ class TestTypeValidation:
         # May be converted to string or rejected
         assert response.status_code in [201, 422]
 
-    async def test_invalid_date_format_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_invalid_date_format_rejected(self, client, db_session, login_as):
         """Invalid date format is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -652,9 +624,7 @@ class TestHabitUpdateValidation:
         )
         assert response.status_code == 422
 
-    async def test_whitespace_only_name_rejected(
-        self, client, db_session, login_as
-    ):
+    async def test_whitespace_only_name_rejected(self, client, db_session, login_as):
         """PATCH with a whitespace-only name is rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -735,7 +705,6 @@ class TestTrackerUpdateValidation:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
 
@@ -755,7 +724,6 @@ class TestTrackerUpdateValidation:
 
         habit = HabitFactory(user=user)
         await db_session.commit()
-
 
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
@@ -777,7 +745,6 @@ class TestTrackerUpdateValidation:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
 
@@ -797,7 +764,6 @@ class TestTrackerUpdateValidation:
 
         habit = HabitFactory(user=user)
         await db_session.commit()
-
 
         tracker = TrackerFactory(habit=habit, note="Some note")
         await db_session.commit()

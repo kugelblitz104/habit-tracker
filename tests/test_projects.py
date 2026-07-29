@@ -30,9 +30,7 @@ class TestListProjects:
         response = await client.get("/projects/")
         assert response.status_code == 422
 
-    async def test_list_projects_unknown_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_list_projects_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
@@ -42,9 +40,7 @@ class TestListProjects:
         response = await client.get("/projects/", params={"profile_id": 99999})
         assert response.status_code == 404
 
-    async def test_list_projects_foreign_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_list_projects_foreign_profile(self, client, db_session, login_as):
         """Cannot list projects of another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -58,9 +54,7 @@ class TestListProjects:
         response = await client.get("/projects/", params={"profile_id": foreign.id})
         assert response.status_code == 403
 
-    async def test_list_projects_scoped_to_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_list_projects_scoped_to_profile(self, client, db_session, login_as):
         """Only projects of the requested profile are returned."""
         user = UserFactory()
         await db_session.commit()
@@ -83,9 +77,7 @@ class TestListProjects:
         ids = {p["id"] for p in data["projects"]}
         assert ids == {project1.id, project2.id}
 
-    async def test_list_projects_include_archived(
-        self, client, db_session, login_as
-    ):
+    async def test_list_projects_include_archived(self, client, db_session, login_as):
         """Archived projects are hidden by default and shown with the flag."""
         user = UserFactory()
         await db_session.commit()
@@ -181,9 +173,7 @@ class TestCreateProject:
         assert data["open_count"] == 0
         assert data["done_count"] == 0
 
-    async def test_create_project_foreign_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_create_project_foreign_profile(self, client, db_session, login_as):
         """Cannot create a project in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -200,9 +190,7 @@ class TestCreateProject:
         )
         assert response.status_code == 403
 
-    async def test_create_project_unknown_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_create_project_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
@@ -215,9 +203,7 @@ class TestCreateProject:
         )
         assert response.status_code == 404
 
-    async def test_create_project_invalid_color(
-        self, client, db_session, login_as
-    ):
+    async def test_create_project_invalid_color(self, client, db_session, login_as):
         """Invalid color is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -371,9 +357,7 @@ class TestPatchProject:
         assert response.status_code == 200
         assert response.json()["profile_id"] == other_profile.id
 
-    async def test_patch_project_move_carries_tasks(
-        self, client, db_session, login_as
-    ):
+    async def test_patch_project_move_carries_tasks(self, client, db_session, login_as):
         """Moving a project to another profile moves its tasks with it."""
         user = UserFactory()
         await db_session.commit()
@@ -440,9 +424,7 @@ class TestPatchProject:
 class TestDeleteProject:
     """Tests for DELETE /projects/{project_id} endpoint."""
 
-    async def test_delete_project_keeps_tasks(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_project_keeps_tasks(self, client, db_session, login_as):
         """Deleting a project keeps its tasks with project_id cleared."""
         user = UserFactory()
         await db_session.commit()
@@ -487,9 +469,7 @@ class TestDeleteProject:
         response = await client.delete(f"/projects/{project.id}")
         assert response.status_code == 403
 
-    async def test_delete_nonexistent_project(
-        self, client, db_session, login_as
-    ):
+    async def test_delete_nonexistent_project(self, client, db_session, login_as):
         """Return 404 for non-existent project."""
         user = UserFactory()
         await db_session.commit()
@@ -503,9 +483,7 @@ class TestDeleteProject:
 class TestDeleteAllProjects:
     """Tests for DELETE /projects/ (bulk delete, profile-scoped)."""
 
-    async def test_deletes_only_this_profile(
-        self, client, db_session, login_as
-    ):
+    async def test_deletes_only_this_profile(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
 
@@ -526,9 +504,7 @@ class TestDeleteAllProjects:
         remaining = (await db_session.execute(select(Project))).scalars().all()
         assert [p.id for p in remaining] == [keep.id]
 
-    async def test_tasks_kept_and_unassigned(
-        self, client, db_session, login_as
-    ):
+    async def test_tasks_kept_and_unassigned(self, client, db_session, login_as):
         """Deleting all projects keeps their tasks but clears project_id."""
         user = UserFactory()
         await db_session.commit()

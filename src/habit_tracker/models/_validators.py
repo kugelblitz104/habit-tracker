@@ -17,7 +17,8 @@ validation rejects it before the field validator runs).
 """
 
 import re
-from typing import Container, Optional, TypeVar, overload
+from collections.abc import Container
+from typing import TypeVar, overload
 
 from pydantic import ValidationInfo
 
@@ -37,7 +38,7 @@ T = TypeVar("T")
 def validate_hex_color(v: str) -> str: ...
 @overload
 def validate_hex_color(v: None) -> None: ...
-def validate_hex_color(v: Optional[str]) -> Optional[str]:
+def validate_hex_color(v: str | None) -> str | None:
     if v is not None and not _HEX_COLOR_RE.match(v):
         raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
     return v
@@ -55,13 +56,13 @@ def reject_null(v: object, info: ValidationInfo) -> object:
 def non_blank_string(v: str, label: str) -> str: ...
 @overload
 def non_blank_string(v: None, label: str) -> None: ...
-def non_blank_string(v: Optional[str], label: str) -> Optional[str]:
+def non_blank_string(v: str | None, label: str) -> str | None:
     if v is not None and not v.strip():
         raise ValueError(f"{label} cannot be empty or whitespace")
     return v
 
 
-def non_negative_int(v: Optional[int], label: str) -> Optional[int]:
+def non_negative_int(v: int | None, label: str) -> int | None:
     if v is not None and v < 0:
         raise ValueError(f"{label} cannot be negative")
     return v
@@ -71,7 +72,7 @@ def non_negative_int(v: Optional[int], label: str) -> Optional[int]:
 def min_value_int(v: int, minimum: int, label: str) -> int: ...
 @overload
 def min_value_int(v: None, minimum: int, label: str) -> None: ...
-def min_value_int(v: Optional[int], minimum: int, label: str) -> Optional[int]:
+def min_value_int(v: int | None, minimum: int, label: str) -> int | None:
     if v is not None and v < minimum:
         raise ValueError(f"{label} must be at least {minimum}")
     return v
@@ -84,14 +85,14 @@ def validate_membership(
 @overload
 def validate_membership(v: T, valid_values: Container[T], message: str) -> T: ...
 def validate_membership(
-    v: Optional[T], valid_values: Container[T], message: str
-) -> Optional[T]:
+    v: T | None, valid_values: Container[T], message: str
+) -> T | None:
     if v is not None and v not in valid_values:
         raise ValueError(message)
     return v
 
 
-def blank_to_none(v: Optional[str]) -> Optional[str]:
+def blank_to_none(v: str | None) -> str | None:
     """Normalize a blank/whitespace-only string to `None`; leave others as-is."""
     if v is not None and not v.strip():
         return None
@@ -106,7 +107,7 @@ def validate_owner_repo(v: str) -> str:
     return v
 
 
-def normalize_base_url(v: Optional[str]) -> Optional[str]:
+def normalize_base_url(v: str | None) -> str | None:
     """Empty/whitespace -> None (public cloud). Otherwise require an http(s)
     scheme and strip any trailing slash so it joins cleanly with the org/project
     path segments."""
@@ -122,7 +123,7 @@ def normalize_base_url(v: Optional[str]) -> Optional[str]:
 def non_empty_token(v: str) -> str: ...
 @overload
 def non_empty_token(v: None) -> None: ...
-def non_empty_token(v: Optional[str]) -> Optional[str]:
+def non_empty_token(v: str | None) -> str | None:
     if v is not None and not v.strip():
         raise ValueError("token (PAT) cannot be empty")
     return v.strip() if v is not None else v
