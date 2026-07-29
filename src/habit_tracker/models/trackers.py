@@ -1,7 +1,23 @@
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, overload
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+
+from habit_tracker.constants import TrackerStatus
+from habit_tracker.models._base import _FromORM, _StampedRead
+from habit_tracker.models._validators import reject_null, validate_membership
+
+_STATUS_VALUES = [s.value for s in TrackerStatus]
+
+
+@overload
+def _validate_status(v: int) -> int: ...
+@overload
+def _validate_status(v: None) -> None: ...
+def _validate_status(v: Optional[int]) -> Optional[int]:
+    return validate_membership(
+        v, _STATUS_VALUES, "Status must be a valid TrackerStatus value"
+    )
 
 
 # Tracker Schemas
@@ -16,15 +32,11 @@ class TrackerCreate(TrackerBase):
     pass
 
 
-class TrackerRead(TrackerBase):
-    id: int
-    created_date: datetime
-    updated_date: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
+class TrackerRead(_StampedRead, TrackerBase):
+    pass
 
 
-class TrackerLite(BaseModel):
+class TrackerLite(_FromORM):
     """Lightweight tracker schema for efficient data fetching."""
 
     id: int
@@ -32,14 +44,24 @@ class TrackerLite(BaseModel):
     status: int  # 0=not completed, 1=skipped, 2=completed
     has_note: bool
 
-    model_config = ConfigDict(from_attributes=True)
-
 
 class TrackerUpdate(BaseModel):
     dated: Optional[date] = None
     status: Optional[int] = None  # 0=not completed, 1=skipped, 2=completed
     note: Optional[str] = None
     updated_date: datetime = Field(default_factory=datetime.now)
+
+    @field_validator("dated", "status")
+    @classmethod
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        # (note IS nullable, so an explicit null clears it. habit_id isn't
+        # settable here at all - trackers don't move between habits.)
+        return reject_null(v, info)
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: Optional[int]) -> Optional[int]:
+        return _validate_status(v)
 
 
 class TrackerList(BaseModel):

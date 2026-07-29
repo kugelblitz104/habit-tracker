@@ -42,6 +42,15 @@ def transport_error_message(
     return f"{provider} request failed: {exc}"
 
 
+def raise_for_status(resp: httpx.Response, provider: str) -> None:
+    if resp.is_success:
+        return
+    detail = resp.text[:300] if resp.text else ""
+    raise IntegrationError(
+        f"{provider} returned {resp.status_code} {resp.reason_phrase}. {detail}".strip()
+    )
+
+
 @dataclass
 class ExternalItem:
     """A work item / issue, normalized across providers."""

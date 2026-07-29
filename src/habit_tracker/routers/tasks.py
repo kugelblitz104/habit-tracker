@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,18 +12,21 @@ from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
 )
+from habit_tracker.core.http import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    validate_sort_ids,
+)
 from habit_tracker.models import (
-    Profile,
-    Project,
-    Task,
     TaskCreate,
     TaskList,
     TaskRead,
     TaskUpdate,
 )
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Profile, Project, Task, User
 from habit_tracker.services.task_export import render_tasks_markdown
 
 router = APIRouter(
@@ -118,13 +121,14 @@ async def _get_task_and_profile(
 ) -> tuple[Task, Profile]:
     """Fetch a task by ID (404 if missing) and authorize the caller against
     the owning profile. Returns the task with its (FK-guaranteed) profile."""
-    task = await db.get(Task, task_id)
-    if not task:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
-        )
-    profile = await authorize_parent_profile(db, task.profile_id, current_user, "task")
-    return task, profile
+    return await get_owned_child(
+        db,
+        Task,
+        task_id,
+        current_user,
+        not_found_detail="Task not found",
+        resource_name="task",
+    )
 
 
 @router.get("/", summary="List tasks for a profile")
@@ -180,6 +184,12 @@ async def list_tasks(
     **subtask_count** / **subtask_done_count** (done = status DONE only),
     computed in a single grouped query.
     """
+    # Hand-rolled rather than an Enum-typed Query: the models/ field
+    # validators only run on request bodies, never on query strings, so they
+    # can't cover band/status here. Declaring these as Enum-typed Query
+    # params instead would add an `enum` array to the OpenAPI parameter
+    # schema and change the 422 detail shape - both schema-breaking in this
+    # phase - so the check stays manual.
     if band is not None and band not in [b.value for b in TaskBand]:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -204,6 +214,9 @@ async def list_tasks(
     if include_closed and band == TaskBand.HIDDEN:
         query = query.order_by(Task.closed_date.desc())
     else:
+        # Mirrored in Python by services.task_export._active_sort_key (the
+        # Markdown export has no database to order in); the two are pinned
+        # against each other in tests/test_task_export.py, not shared code.
         query = query.order_by(
             Task.priority.desc(),
             Task.due_date.asc().nulls_last(),
@@ -357,17 +370,7 @@ async def sort_tasks(
     subtasks); the caller is expected to pass a coherent sibling set, but the
     endpoint only enforces ownership, not shared parentage.
     """
-    if not task_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="task_ids list cannot be empty",
-        )
-
-    if len(task_ids) != len(set(task_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Duplicate task IDs in request",
-        )
+    validate_sort_ids(task_ids, noun="task")
 
     result = await db.execute(select(Task).filter(Task.id.in_(task_ids)))
     tasks = {t.id: t for t in result.scalars().all()}
@@ -458,6 +461,23 @@ async def patch_task(
 
     task_data = task_update.model_dump(exclude_unset=True)
 
+    # Memoised subtask count: the profile-move check and the parent_id-set
+    # check below are each only conditionally reached, and the first raises
+    # before the second when both apply, so at most one query ever runs -
+    # this just avoids writing the same query twice.
+    _cached_subtask_total: Optional[int] = None
+
+    async def subtask_total() -> int:
+        nonlocal _cached_subtask_total
+        if _cached_subtask_total is None:
+            _cached_subtask_total = (
+                await db.scalar(
+                    select(func.count(Task.id)).filter(Task.parent_id == task_id)
+                )
+                or 0
+            )
+        return _cached_subtask_total
+
     # Validate a profile move: new profile must belong to the same user, and
     # the task's project (if any) must belong to the new profile
     new_profile_id = task_data.get("profile_id")
@@ -488,10 +508,7 @@ async def patch_task(
     # cannot move (mirrors the project rule - profile coherence is enforced,
     # never silently fixed)
     if new_profile_id is not None and new_profile_id != db_task.profile_id:
-        subtask_total = await db.scalar(
-            select(func.count(Task.id)).filter(Task.parent_id == task_id)
-        )
-        if subtask_total:
+        if await subtask_total():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot move a task with subtasks to another profile",
@@ -519,10 +536,7 @@ async def patch_task(
         # subtask (only reachable when parent_id is being set - an existing
         # subtask can never have subtasks of its own)
         if "parent_id" in task_data:
-            subtask_total = await db.scalar(
-                select(func.count(Task.id)).filter(Task.parent_id == task_id)
-            )
-            if subtask_total:
+            if await subtask_total():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="A task with subtasks cannot itself become a subtask",
@@ -555,10 +569,7 @@ async def patch_task(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Task change violates a database constraint",
-        )
+        raise integrity_conflict("Task change violates a database constraint")
     await db.refresh(db_task)
     subtask_counts = await _get_subtask_counts(db, parent_id=task_id)
     return _task_to_read(db_task, subtask_counts=subtask_counts)
@@ -579,19 +590,13 @@ async def delete_all_tasks(
     are removed with it (ON DELETE CASCADE); countdowns that link a task are
     kept and unlinked (ON DELETE SET NULL), matching single-task delete.
     """
-    await get_owned_profile(db, profile_id, current_user, "task")
-
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Task)
-            .filter(Task.profile_id == profile_id)
-        )
-    ).scalar() or 0
-    await db.execute(delete(Task).where(Task.profile_id == profile_id))
-    await db.commit()
-    return JSONResponse(
-        content={"detail": f"Deleted {count} tasks", "deleted": count}
+    return await bulk_delete_in_profile(
+        db,
+        Task,
+        profile_id,
+        current_user,
+        resource_name="task",
+        detail="Deleted {count} tasks",
     )
 
 

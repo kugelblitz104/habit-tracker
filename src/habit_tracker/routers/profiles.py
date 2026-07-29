@@ -13,14 +13,14 @@ from habit_tracker.core.dependencies import (
     get_db,
     get_owned_profile,
 )
+from habit_tracker.core.http import integrity_conflict
 from habit_tracker.models import (
-    Profile,
     ProfileCreate,
     ProfileList,
     ProfileRead,
     ProfileUpdate,
 )
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Profile, User
 
 router = APIRouter(
     prefix="/profiles", tags=["profiles"], responses={404: {"description": "Not found"}}
@@ -34,14 +34,8 @@ def _profile_integrity_error(exc: IntegrityError) -> HTTPException:
     (user_id, name) is actually the one that fired.
     """
     if "uix_profile_user_name" in str(exc.orig or exc):
-        return HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A profile with this name already exists for this user",
-        )
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail="Profile change violates a database constraint",
-    )
+        return integrity_conflict("A profile with this name already exists for this user")
+    return integrity_conflict("Profile change violates a database constraint")
 
 
 @router.get("/", summary="List profiles for the current user")

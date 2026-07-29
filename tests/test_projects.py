@@ -5,7 +5,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 from habit_tracker.constants import TaskStatus
-from habit_tracker.schemas.db_models import Project
+from habit_tracker.schemas.db_models import Project, Task
 from tests.factories import (
     DoneTaskFactory,
     ProfileFactory,
@@ -15,45 +15,35 @@ from tests.factories import (
 )
 
 
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-
-
 class TestListProjects:
     """Tests for GET /projects/ endpoint."""
 
     async def test_list_projects_requires_profile_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """profile_id query parameter is required (422 if missing)."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/")
         assert response.status_code == 422
 
     async def test_list_projects_unknown_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/", params={"profile_id": 99999})
         assert response.status_code == 404
 
     async def test_list_projects_foreign_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Cannot list projects of another user's profile (403)."""
         user = UserFactory()
@@ -63,13 +53,13 @@ class TestListProjects:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/", params={"profile_id": foreign.id})
         assert response.status_code == 403
 
     async def test_list_projects_scoped_to_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Only projects of the requested profile are returned."""
         user = UserFactory()
@@ -84,7 +74,7 @@ class TestListProjects:
         ProjectFactory(profile=other_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -94,7 +84,7 @@ class TestListProjects:
         assert ids == {project1.id, project2.id}
 
     async def test_list_projects_include_archived(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Archived projects are hidden by default and shown with the flag."""
         user = UserFactory()
@@ -107,7 +97,7 @@ class TestListProjects:
         archived = ProjectFactory(profile=profile, archived=True)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -124,7 +114,7 @@ class TestListProjects:
         ids = {p["id"] for p in data["projects"]}
         assert ids == {active.id, archived.id}
 
-    async def test_list_projects_task_counts(self, client, db_session, setup_factories):
+    async def test_list_projects_task_counts(self, client, db_session, login_as):
         """open_count/done_count are correct; cancelled counts in neither."""
         user = UserFactory()
         await db_session.commit()
@@ -150,7 +140,7 @@ class TestListProjects:
         TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -162,7 +152,7 @@ class TestListProjects:
 class TestCreateProject:
     """Tests for POST /projects/ endpoint."""
 
-    async def test_create_project_basic(self, client, db_session, setup_factories):
+    async def test_create_project_basic(self, client, db_session, login_as):
         """Create project and get its fields echoed back with zero counts."""
         user = UserFactory()
         await db_session.commit()
@@ -170,7 +160,7 @@ class TestCreateProject:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/projects/",
@@ -192,7 +182,7 @@ class TestCreateProject:
         assert data["done_count"] == 0
 
     async def test_create_project_foreign_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Cannot create a project in another user's profile (403)."""
         user = UserFactory()
@@ -202,7 +192,7 @@ class TestCreateProject:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/projects/",
@@ -211,13 +201,13 @@ class TestCreateProject:
         assert response.status_code == 403
 
     async def test_create_project_unknown_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/projects/",
@@ -226,7 +216,7 @@ class TestCreateProject:
         assert response.status_code == 404
 
     async def test_create_project_invalid_color(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid color is rejected (422)."""
         user = UserFactory()
@@ -235,7 +225,7 @@ class TestCreateProject:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/projects/",
@@ -247,7 +237,7 @@ class TestCreateProject:
 class TestGetProject:
     """Tests for GET /projects/{project_id} endpoint."""
 
-    async def test_get_project_with_counts(self, client, db_session, setup_factories):
+    async def test_get_project_with_counts(self, client, db_session, login_as):
         """Retrieve a project including its task counts."""
         user = UserFactory()
         await db_session.commit()
@@ -262,7 +252,7 @@ class TestGetProject:
         DoneTaskFactory(profile=profile, project=project)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/projects/{project.id}")
         assert response.status_code == 200
@@ -271,17 +261,17 @@ class TestGetProject:
         assert data["open_count"] == 1
         assert data["done_count"] == 1
 
-    async def test_get_nonexistent_project(self, client, db_session, setup_factories):
+    async def test_get_nonexistent_project(self, client, db_session, login_as):
         """Return 404 for non-existent project."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/projects/99999")
         assert response.status_code == 404
 
-    async def test_get_other_user_project(self, client, db_session, setup_factories):
+    async def test_get_other_user_project(self, client, db_session, login_as):
         """User cannot access a project in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -293,7 +283,7 @@ class TestGetProject:
         project = ProjectFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/projects/{project.id}")
         assert response.status_code == 403
@@ -302,7 +292,7 @@ class TestGetProject:
 class TestPatchProject:
     """Tests for PATCH /projects/{project_id} endpoint."""
 
-    async def test_patch_project_rename(self, client, db_session, setup_factories):
+    async def test_patch_project_rename(self, client, db_session, login_as):
         """Rename a project."""
         user = UserFactory()
         await db_session.commit()
@@ -313,7 +303,7 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile, name="Old Name")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"name": "New Name"}
@@ -321,7 +311,7 @@ class TestPatchProject:
         assert response.status_code == 200
         assert response.json()["name"] == "New Name"
 
-    async def test_patch_project_archive(self, client, db_session, setup_factories):
+    async def test_patch_project_archive(self, client, db_session, login_as):
         """Archive a project."""
         user = UserFactory()
         await db_session.commit()
@@ -332,7 +322,7 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile, archived=False)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"archived": True}
@@ -340,7 +330,7 @@ class TestPatchProject:
         assert response.status_code == 200
         assert response.json()["archived"] is True
 
-    async def test_patch_project_notes(self, client, db_session, setup_factories):
+    async def test_patch_project_notes(self, client, db_session, login_as):
         """Update project notes."""
         user = UserFactory()
         await db_session.commit()
@@ -351,7 +341,7 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"notes": "## Updated markdown"}
@@ -360,7 +350,7 @@ class TestPatchProject:
         assert response.json()["notes"] == "## Updated markdown"
 
     async def test_patch_project_move_to_own_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Move a project to another profile of the same user."""
         user = UserFactory()
@@ -373,7 +363,7 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"profile_id": other_profile.id}
@@ -382,7 +372,7 @@ class TestPatchProject:
         assert response.json()["profile_id"] == other_profile.id
 
     async def test_patch_project_move_carries_tasks(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a project to another profile moves its tasks with it."""
         user = UserFactory()
@@ -398,7 +388,7 @@ class TestPatchProject:
         task = TaskFactory(profile=profile, project=project)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"profile_id": other_profile.id}
@@ -408,7 +398,7 @@ class TestPatchProject:
         await db_session.refresh(task)
         assert task.profile_id == other_profile.id
 
-    async def test_patch_project_null_name(self, client, db_session, setup_factories):
+    async def test_patch_project_null_name(self, client, db_session, login_as):
         """An explicit null for the non-nullable name is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -419,13 +409,13 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/projects/{project.id}", json={"name": None})
         assert response.status_code == 422
 
     async def test_patch_project_move_to_other_user_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a project to another user's profile is rejected (400)."""
         user = UserFactory()
@@ -439,7 +429,7 @@ class TestPatchProject:
         project = ProjectFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/projects/{project.id}", json={"profile_id": foreign.id}
@@ -451,7 +441,7 @@ class TestDeleteProject:
     """Tests for DELETE /projects/{project_id} endpoint."""
 
     async def test_delete_project_keeps_tasks(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Deleting a project keeps its tasks with project_id cleared."""
         user = UserFactory()
@@ -466,7 +456,7 @@ class TestDeleteProject:
         task = TaskFactory(profile=profile, project=project)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/projects/{project.id}")
         assert response.status_code == 200
@@ -480,7 +470,7 @@ class TestDeleteProject:
         await db_session.refresh(task)
         assert task.project_id is None
 
-    async def test_delete_other_user_project(self, client, db_session, setup_factories):
+    async def test_delete_other_user_project(self, client, db_session, login_as):
         """User cannot delete a project in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -492,19 +482,72 @@ class TestDeleteProject:
         project = ProjectFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/projects/{project.id}")
         assert response.status_code == 403
 
     async def test_delete_nonexistent_project(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for non-existent project."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete("/projects/99999")
         assert response.status_code == 404
+
+
+class TestDeleteAllProjects:
+    """Tests for DELETE /projects/ (bulk delete, profile-scoped)."""
+
+    async def test_deletes_only_this_profile(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        ProjectFactory(profile=profile)
+        ProjectFactory(profile=profile)
+        keep = ProjectFactory(profile=other)
+        await db_session.commit()
+
+        await login_as(user)
+        response = await client.delete("/projects/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+
+        remaining = (await db_session.execute(select(Project))).scalars().all()
+        assert [p.id for p in remaining] == [keep.id]
+
+    async def test_tasks_kept_and_unassigned(
+        self, client, db_session, login_as
+    ):
+        """Deleting all projects keeps their tasks but clears project_id."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        await db_session.commit()
+
+        project = ProjectFactory(profile=profile)
+        await db_session.commit()
+
+        task = TaskFactory(profile=profile, project_id=project.id)
+        await db_session.commit()
+        task_id = task.id
+
+        await login_as(user)
+        response = await client.delete("/projects/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        surviving = await db_session.get(Task, task_id)
+        assert surviving is not None
+        assert surviving.project_id is None

@@ -13,6 +13,7 @@ from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
 from habit_tracker.core.crypto import encrypt_secret
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
+    Countdown,
     Habit,
     IntegrationConnection,
     Profile,
@@ -107,11 +108,21 @@ class ProfileFactory(BaseFactory):
     color_start = "#e0763f"
     color_end = "#c14e6a"
     habits_enabled = True
+    countdowns_enabled = True
+    insights_enabled = True
     calendar_enabled = True
     publish_to_azure = False
     default_landing = "today"
+    week_start_monday = True
+    use_habit_color_accent = False
+    show_estimated_effort = False
+    pomodoro_work_minutes = 25
+    pomodoro_break_minutes = 5
+    pomodoro_long_break_minutes = 15
+    pomodoro_cycles = 4
     user = SubFactory(UserFactory)
     created_date = LazyFunction(datetime.now)
+    updated_date = None
 
 
 class HabitFactory(BaseFactory):
@@ -154,6 +165,25 @@ class ProjectFactory(BaseFactory):
     archived = False
     profile = SubFactory(ProfileFactory)
     created_date = LazyFunction(datetime.now)
+
+
+class CountdownFactory(BaseFactory):
+    """Factory for creating test countdowns."""
+
+    class Meta:
+        model = Countdown
+
+    task = None
+    title = Sequence(lambda n: f"Countdown {n}")
+    target_date = LazyFunction(date.today)
+    target_time = None
+    category = None
+    color = None
+    repeat = "none"
+    show_occurrence = False
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+    updated_date = None
 
 
 class CalendarConnectionFactory(BaseFactory):
@@ -249,21 +279,3 @@ class TrackerFactory(BaseFactory):
     status = TrackerStatus.COMPLETED
     note = Faker("sentence")
     created_date = LazyFunction(datetime.now)
-
-
-class CompletedTrackerFactory(TrackerFactory):
-    """Factory for completed trackers."""
-
-    status = TrackerStatus.COMPLETED
-
-
-class IncompleteTrackerFactory(TrackerFactory):
-    """Factory for creating incomplete tracker (neither completed nor skipped)."""
-
-    status = TrackerStatus.NOT_COMPLETED
-
-
-class SkippedTrackerFactory(TrackerFactory):
-    """Factory for skipped trackers."""
-
-    status = TrackerStatus.SKIPPED

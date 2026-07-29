@@ -10,6 +10,7 @@ import httpx
 from habit_tracker.services.integrations.base import (
     ExternalItem,
     IntegrationError,
+    raise_for_status,
     transport_error_message,
 )
 
@@ -96,7 +97,7 @@ class AzureDevOpsClient:
                     params={"api-version": API_VERSION},
                     json={"query": _WIQL},
                 )
-                _raise_for_status(wiql_resp, "Azure DevOps")
+                raise_for_status(wiql_resp, "Azure DevOps")
                 work_items = (wiql_resp.json().get("workItems") or [])[:_MAX_ITEMS]
                 ids = [str(w["id"]) for w in work_items]
                 if not ids:
@@ -110,7 +111,7 @@ class AzureDevOpsClient:
                         "api-version": API_VERSION,
                     },
                 )
-                _raise_for_status(detail_resp, "Azure DevOps")
+                raise_for_status(detail_resp, "Azure DevOps")
         except httpx.HTTPError as exc:
             raise IntegrationError(
                 transport_error_message(exc, "Azure DevOps", self.host)
@@ -152,7 +153,7 @@ class AzureDevOpsClient:
                     headers={"Content-Type": "application/json-patch+json"},
                     json=patch,
                 )
-                _raise_for_status(resp, "Azure DevOps")
+                raise_for_status(resp, "Azure DevOps")
         except httpx.HTTPError as exc:
             raise IntegrationError(
                 transport_error_message(exc, "Azure DevOps", self.host)
@@ -167,12 +168,3 @@ class AzureDevOpsClient:
             title=title,
             description=body,
         )
-
-
-def _raise_for_status(resp: httpx.Response, provider: str) -> None:
-    if resp.is_success:
-        return
-    detail = resp.text[:300] if resp.text else ""
-    raise IntegrationError(
-        f"{provider} returned {resp.status_code} {resp.reason_phrase}. {detail}".strip()
-    )

@@ -55,6 +55,112 @@ class BackupError(Exception):
     """Raised when a backup document can't be restored (bad format/version)."""
 
 
+async def load_profile_rows(db: AsyncSession, profile_id: int) -> dict:
+    """Load every entity of a profile for a backup export.
+
+    Returns a dict keyed by build_profile_backup's kwarg names, so the
+    router can call ``build_profile_backup(profile=profile, **rows)``.
+    Tracker has no profile_id column of its own, so its rows are reached by
+    joining through Habit.
+    """
+    projects = (
+        (
+            await db.execute(
+                select(Project)
+                .where(Project.profile_id == profile_id)
+                .order_by(Project.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    tasks = (
+        (
+            await db.execute(
+                select(Task).where(Task.profile_id == profile_id).order_by(Task.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    countdowns = (
+        (
+            await db.execute(
+                select(Countdown)
+                .where(Countdown.profile_id == profile_id)
+                .order_by(Countdown.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    time_entries = (
+        (
+            await db.execute(
+                select(TimeEntry)
+                .where(TimeEntry.profile_id == profile_id)
+                .order_by(TimeEntry.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    habits = (
+        (
+            await db.execute(
+                select(Habit).where(Habit.profile_id == profile_id).order_by(Habit.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    trackers = (
+        (
+            await db.execute(
+                select(Tracker)
+                .join(Habit, Tracker.habit_id == Habit.id)
+                .where(Habit.profile_id == profile_id)
+                .order_by(Tracker.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    calendar_connections = (
+        (
+            await db.execute(
+                select(CalendarConnection)
+                .where(CalendarConnection.profile_id == profile_id)
+                .order_by(CalendarConnection.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    integration_connections = (
+        (
+            await db.execute(
+                select(IntegrationConnection)
+                .where(IntegrationConnection.profile_id == profile_id)
+                .order_by(IntegrationConnection.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "projects": projects,
+        "tasks": tasks,
+        "countdowns": countdowns,
+        "time_entries": time_entries,
+        "habits": habits,
+        "trackers": trackers,
+        "calendar_connections": calendar_connections,
+        "integration_connections": integration_connections,
+    }
+
+
 def build_profile_backup(
     profile: Profile,
     projects: Iterable[Project],

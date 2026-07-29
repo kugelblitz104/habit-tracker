@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
@@ -13,17 +14,14 @@ from habit_tracker.core.dependencies import (
 )
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
-    Habit,
     HabitList,
     HabitRead,
-    Profile,
-    Tracker,
-    User,
     UserCreate,
     UserList,
     UserRead,
     UserUpdate,
 )
+from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
 
 router = APIRouter(
     prefix="/users", tags=["users"], responses={404: {"description": "Not found"}}
@@ -178,9 +176,11 @@ async def list_user_habits(
         habit_read = HabitRead.model_validate(habit)
         tracker = today_trackers.get(habit.id)
         habit_read.completed_today = (
-            tracker.status == 2 if tracker else False
-        )  # completed
-        habit_read.skipped_today = tracker.status == 1 if tracker else False  # skipped
+            tracker.status == TrackerStatus.COMPLETED if tracker else False
+        )
+        habit_read.skipped_today = (
+            tracker.status == TrackerStatus.SKIPPED if tracker else False
+        )
         habits_read.append(habit_read)
 
     return HabitList(

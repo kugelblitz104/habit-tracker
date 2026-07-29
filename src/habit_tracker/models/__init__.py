@@ -1,3 +1,25 @@
+"""Pydantic request/response models only.
+
+This barrel must never re-export SQLAlchemy ORM classes (those live in
+`habit_tracker.schemas.db_models`) or the shared enums (those live in
+`habit_tracker.constants`). Conflating the two layers is exactly what
+CLAUDE.md warns against: `from habit_tracker.models import Task` must always
+hand back the Pydantic `Task`-shaped model, never the ORM table.
+"""
+
+from habit_tracker.models.backup import (
+    CalendarConnectionBackup,
+    CountdownBackup,
+    HabitBackup,
+    ImportSummary,
+    IntegrationConnectionBackup,
+    ProfileBackup,
+    ProfileSettings,
+    ProjectBackup,
+    TaskBackup,
+    TimeEntryBackup,
+    TrackerBackup,
+)
 from habit_tracker.models.calendar_connections import (
     CalendarConnectionCreate,
     CalendarConnectionList,
@@ -5,6 +27,7 @@ from habit_tracker.models.calendar_connections import (
     CalendarConnectionUpdate,
     CalendarEventList,
     CalendarEventRead,
+    normalize_ics_url,
 )
 from habit_tracker.models.countdowns import (
     CountdownCreate,
@@ -19,6 +42,20 @@ from habit_tracker.models.habits import (
     HabitRead,
     HabitStreak,
     HabitUpdate,
+)
+from habit_tracker.models.imports import (
+    ExportResult,
+    ImportedHabitSummary,
+    ImportResult,
+)
+from habit_tracker.models.integrations import (
+    IntegrationConnectionCreate,
+    IntegrationConnectionList,
+    IntegrationConnectionRead,
+    IntegrationConnectionUpdate,
+    IntegrationSyncResult,
+    PublishRequest,
+    PublishResult,
 )
 from habit_tracker.models.profiles import (
     ProfileCreate,
@@ -56,56 +93,18 @@ from habit_tracker.models.trackers import (
     TrackerUpdate,
 )
 from habit_tracker.models.users import (
+    ForgotPasswordRequest,
+    MessageResponse,
+    RefreshTokenRequest,
+    ResetPasswordRequest,
+    Token,
     UserCreate,
     UserList,
     UserRead,
     UserUpdate,
 )
-from habit_tracker.models.imports import (
-    ImportResult,
-    ImportedHabitSummary,
-)
-from habit_tracker.models.integrations import (
-    IntegrationConnectionCreate,
-    IntegrationConnectionList,
-    IntegrationConnectionRead,
-    IntegrationConnectionUpdate,
-    IntegrationSyncResult,
-    PublishRequest,
-    PublishResult,
-)
-from habit_tracker.schemas.db_models import (
-    CalendarConnection,
-    Countdown,
-    Habit,
-    IntegrationConnection,
-    Profile,
-    Project,
-    Task,
-    TimeEntry,
-    Tracker,
-    User,
-)
-from habit_tracker.constants import (
-    IntegrationProvider,
-    TaskBand,
-    TaskStatus,
-    TimeEntryKind,
-    TrackerStatus,
-)
 
 __all__ = [
-    # DB Models
-    "User",
-    "Profile",
-    "Project",
-    "Task",
-    "TimeEntry",
-    "Habit",
-    "Tracker",
-    "CalendarConnection",
-    "IntegrationConnection",
-    "Countdown",
     # Pydantic Schemas
     "CountdownCreate",
     "CountdownRead",
@@ -134,7 +133,6 @@ __all__ = [
     "TimeEntrySummary",
     "TaskTimeSummary",
     "ProjectTimeSummary",
-    "TimeEntryKind",
     "HabitCreate",
     "HabitRead",
     "HabitUpdate",
@@ -147,12 +145,9 @@ __all__ = [
     "TrackerList",
     "TrackerLite",
     "TrackerLiteList",
-    "TrackerStatus",
-    "TaskStatus",
-    "TaskBand",
     "ImportResult",
     "ImportedHabitSummary",
-    "IntegrationProvider",
+    "ExportResult",
     "IntegrationConnectionCreate",
     "IntegrationConnectionRead",
     "IntegrationConnectionUpdate",
@@ -166,4 +161,21 @@ __all__ = [
     "CalendarConnectionList",
     "CalendarEventRead",
     "CalendarEventList",
+    "normalize_ics_url",
+    "Token",
+    "RefreshTokenRequest",
+    "ForgotPasswordRequest",
+    "ResetPasswordRequest",
+    "MessageResponse",
+    "ProfileBackup",
+    "ImportSummary",
+    "ProfileSettings",
+    "ProjectBackup",
+    "TaskBackup",
+    "CountdownBackup",
+    "TimeEntryBackup",
+    "HabitBackup",
+    "TrackerBackup",
+    "CalendarConnectionBackup",
+    "IntegrationConnectionBackup",
 ]

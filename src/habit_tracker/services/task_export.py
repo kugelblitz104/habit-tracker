@@ -28,7 +28,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Iterable, Mapping
 
-from habit_tracker.constants import TaskBand, TaskStatus, compute_band
+from habit_tracker.constants import TaskBand, TaskPriority, TaskStatus, compute_band
 from habit_tracker.schemas.db_models import Task
 
 _STATUS_LABELS = {
@@ -44,7 +44,11 @@ _STATUS_LABELS = {
     TaskStatus.UNCLEAR.value: "Unclear",
 }
 
-_PRIORITY_LABELS = {1: "Low", 2: "Medium", 3: "High"}
+_PRIORITY_LABELS = {
+    TaskPriority.LOW.value: "Low",
+    TaskPriority.MEDIUM.value: "Medium",
+    TaskPriority.HIGH.value: "High",
+}
 
 # Section order and human titles; the hidden band holds done/cancelled tasks
 _BAND_SECTIONS: list[tuple[TaskBand, str]] = [
@@ -63,7 +67,15 @@ def _format_when(day: date, at: time | None) -> str:
 
 
 def _active_sort_key(task: Task) -> tuple:
-    """Priority desc, due date asc with nulls last, creation date asc."""
+    """Priority desc, due date asc with nulls last, creation date asc.
+
+    Mirrors the SQL ordering in ``routers.tasks.list_tasks``
+    (``Task.priority.desc(), Task.due_date.asc().nulls_last(),
+    Task.created_date.asc()``) in Python, since this formatter has no
+    database to order in. The two can't share code (SQL vs. Python), so
+    ``tests/test_task_export.py`` pins them against each other on a fixture
+    set - keep both in step by hand if either ordering changes.
+    """
     return (
         -task.priority,
         task.due_date is None,

@@ -61,6 +61,39 @@ class IntegrationProvider(str, Enum):
     GITHUB = "github"
 
 
+class TaskPriority(int, Enum):
+    """Priority of a task. Field annotations stay plain `int` - this enum is
+    for validators and label maps only, never a field type (which would add
+    an `enum` array to that property's JSON Schema)."""
+
+    NONE = 0
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
+
+
+class DefaultLanding(str, Enum):
+    """A profile's default landing page."""
+
+    TODAY = "today"
+    HABITS = "habits"
+
+
+class CountdownRepeat(str, Enum):
+    """Recurrence rule for a countdown, anchored on its target_date.
+
+    "monthly_weekday" recurs on the Nth weekday of the month (e.g. 3rd
+    Monday), with N + weekday derived from the anchor target_date; the rest
+    are calendar rules (same day-of-month / same month+day).
+    """
+
+    NONE = "none"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    MONTHLY_WEEKDAY = "monthly_weekday"
+    YEARLY = "yearly"
+
+
 class TaskBand(str, Enum):
     """Computed urgency band for a task. Never stored - derived from
     status + priority + due date via compute_band()."""

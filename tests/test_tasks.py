@@ -5,31 +5,23 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 
 from habit_tracker.constants import TaskStatus
-from habit_tracker.schemas.db_models import Task
+from habit_tracker.schemas.db_models import Countdown, Task, TimeEntry
 from tests.factories import (
     AdminUserFactory,
+    CountdownFactory,
     DoneTaskFactory,
     ProfileFactory,
     ProjectFactory,
     TaskFactory,
+    TimeEntryFactory,
     UserFactory,
 )
-
-
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
 
 
 class TestCreateTask:
     """Tests for POST /tasks/ endpoint."""
 
-    async def test_create_task_quick_capture(self, client, db_session, setup_factories):
+    async def test_create_task_quick_capture(self, client, db_session, login_as):
         """Only profile_id and title are required; everything else defaults."""
         user = UserFactory()
         await db_session.commit()
@@ -37,7 +29,7 @@ class TestCreateTask:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/", json={"profile_id": profile.id, "title": "Buy milk"}
@@ -53,7 +45,7 @@ class TestCreateTask:
         assert data["due_date"] is None
         assert data["closed_date"] is None
 
-    async def test_create_task_all_fields(self, client, db_session, setup_factories):
+    async def test_create_task_all_fields(self, client, db_session, login_as):
         """Create task with a full payload and get it echoed back."""
         user = UserFactory()
         await db_session.commit()
@@ -66,7 +58,7 @@ class TestCreateTask:
 
         due = date.today() + timedelta(days=1)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -98,7 +90,7 @@ class TestCreateTask:
         assert data["band"] == "now"  # priority 3
 
     async def test_create_task_with_scheduled_date_time(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """scheduled_date/scheduled_time persist and round-trip in TaskRead."""
         user = UserFactory()
@@ -109,7 +101,7 @@ class TestCreateTask:
 
         scheduled = date.today() + timedelta(days=3)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -136,7 +128,7 @@ class TestCreateTask:
         assert got["scheduled_time"] == "09:15:00"
 
     async def test_create_non_scheduled_task_clears_scheduled_data(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A non-SCHEDULED status forces scheduled_date/time null even if sent."""
         user = UserFactory()
@@ -147,7 +139,7 @@ class TestCreateTask:
 
         scheduled = date.today() + timedelta(days=3)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -174,7 +166,7 @@ class TestCreateTask:
         assert db_task.scheduled_time is None
 
     async def test_create_scheduled_task_keeps_scheduled_data(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A SCHEDULED status keeps supplied scheduled_date/time."""
         user = UserFactory()
@@ -185,7 +177,7 @@ class TestCreateTask:
 
         scheduled = date.today() + timedelta(days=3)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -204,7 +196,7 @@ class TestCreateTask:
         assert data["scheduled_time"] == "09:15:00"
 
     async def test_create_task_project_in_other_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A project in a different profile is rejected (400)."""
         user = UserFactory()
@@ -217,7 +209,7 @@ class TestCreateTask:
         project = ProjectFactory(profile=other_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -230,7 +222,7 @@ class TestCreateTask:
         assert response.status_code == 400
 
     async def test_create_task_foreign_or_missing_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Foreign profile is 403; non-existent profile is 404."""
         user = UserFactory()
@@ -240,7 +232,7 @@ class TestCreateTask:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/", json={"profile_id": foreign.id, "title": "Nope"}
@@ -253,7 +245,7 @@ class TestCreateTask:
         assert response.status_code == 404
 
     async def test_create_task_done_stamps_closed_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Creating a task already DONE stamps its closed_date."""
         user = UserFactory()
@@ -262,7 +254,7 @@ class TestCreateTask:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -283,7 +275,7 @@ class TestListTasks:
     """Tests for GET /tasks/ endpoint."""
 
     async def test_list_tasks_excludes_closed_by_default(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """DONE and CANCELLED tasks are excluded unless include_closed."""
         user = UserFactory()
@@ -300,7 +292,7 @@ class TestListTasks:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/tasks/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -309,7 +301,7 @@ class TestListTasks:
         ids = {t["id"] for t in data["tasks"]}
         assert ids == {open_task.id, blocked_task.id}
 
-    async def test_list_tasks_include_closed(self, client, db_session, setup_factories):
+    async def test_list_tasks_include_closed(self, client, db_session, login_as):
         """include_closed=true returns closed tasks too."""
         user = UserFactory()
         await db_session.commit()
@@ -324,7 +316,7 @@ class TestListTasks:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/", params={"profile_id": profile.id, "include_closed": True}
@@ -333,7 +325,7 @@ class TestListTasks:
         assert response.json()["total"] == 3
 
     async def test_list_tasks_status_filter_includes_done(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An explicit status filter works even for DONE."""
         user = UserFactory()
@@ -346,7 +338,7 @@ class TestListTasks:
         done = DoneTaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/",
@@ -359,7 +351,7 @@ class TestListTasks:
         assert data["tasks"][0]["band"] == "hidden"
 
     async def test_list_tasks_band_membership(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Band filter returns tasks whose computed band matches."""
         user = UserFactory()
@@ -379,7 +371,7 @@ class TestListTasks:
         plain = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/", params={"profile_id": profile.id, "band": "now"}
@@ -407,7 +399,7 @@ class TestListTasks:
             plain.id,
         }
 
-    async def test_list_tasks_invalid_band(self, client, db_session, setup_factories):
+    async def test_list_tasks_invalid_band(self, client, db_session, login_as):
         """An invalid band value is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -415,7 +407,7 @@ class TestListTasks:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/", params={"profile_id": profile.id, "band": "urgent"}
@@ -423,7 +415,7 @@ class TestListTasks:
         assert response.status_code == 422
 
     async def test_list_tasks_completed_view_ordering(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """band=hidden&include_closed=true orders by closed_date descending."""
         user = UserFactory()
@@ -446,7 +438,7 @@ class TestListTasks:
         TaskFactory(profile=profile)  # open task stays out of the hidden band
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/",
@@ -462,7 +454,7 @@ class TestListTasks:
         assert [t["id"] for t in data["tasks"]] == [newest.id, middle.id, oldest.id]
 
     async def test_list_tasks_active_ordering(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Active tasks order by priority desc, due date asc nulls last."""
         user = UserFactory()
@@ -500,7 +492,7 @@ class TestListTasks:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/tasks/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -514,7 +506,7 @@ class TestListTasks:
         ]
 
     async def test_list_tasks_pagination_after_band_filter(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """limit/offset apply to the band-filtered list; total matches it."""
         user = UserFactory()
@@ -534,7 +526,7 @@ class TestListTasks:
         TaskFactory(profile=profile, priority=1)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/",
@@ -548,7 +540,7 @@ class TestListTasks:
         # Ordered by due date ascending, the slice skips the two most overdue
         assert [t["id"] for t in data["tasks"]] == [now_tasks[2].id, now_tasks[3].id]
 
-    async def test_list_tasks_project_filter(self, client, db_session, setup_factories):
+    async def test_list_tasks_project_filter(self, client, db_session, login_as):
         """project_id filter restricts results to that project's tasks."""
         user = UserFactory()
         await db_session.commit()
@@ -563,7 +555,7 @@ class TestListTasks:
         TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/tasks/", params={"profile_id": profile.id, "project_id": project.id}
@@ -574,7 +566,7 @@ class TestListTasks:
         assert data["tasks"][0]["id"] == in_project.id
 
     async def test_list_tasks_foreign_or_missing_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Foreign profile is 403; non-existent profile is 404."""
         user = UserFactory()
@@ -584,7 +576,7 @@ class TestListTasks:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/tasks/", params={"profile_id": foreign.id})
         assert response.status_code == 403
@@ -596,7 +588,7 @@ class TestListTasks:
 class TestGetTask:
     """Tests for GET /tasks/{task_id} endpoint."""
 
-    async def test_get_own_task(self, client, db_session, setup_factories):
+    async def test_get_own_task(self, client, db_session, login_as):
         """User can retrieve their task, including its computed band."""
         user = UserFactory()
         await db_session.commit()
@@ -607,7 +599,7 @@ class TestGetTask:
         task = TaskFactory(profile=profile, priority=3)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/tasks/{task.id}")
         assert response.status_code == 200
@@ -615,7 +607,7 @@ class TestGetTask:
         assert data["id"] == task.id
         assert data["band"] == "now"
 
-    async def test_get_task_as_admin(self, client, db_session, setup_factories):
+    async def test_get_task_as_admin(self, client, db_session, login_as):
         """Admin can access any task."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -627,12 +619,12 @@ class TestGetTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, admin)
+        await login_as(admin)
 
         response = await client.get(f"/tasks/{task.id}")
         assert response.status_code == 200
 
-    async def test_get_other_user_task(self, client, db_session, setup_factories):
+    async def test_get_other_user_task(self, client, db_session, login_as):
         """User cannot access a task in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -644,17 +636,17 @@ class TestGetTask:
         task = TaskFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/tasks/{task.id}")
         assert response.status_code == 403
 
-    async def test_get_nonexistent_task(self, client, db_session, setup_factories):
+    async def test_get_nonexistent_task(self, client, db_session, login_as):
         """Return 404 for non-existent task."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/tasks/99999")
         assert response.status_code == 404
@@ -664,7 +656,7 @@ class TestPatchTask:
     """Tests for PATCH /tasks/{task_id} endpoint."""
 
     async def test_patch_task_priority_flips_band(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Raising priority to 3 moves the task from whenever to now."""
         user = UserFactory()
@@ -676,7 +668,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile, priority=0)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/tasks/{task.id}", json={"priority": 3})
         assert response.status_code == 200
@@ -685,7 +677,7 @@ class TestPatchTask:
         assert data["band"] == "now"
 
     async def test_patch_task_scheduled_date_moves_band(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Setting a near-future scheduled_date moves the task into 'soon'."""
         user = UserFactory()
@@ -697,7 +689,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile, priority=0)  # starts "whenever"
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         # Scheduled data only lives on SCHEDULED tasks, so schedule + set status
         scheduled = date.today() + timedelta(days=2)
@@ -716,7 +708,7 @@ class TestPatchTask:
         assert data["band"] == "soon"
 
     async def test_patch_task_clear_scheduled_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """scheduled_date is nullable - PATCH scheduled_date=null clears it."""
         user = UserFactory()
@@ -731,7 +723,7 @@ class TestPatchTask:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"scheduled_date": None}
@@ -743,7 +735,7 @@ class TestPatchTask:
         assert data["band"] == "whenever"
 
     async def test_patch_status_away_from_scheduled_clears_scheduled_data(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Changing status off SCHEDULED clears scheduled data without sending it.
 
@@ -766,7 +758,7 @@ class TestPatchTask:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         # Only the status changes - the scheduled fields are NOT part of the body
         response = await client.patch(
@@ -787,7 +779,7 @@ class TestPatchTask:
         assert db_task.scheduled_time is None
 
     async def test_patch_scheduled_task_keeps_scheduled_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Patching scheduled_date while status stays SCHEDULED keeps it."""
         user = UserFactory()
@@ -804,7 +796,7 @@ class TestPatchTask:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         new_scheduled = date.today() + timedelta(days=2)
         response = await client.patch(
@@ -818,7 +810,7 @@ class TestPatchTask:
         assert data["band"] == "soon"
 
     async def test_patch_non_scheduled_task_to_scheduled_keeps_scheduled_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Setting status to SCHEDULED + scheduled_date in one PATCH keeps it."""
         user = UserFactory()
@@ -830,7 +822,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile, priority=0, status=TaskStatus.OPEN)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         scheduled = date.today() + timedelta(days=2)
         response = await client.patch(
@@ -849,7 +841,7 @@ class TestPatchTask:
         assert data["band"] == "soon"
 
     async def test_patch_task_done_sets_closed_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Setting status to DONE stamps closed_date."""
         user = UserFactory()
@@ -861,7 +853,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile, status=TaskStatus.OPEN)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"status": TaskStatus.DONE.value}
@@ -873,7 +865,7 @@ class TestPatchTask:
         assert data["band"] == "hidden"
 
     async def test_patch_task_done_to_cancelled_preserves_closed_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """DONE -> CANCELLED keeps the original closed_date."""
         user = UserFactory()
@@ -887,7 +879,7 @@ class TestPatchTask:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"status": TaskStatus.CANCELLED.value}
@@ -898,7 +890,7 @@ class TestPatchTask:
         assert data["closed_date"] == "2026-01-05T12:00:00"
 
     async def test_patch_task_reopen_clears_closed_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reopening a closed task clears its closed_date."""
         user = UserFactory()
@@ -910,7 +902,7 @@ class TestPatchTask:
         task = DoneTaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"status": TaskStatus.OPEN.value}
@@ -921,7 +913,7 @@ class TestPatchTask:
         assert data["closed_date"] is None
 
     async def test_patch_task_block_reason_set_and_clear(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """block_reason can be set and cleared."""
         user = UserFactory()
@@ -933,7 +925,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}",
@@ -955,7 +947,7 @@ class TestPatchTask:
         assert response.json()["block_reason"] is None
 
     async def test_patch_task_move_to_project_same_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a task into a project of the same profile works."""
         user = UserFactory()
@@ -970,7 +962,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"project_id": project.id}
@@ -979,7 +971,7 @@ class TestPatchTask:
         assert response.json()["project_id"] == project.id
 
     async def test_patch_task_move_to_project_in_other_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a task into a project of a different profile fails (400)."""
         user = UserFactory()
@@ -995,7 +987,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"project_id": project.id}
@@ -1003,7 +995,7 @@ class TestPatchTask:
         assert response.status_code == 400
 
     async def test_patch_task_profile_move_without_project(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A task with no project can move to another of the user's profiles."""
         user = UserFactory()
@@ -1016,7 +1008,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"profile_id": other_profile.id}
@@ -1025,7 +1017,7 @@ class TestPatchTask:
         assert response.json()["profile_id"] == other_profile.id
 
     async def test_patch_task_profile_move_with_project_in_old_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a task whose project stays in the old profile fails (400)."""
         user = UserFactory()
@@ -1041,7 +1033,7 @@ class TestPatchTask:
         task = TaskFactory(profile=profile, project=project)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"profile_id": other_profile.id}
@@ -1049,7 +1041,7 @@ class TestPatchTask:
         assert response.status_code == 400
 
     async def test_patch_task_profile_move_to_other_user_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a task to another user's profile fails (400)."""
         user = UserFactory()
@@ -1063,14 +1055,14 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"profile_id": foreign.id}
         )
         assert response.status_code == 400
 
-    async def test_patch_task_null_title(self, client, db_session, setup_factories):
+    async def test_patch_task_null_title(self, client, db_session, login_as):
         """An explicit null for the non-nullable title is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -1081,13 +1073,13 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/tasks/{task.id}", json={"title": None})
         assert response.status_code == 422
 
     async def test_patch_task_null_profile_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An explicit null for the non-nullable profile_id is rejected (422)."""
         user = UserFactory()
@@ -1099,12 +1091,12 @@ class TestPatchTask:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/tasks/{task.id}", json={"profile_id": None})
         assert response.status_code == 422
 
-    async def test_patch_other_user_task(self, client, db_session, setup_factories):
+    async def test_patch_other_user_task(self, client, db_session, login_as):
         """User cannot patch a task in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -1116,17 +1108,17 @@ class TestPatchTask:
         task = TaskFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/tasks/{task.id}", json={"title": "Hax"})
         assert response.status_code == 403
 
-    async def test_patch_nonexistent_task(self, client, db_session, setup_factories):
+    async def test_patch_nonexistent_task(self, client, db_session, login_as):
         """Return 404 for non-existent task."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch("/tasks/99999", json={"title": "Ghost"})
         assert response.status_code == 404
@@ -1135,7 +1127,7 @@ class TestPatchTask:
 class TestSubtasks:
     """Tests for subtasks (self-referential parent_id, one level deep)."""
 
-    async def test_create_subtask(self, client, db_session, setup_factories):
+    async def test_create_subtask(self, client, db_session, login_as):
         """POST with parent_id creates a subtask; parent_id round-trips."""
         user = UserFactory()
         await db_session.commit()
@@ -1146,7 +1138,7 @@ class TestSubtasks:
         parent = TaskFactory(profile=profile, title="Plan the offsite")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -1168,7 +1160,7 @@ class TestSubtasks:
         assert response.json()["parent_id"] == parent.id
 
     async def test_create_subtask_parent_not_found(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A non-existent parent is rejected (400, mirrors project_id)."""
         user = UserFactory()
@@ -1177,7 +1169,7 @@ class TestSubtasks:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -1187,7 +1179,7 @@ class TestSubtasks:
         assert "Parent task not found" in response.json()["detail"]
 
     async def test_create_subtask_cross_profile_parent(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A parent in a different profile is rejected (400)."""
         user = UserFactory()
@@ -1200,7 +1192,7 @@ class TestSubtasks:
         parent = TaskFactory(profile=other_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -1214,7 +1206,7 @@ class TestSubtasks:
         assert "Parent task not found" in response.json()["detail"]
 
     async def test_create_subtask_under_subtask(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Creating a subtask under a subtask is rejected (400, one level)."""
         user = UserFactory()
@@ -1229,7 +1221,7 @@ class TestSubtasks:
         subtask = TaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -1245,7 +1237,7 @@ class TestSubtasks:
         )
 
     async def test_patch_parent_onto_task_with_subtasks(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A task that HAS subtasks cannot itself become a subtask (400)."""
         user = UserFactory()
@@ -1261,7 +1253,7 @@ class TestSubtasks:
         TaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{parent.id}", json={"parent_id": other.id}
@@ -1272,7 +1264,7 @@ class TestSubtasks:
             == "A task with subtasks cannot itself become a subtask"
         )
 
-    async def test_patch_self_parent(self, client, db_session, setup_factories):
+    async def test_patch_self_parent(self, client, db_session, login_as):
         """A task cannot be its own parent (400)."""
         user = UserFactory()
         await db_session.commit()
@@ -1283,14 +1275,14 @@ class TestSubtasks:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/tasks/{task.id}", json={"parent_id": task.id})
         assert response.status_code == 400
         assert response.json()["detail"] == "A task cannot be its own parent"
 
     async def test_patch_set_and_clear_parent(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """PATCH can attach a task to a parent and detach it again."""
         user = UserFactory()
@@ -1303,7 +1295,7 @@ class TestSubtasks:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"parent_id": parent.id}
@@ -1316,7 +1308,7 @@ class TestSubtasks:
         assert response.json()["parent_id"] is None
 
     async def test_patch_parent_of_existing_subtask_one_level(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """PATCHing parent_id to point at a subtask is rejected (400)."""
         user = UserFactory()
@@ -1332,7 +1324,7 @@ class TestSubtasks:
         subtask = TaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"parent_id": subtask.id}
@@ -1343,7 +1335,7 @@ class TestSubtasks:
         )
 
     async def test_delete_parent_cascades_subtasks(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Deleting a parent task deletes its subtasks (ON DELETE CASCADE)."""
         user = UserFactory()
@@ -1359,7 +1351,7 @@ class TestSubtasks:
         await db_session.commit()
         parent_id, subtask_id = parent.id, subtask.id
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/tasks/{parent_id}")
         assert response.status_code == 200
@@ -1370,7 +1362,7 @@ class TestSubtasks:
         assert result.scalar_one_or_none() is None
 
     async def test_list_includes_subtasks_with_parent_id_and_counts(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Subtasks come back in the same list response; counts are right
         with mixed statuses (done counts DONE only, not cancelled)."""
@@ -1394,7 +1386,7 @@ class TestSubtasks:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/tasks/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -1414,7 +1406,7 @@ class TestSubtasks:
         assert by_id[lone.id]["subtask_done_count"] == 0
 
     async def test_get_single_task_subtask_counts(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """GET /tasks/{id} carries the same counts as the list endpoint."""
         user = UserFactory()
@@ -1430,7 +1422,7 @@ class TestSubtasks:
         DoneTaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/tasks/{parent.id}")
         assert response.status_code == 200
@@ -1439,7 +1431,7 @@ class TestSubtasks:
         assert data["subtask_done_count"] == 1
 
     async def test_patch_profile_move_with_subtasks(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a task that has subtasks to another profile fails (400)."""
         user = UserFactory()
@@ -1455,7 +1447,7 @@ class TestSubtasks:
         TaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{parent.id}", json={"profile_id": other_profile.id}
@@ -1467,7 +1459,7 @@ class TestSubtasks:
         )
 
     async def test_patch_profile_move_of_subtask(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Moving a subtask fails (400) unless parent_id is nulled with it."""
         user = UserFactory()
@@ -1483,7 +1475,7 @@ class TestSubtasks:
         subtask = TaskFactory(profile=profile, parent_id=parent.id)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         # Parent would be left in the old profile -> rejected
         response = await client.patch(
@@ -1506,7 +1498,7 @@ class TestSubtasks:
 class TestDeleteTask:
     """Tests for DELETE /tasks/{task_id} endpoint."""
 
-    async def test_delete_own_task(self, client, db_session, setup_factories):
+    async def test_delete_own_task(self, client, db_session, login_as):
         """User can delete their task."""
         user = UserFactory()
         await db_session.commit()
@@ -1518,7 +1510,7 @@ class TestDeleteTask:
         await db_session.commit()
         task_id = task.id
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/tasks/{task_id}")
         assert response.status_code == 200
@@ -1526,7 +1518,7 @@ class TestDeleteTask:
         result = await db_session.execute(select(Task).filter(Task.id == task_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_other_user_task(self, client, db_session, setup_factories):
+    async def test_delete_other_user_task(self, client, db_session, login_as):
         """User cannot delete a task in another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -1538,17 +1530,17 @@ class TestDeleteTask:
         task = TaskFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/tasks/{task.id}")
         assert response.status_code == 403
 
-    async def test_delete_nonexistent_task(self, client, db_session, setup_factories):
+    async def test_delete_nonexistent_task(self, client, db_session, login_as):
         """Return 404 for non-existent task."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete("/tasks/99999")
         assert response.status_code == 404
@@ -1557,7 +1549,7 @@ class TestDeleteTask:
 class TestSortTasks:
     """Tests for PUT /tasks/sort endpoint."""
 
-    async def test_sort_tasks_basic(self, client, db_session, setup_factories):
+    async def test_sort_tasks_basic(self, client, db_session, login_as):
         """Successfully reorder sibling tasks; first ID gets the lowest sort_order."""
         user = UserFactory()
         await db_session.commit()
@@ -1572,7 +1564,7 @@ class TestSortTasks:
         sub3 = TaskFactory(profile=profile, parent=parent, title="Sub 3")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         # Reorder: sub3, sub1, sub2
         response = await client.put(
@@ -1589,17 +1581,17 @@ class TestSortTasks:
         assert sub1.sort_order == 1
         assert sub2.sort_order == 2
 
-    async def test_sort_tasks_empty_list(self, client, db_session, setup_factories):
+    async def test_sort_tasks_empty_list(self, client, db_session, login_as):
         """An empty task_ids list is rejected."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.put("/tasks/sort", json=[])
         assert response.status_code == 400
 
-    async def test_sort_tasks_duplicate_ids(self, client, db_session, setup_factories):
+    async def test_sort_tasks_duplicate_ids(self, client, db_session, login_as):
         """Duplicate task IDs are rejected."""
         user = UserFactory()
         await db_session.commit()
@@ -1609,22 +1601,22 @@ class TestSortTasks:
         task = TaskFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.put("/tasks/sort", json=[task.id, task.id])
         assert response.status_code == 400
 
-    async def test_sort_tasks_not_found(self, client, db_session, setup_factories):
+    async def test_sort_tasks_not_found(self, client, db_session, login_as):
         """A missing task ID yields 404."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.put("/tasks/sort", json=[99999])
         assert response.status_code == 404
 
-    async def test_sort_tasks_forbidden(self, client, db_session, setup_factories):
+    async def test_sort_tasks_forbidden(self, client, db_session, login_as):
         """Reordering a task in another user's profile is forbidden."""
         user = UserFactory()
         other_user = UserFactory()
@@ -1635,7 +1627,63 @@ class TestSortTasks:
         task = TaskFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.put("/tasks/sort", json=[task.id])
         assert response.status_code == 403
+
+
+class TestDeleteAllTasks:
+    """Tests for DELETE /tasks/ (bulk delete, profile-scoped)."""
+
+    async def test_deletes_tasks_and_subtasks(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile)
+        await db_session.commit()
+        TaskFactory(profile=profile, parent_id=parent.id)  # subtask
+        keep = TaskFactory(profile=other)
+        await db_session.commit()
+
+        await login_as(user)
+        response = await client.delete("/tasks/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2  # parent + subtask
+
+        remaining = (await db_session.execute(select(Task))).scalars().all()
+        assert [t.id for t in remaining] == [keep.id]
+
+    async def test_cascades_time_entries_but_unlinks_countdowns(
+        self, client, db_session, login_as
+    ):
+        """A task-attached time entry is removed with the task (CASCADE); a
+        countdown that links the task is kept and unlinked (SET NULL)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        await db_session.commit()
+
+        task = TaskFactory(profile=profile)
+        await db_session.commit()
+
+        entry = TimeEntryFactory(profile=profile, task=task)
+        countdown = CountdownFactory(profile=profile, task=task, title="Ship it")
+        await db_session.commit()
+        entry_id, countdown_id = entry.id, countdown.id
+
+        await login_as(user)
+        response = await client.delete("/tasks/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        assert await db_session.get(TimeEntry, entry_id) is None  # cascaded
+        survivor = await db_session.get(Countdown, countdown_id)
+        assert survivor is not None and survivor.task_id is None  # unlinked

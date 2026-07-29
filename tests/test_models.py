@@ -19,7 +19,7 @@ class TestUserModel:
     """Tests for User model."""
 
     async def test_user_creation_with_required_fields(
-        self, db_session, setup_factories
+        self, db_session
     ):
         """User can be created with required fields."""
         user = UserFactory()
@@ -32,7 +32,7 @@ class TestUserModel:
         assert fetched_user.email is not None
         assert fetched_user.password_hash is not None
 
-    async def test_user_admin_flag_default(self, db_session, setup_factories):
+    async def test_user_admin_flag_default(self, db_session):
         """User is_admin defaults to False."""
         user = UserFactory()
         await db_session.commit()
@@ -41,7 +41,7 @@ class TestUserModel:
         fetched_user = result.scalar_one()
         assert fetched_user.is_admin is False
 
-    async def test_user_admin_flag_set(self, db_session, setup_factories):
+    async def test_user_admin_flag_set(self, db_session):
         """Admin user has is_admin=True."""
         admin = AdminUserFactory()
         await db_session.commit()
@@ -50,7 +50,7 @@ class TestUserModel:
         fetched_user = result.scalar_one()
         assert fetched_user.is_admin is True
 
-    async def test_user_has_habits_relationship(self, db_session, setup_factories):
+    async def test_user_has_habits_relationship(self, db_session):
         """User has habits relationship."""
         user = UserFactory()
         await db_session.commit()
@@ -64,7 +64,7 @@ class TestUserModel:
         await db_session.refresh(fetched_user, ["habits"])
         assert len(fetched_user.habits) == 2
 
-    async def test_user_timestamps(self, db_session, setup_factories):
+    async def test_user_timestamps(self, db_session):
         """User has timestamp fields."""
         user = UserFactory()
         await db_session.commit()
@@ -80,7 +80,7 @@ class TestHabitModel:
     """Tests for Habit model."""
 
     async def test_habit_creation_with_required_fields(
-        self, db_session, setup_factories
+        self, db_session
     ):
         """Habit can be created with required fields."""
         user = UserFactory()
@@ -95,7 +95,7 @@ class TestHabitModel:
         assert fetched_habit.name is not None
         assert fetched_habit.user_id == user.id
 
-    async def test_habit_belongs_to_user(self, db_session, setup_factories):
+    async def test_habit_belongs_to_user(self, db_session):
         """Habit belongs to user via user_id."""
         user = UserFactory()
         await db_session.commit()
@@ -107,7 +107,7 @@ class TestHabitModel:
         fetched_habit = result.scalar_one()
         assert fetched_habit.user_id == user.id
 
-    async def test_habit_has_trackers_relationship(self, db_session, setup_factories):
+    async def test_habit_has_trackers_relationship(self, db_session):
         """Habit has trackers relationship."""
         user = UserFactory()
         await db_session.commit()
@@ -124,7 +124,7 @@ class TestHabitModel:
         await db_session.refresh(fetched_habit, ["trackers"])
         assert len(fetched_habit.trackers) == 2
 
-    async def test_habit_default_values(self, db_session, setup_factories):
+    async def test_habit_default_values(self, db_session):
         """Habit has proper default values."""
         user = UserFactory()
         await db_session.commit()
@@ -136,7 +136,7 @@ class TestHabitModel:
         fetched_habit = result.scalar_one()
         assert fetched_habit.archived is False
 
-    async def test_habit_sort_order_field(self, db_session, setup_factories):
+    async def test_habit_sort_order_field(self, db_session):
         """Habit has sort_order field."""
         user = UserFactory()
         await db_session.commit()
@@ -152,7 +152,7 @@ class TestHabitModel:
 class TestTrackerModel:
     """Tests for Tracker model."""
 
-    async def test_tracker_creation(self, db_session, setup_factories):
+    async def test_tracker_creation(self, db_session):
         """Tracker can be created."""
         user = UserFactory()
         await db_session.commit()
@@ -170,7 +170,7 @@ class TestTrackerModel:
         assert fetched_tracker is not None
         assert fetched_tracker.habit_id == habit.id
 
-    async def test_tracker_belongs_to_habit(self, db_session, setup_factories):
+    async def test_tracker_belongs_to_habit(self, db_session):
         """Tracker belongs to habit via habit_id."""
         user = UserFactory()
         await db_session.commit()
@@ -187,7 +187,7 @@ class TestTrackerModel:
         fetched_tracker = result.scalar_one()
         assert fetched_tracker.habit_id == habit.id
 
-    async def test_tracker_dated_field(self, db_session, setup_factories):
+    async def test_tracker_dated_field(self, db_session):
         """Tracker has dated field."""
         user = UserFactory()
         await db_session.commit()
@@ -205,7 +205,7 @@ class TestTrackerModel:
         fetched_tracker = result.scalar_one()
         assert fetched_tracker.dated == today
 
-    async def test_tracker_completed_status(self, db_session, setup_factories):
+    async def test_tracker_completed_status(self, db_session):
         """Tracker stores a completed status."""
         user = UserFactory()
         await db_session.commit()
@@ -222,7 +222,7 @@ class TestTrackerModel:
         fetched_tracker = result.scalar_one()
         assert fetched_tracker.status == TrackerStatus.COMPLETED
 
-    async def test_tracker_skipped_status(self, db_session, setup_factories):
+    async def test_tracker_skipped_status(self, db_session):
         """Tracker stores a skipped status."""
         user = UserFactory()
         await db_session.commit()
@@ -243,7 +243,7 @@ class TestTrackerModel:
 class TestModelRelationships:
     """Tests for model relationships."""
 
-    async def test_user_habit_cascade_delete(self, db_session, setup_factories):
+    async def test_user_habit_cascade_delete(self, db_session):
         """Deleting user cascades to habits."""
         user = UserFactory()
         await db_session.commit()
@@ -259,7 +259,7 @@ class TestModelRelationships:
         result = await db_session.execute(select(Habit).where(Habit.id == habit.id))
         assert result.scalar_one_or_none() is None
 
-    async def test_habit_tracker_cascade_delete(self, db_session, setup_factories):
+    async def test_habit_tracker_cascade_delete(self, db_session):
         """Deleting habit cascades to trackers."""
         user = UserFactory()
         await db_session.commit()
@@ -281,7 +281,7 @@ class TestModelRelationships:
         )
         assert result.scalar_one_or_none() is None
 
-    async def test_multiple_habits_per_user(self, db_session, setup_factories):
+    async def test_multiple_habits_per_user(self, db_session):
         """User can have multiple habits."""
         user = UserFactory()
         await db_session.commit()
@@ -294,7 +294,7 @@ class TestModelRelationships:
         habits = result.scalars().all()
         assert len(habits) == 5
 
-    async def test_multiple_trackers_per_habit(self, db_session, setup_factories):
+    async def test_multiple_trackers_per_habit(self, db_session):
         """Habit can have multiple trackers."""
         user = UserFactory()
         await db_session.commit()
@@ -316,7 +316,7 @@ class TestModelRelationships:
 class TestModelConstraints:
     """Tests for model constraints."""
 
-    async def test_user_unique_username(self, db_session, setup_factories):
+    async def test_user_unique_username(self, db_session):
         """Username must be unique."""
         UserFactory(username="uniqueuser")
         await db_session.commit()
@@ -325,7 +325,7 @@ class TestModelConstraints:
             UserFactory(username="uniqueuser")
             await db_session.commit()
 
-    async def test_user_unique_email(self, db_session, setup_factories):
+    async def test_user_unique_email(self, db_session):
         """Email must be unique."""
         UserFactory(email="unique@example.com")
         await db_session.commit()
@@ -334,7 +334,7 @@ class TestModelConstraints:
             UserFactory(email="unique@example.com")
             await db_session.commit()
 
-    async def test_habit_requires_user(self, db_session, setup_factories):
+    async def test_habit_requires_user(self, db_session):
         """Habit must have a user."""
         # This should fail due to foreign key constraint
         habit = Habit(
@@ -349,7 +349,7 @@ class TestModelConstraints:
         with pytest.raises(Exception):
             await db_session.commit()
 
-    async def test_tracker_requires_habit(self, db_session, setup_factories):
+    async def test_tracker_requires_habit(self, db_session):
         """Tracker must have a habit."""
         tracker = Tracker(
             habit_id=99999,  # Non-existent habit
@@ -359,3 +359,14 @@ class TestModelConstraints:
         db_session.add(tracker)
         with pytest.raises(Exception):
             await db_session.commit()
+
+
+def test_models_barrel_never_reexports_orm():
+    """`from habit_tracker.models import X` must always give the Pydantic X."""
+    import habit_tracker.models as m
+    from pydantic import BaseModel
+
+    for name in m.__all__:
+        obj = getattr(m, name)
+        if isinstance(obj, type):
+            assert issubclass(obj, BaseModel), f"{name} is not a Pydantic model"

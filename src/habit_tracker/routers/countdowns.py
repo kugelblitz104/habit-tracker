@@ -3,15 +3,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
-    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
 )
+from habit_tracker.core.http import bulk_delete_in_profile
 from habit_tracker.models import (
     CountdownCreate,
     CountdownList,
@@ -44,13 +45,13 @@ async def _validate_task_link(
 async def _get_countdown_and_authorize(
     db: AsyncSession, countdown_id: int, current_user: User
 ) -> Countdown:
-    countdown = await db.get(Countdown, countdown_id)
-    if not countdown:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Countdown not found"
-        )
-    await authorize_parent_profile(
-        db, countdown.profile_id, current_user, "countdown"
+    countdown, _ = await get_owned_child(
+        db,
+        Countdown,
+        countdown_id,
+        current_user,
+        not_found_detail="Countdown not found",
+        resource_name="countdown",
     )
     return countdown
 
@@ -154,19 +155,13 @@ async def delete_all_countdowns(
 
     This action cannot be undone. Linked tasks are not affected.
     """
-    await get_owned_profile(db, profile_id, current_user, "countdown")
-
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Countdown)
-            .filter(Countdown.profile_id == profile_id)
-        )
-    ).scalar() or 0
-    await db.execute(delete(Countdown).where(Countdown.profile_id == profile_id))
-    await db.commit()
-    return JSONResponse(
-        content={"detail": f"Deleted {count} countdowns", "deleted": count}
+    return await bulk_delete_in_profile(
+        db,
+        Countdown,
+        profile_id,
+        current_user,
+        resource_name="countdown",
+        detail="Deleted {count} countdowns",
     )
 
 

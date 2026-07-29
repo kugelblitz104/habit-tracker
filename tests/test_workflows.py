@@ -17,7 +17,7 @@ class TestUserOnboardingFlow:
     """Tests for user onboarding workflows."""
 
     async def test_complete_user_registration_flow(
-        self, shared_client, shared_db_session, setup_factories
+        self, shared_client, shared_db_session
     ):
         """Register, login, verify tokens."""
         # Register new user
@@ -53,7 +53,7 @@ class TestUserOnboardingFlow:
         assert response.status_code == 200
 
     async def test_user_creates_first_habit(
-        self, shared_client, shared_db_session, setup_factories
+        self, shared_client, shared_db_session
     ):
         """New user creates their first habit."""
         # Register and login
@@ -142,18 +142,13 @@ class TestHabitTrackingFlow:
 
     @pytest.mark.skip(reason="endpoint arrives in overhaul Phase 3")
     async def test_daily_habit_completion_flow(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Create habit, mark complete, verify KPIs."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Create habit
         habit_response = await client.post(
@@ -184,7 +179,7 @@ class TestHabitTrackingFlow:
         kpis = kpi_response.json()
         assert kpis["total_completions"] == 1
 
-    async def test_habit_skip_flow(self, client, db_session, setup_factories):
+    async def test_habit_skip_flow(self, client, db_session, login_as):
         """Skip habit and verify it doesn't break streak."""
         user = UserFactory()
         await db_session.commit()
@@ -192,12 +187,7 @@ class TestHabitTrackingFlow:
         habit = HabitFactory(user=user, frequency=1, range=1)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Complete yesterday
         await client.post(
@@ -226,7 +216,7 @@ class TestHabitTrackingFlow:
         assert data["skipped_today"] is True
 
     async def test_habit_archive_unarchive_flow(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Archive and unarchive habit."""
         user = UserFactory()
@@ -235,12 +225,7 @@ class TestHabitTrackingFlow:
         habit = HabitFactory(user=user, archived=False)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Archive
         archive_response = await client.patch(
@@ -264,7 +249,7 @@ class TestStreakBuildingFlow:
     """Tests for streak building workflows."""
 
     async def test_build_streak_consecutive_days(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Build streak over consecutive days."""
         user = UserFactory()
@@ -282,12 +267,7 @@ class TestStreakBuildingFlow:
             )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Check streaks
         streaks_response = await client.get(f"/habits/{habit.id}/streaks")
@@ -296,7 +276,7 @@ class TestStreakBuildingFlow:
         assert len(streaks) >= 1
 
     async def test_build_streak_with_frequency(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Build streak with frequency > 1."""
         user = UserFactory()
@@ -320,12 +300,7 @@ class TestStreakBuildingFlow:
         )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         kpis_response = await client.get(f"/habits/{habit.id}/kpis")
         assert kpis_response.status_code == 200
@@ -337,7 +312,7 @@ class TestMultiUserScenarios:
     """Tests for multi-user scenarios."""
 
     async def test_multiple_users_isolated_data(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify user data isolation."""
         user1 = UserFactory()
@@ -349,12 +324,7 @@ class TestMultiUserScenarios:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # User1 can access their habit
         response = await client.get(f"/habits/{habit1.id}")
@@ -365,7 +335,7 @@ class TestMultiUserScenarios:
         assert response.status_code == 403
 
     async def test_admin_manages_multiple_users(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can manage multiple users."""
         admin = AdminUserFactory()
@@ -373,12 +343,7 @@ class TestMultiUserScenarios:
         user2 = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         # Admin can see all users
         response = await client.get("/users/")
@@ -400,7 +365,7 @@ class TestMultiUserScenarios:
         )
         assert response.status_code == 200
 
-    async def test_concurrent_habit_tracking(self, client, db_session, setup_factories):
+    async def test_concurrent_habit_tracking(self, client, db_session, login_as):
         """Multiple users track habits simultaneously."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -416,12 +381,7 @@ class TestMultiUserScenarios:
         await db_session.commit()
 
         # Verify user1's tracker
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.get(f"/habits/{habit1.id}")
         assert response.status_code == 200

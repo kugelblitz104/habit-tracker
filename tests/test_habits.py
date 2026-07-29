@@ -1,6 +1,6 @@
 """Tests for habit management endpoints."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -10,6 +10,7 @@ from habit_tracker.schemas.db_models import Habit, Tracker
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
+    ProfileFactory,
     TrackerFactory,
     UserFactory,
 )
@@ -18,17 +19,12 @@ from tests.factories import (
 class TestCreateHabit:
     """Tests for POST /habits/ endpoint."""
 
-    async def test_create_habit_basic(self, client, db_session, setup_factories):
+    async def test_create_habit_basic(self, client, db_session, login_as):
         """Create habit with minimal required fields."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -46,17 +42,12 @@ class TestCreateHabit:
         assert data["question"] == "Did you drink 8 glasses?"
         assert data["color"] == "#00FF00"
 
-    async def test_create_habit_all_fields(self, client, db_session, setup_factories):
+    async def test_create_habit_all_fields(self, client, db_session, login_as):
         """Create habit with all optional fields."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -82,18 +73,13 @@ class TestCreateHabit:
         assert data["sort_order"] == 10
 
     async def test_create_habit_auto_assigns_user(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify habit is assigned to current user."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -112,18 +98,13 @@ class TestCreateHabit:
         assert habit.user_id == user.id
 
     async def test_create_habit_invalid_color(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reject invalid color format (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -138,18 +119,13 @@ class TestCreateHabit:
         assert response.status_code == 422
 
     async def test_create_habit_negative_frequency(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reject negative frequency (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -164,18 +140,13 @@ class TestCreateHabit:
         assert response.status_code == 422
 
     async def test_create_habit_negative_range(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reject negative range (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -190,18 +161,13 @@ class TestCreateHabit:
         assert response.status_code == 422
 
     async def test_create_habit_zero_frequency(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reject zero frequency (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -215,17 +181,12 @@ class TestCreateHabit:
         )
         assert response.status_code == 422
 
-    async def test_create_habit_zero_range(self, client, db_session, setup_factories):
+    async def test_create_habit_zero_range(self, client, db_session, login_as):
         """Reject zero range (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -240,18 +201,13 @@ class TestCreateHabit:
         assert response.status_code == 422
 
     async def test_create_habit_missing_required_fields(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Reject missing required fields (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Missing name
         response = await client.post(
@@ -266,18 +222,13 @@ class TestCreateHabit:
         assert response.status_code == 422
 
     async def test_create_habit_with_sort_order(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Create habit with custom sort order."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -294,18 +245,13 @@ class TestCreateHabit:
         assert response.json()["sort_order"] == 99
 
     async def test_create_habit_archived_flag(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Create habit with archived flag."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.post(
             "/habits/",
@@ -325,7 +271,7 @@ class TestCreateHabit:
 class TestGetHabit:
     """Tests for GET /habits/{habit_id} endpoint."""
 
-    async def test_get_own_habit(self, client, db_session, setup_factories):
+    async def test_get_own_habit(self, client, db_session, login_as):
         """User can retrieve their own habit."""
         user = UserFactory()
         await db_session.commit()
@@ -333,12 +279,7 @@ class TestGetHabit:
         habit = HabitFactory(user=user, name="My Habit", color="#123456")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
@@ -346,7 +287,7 @@ class TestGetHabit:
         assert data["id"] == habit.id
         assert data["name"] == "My Habit"
 
-    async def test_get_other_user_habit(self, client, db_session, setup_factories):
+    async def test_get_other_user_habit(self, client, db_session, login_as):
         """User cannot access other user's habit (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -355,17 +296,12 @@ class TestGetHabit:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 403
 
-    async def test_get_habit_as_admin(self, client, db_session, setup_factories):
+    async def test_get_habit_as_admin(self, client, db_session, login_as):
         """Admin can access any habit."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -374,33 +310,23 @@ class TestGetHabit:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
 
-    async def test_get_nonexistent_habit(self, client, db_session, setup_factories):
+    async def test_get_nonexistent_habit(self, client, db_session, login_as):
         """Return 404 for non-existent habit."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get("/habits/99999")
         assert response.status_code == 404
 
     async def test_get_habit_includes_today_status(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify completed_today and skipped_today fields."""
         user = UserFactory()
@@ -412,12 +338,7 @@ class TestGetHabit:
         TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
@@ -426,7 +347,7 @@ class TestGetHabit:
         assert data["skipped_today"] is False
 
     async def test_get_habit_today_status_with_tracker(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify status when tracker exists for today."""
         user = UserFactory()
@@ -438,12 +359,7 @@ class TestGetHabit:
         TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.SKIPPED)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
@@ -452,7 +368,7 @@ class TestGetHabit:
         assert data["skipped_today"] is True
 
     async def test_get_habit_today_status_without_tracker(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify default false when no tracker."""
         user = UserFactory()
@@ -461,12 +377,7 @@ class TestGetHabit:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
@@ -475,7 +386,7 @@ class TestGetHabit:
         assert data["skipped_today"] is False
 
     async def test_get_habit_today_status_honors_tz(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """completed_today is computed against "today" in the requested zone.
 
@@ -497,12 +408,7 @@ class TestGetHabit:
         )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/habits/{habit.id}", params={"tz": tz_name})
         assert response.status_code == 200
@@ -514,7 +420,7 @@ class TestGetHabit:
         assert response.status_code == 200
         assert response.json()["completed_today"] is False
 
-    async def test_get_habit_invalid_tz(self, client, db_session, setup_factories):
+    async def test_get_habit_invalid_tz(self, client, db_session, login_as):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()
@@ -522,12 +428,7 @@ class TestGetHabit:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(
             f"/habits/{habit.id}", params={"tz": "Not/AZone"}
@@ -539,7 +440,7 @@ class TestGetHabit:
 class TestUpdateHabitPut:
     """Tests for PUT /habits/{habit_id} endpoint."""
 
-    async def test_update_own_habit_put(self, client, db_session, setup_factories):
+    async def test_update_own_habit_put(self, client, db_session, login_as):
         """User can update their own habit (full update)."""
         user = UserFactory()
         await db_session.commit()
@@ -547,12 +448,7 @@ class TestUpdateHabitPut:
         habit = HabitFactory(user=user, name="Original")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/habits/{habit.id}",
@@ -574,7 +470,7 @@ class TestUpdateHabitPut:
         assert data["question"] == "Updated question?"
 
     async def test_update_other_user_habit_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User cannot update other's habit (403)."""
         user1 = UserFactory()
@@ -584,12 +480,7 @@ class TestUpdateHabitPut:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.put(
             f"/habits/{habit.id}",
@@ -604,7 +495,7 @@ class TestUpdateHabitPut:
         assert response.status_code == 403
 
     async def test_update_habit_all_fields_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify all fields are updated."""
         user = UserFactory()
@@ -624,12 +515,7 @@ class TestUpdateHabitPut:
         )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/habits/{habit.id}",
@@ -657,7 +543,7 @@ class TestUpdateHabitPut:
         assert data["archived"] is True
         assert data["sort_order"] == 10
 
-    async def test_update_habit_color_put(self, client, db_session, setup_factories):
+    async def test_update_habit_color_put(self, client, db_session, login_as):
         """Update habit color."""
         user = UserFactory()
         await db_session.commit()
@@ -665,12 +551,7 @@ class TestUpdateHabitPut:
         habit = HabitFactory(user=user, color="#000000")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/habits/{habit.id}",
@@ -690,7 +571,7 @@ class TestUpdateHabitPut:
         assert response.json()["color"] == "#FF5733"
 
     async def test_update_habit_frequency_range_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update frequency and range."""
         user = UserFactory()
@@ -699,12 +580,7 @@ class TestUpdateHabitPut:
         habit = HabitFactory(user=user, frequency=1, range=1)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/habits/{habit.id}",
@@ -725,7 +601,7 @@ class TestUpdateHabitPut:
         assert data["frequency"] == 5
         assert data["range"] == 7
 
-    async def test_update_habit_archived_put(self, client, db_session, setup_factories):
+    async def test_update_habit_archived_put(self, client, db_session, login_as):
         """Archive/unarchive habit."""
         user = UserFactory()
         await db_session.commit()
@@ -733,12 +609,7 @@ class TestUpdateHabitPut:
         habit = HabitFactory(user=user, archived=False)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Archive
         response = await client.put(
@@ -759,18 +630,13 @@ class TestUpdateHabitPut:
         assert response.json()["archived"] is True
 
     async def test_update_nonexistent_habit_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for non-existent habit."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             "/habits/99999",
@@ -793,7 +659,7 @@ class TestUpdateHabitPatch:
     """Tests for PATCH /habits/{habit_id} endpoint."""
 
     async def test_update_habit_single_field_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update only one field."""
         user = UserFactory()
@@ -802,12 +668,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user, name="Original")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -817,7 +678,7 @@ class TestUpdateHabitPatch:
         assert response.json()["name"] == "Patched"
 
     async def test_update_habit_multiple_fields_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update multiple fields."""
         user = UserFactory()
@@ -826,12 +687,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -842,7 +698,7 @@ class TestUpdateHabitPatch:
         assert data["name"] == "Multi"
         assert data["question"] == "Multi question?"
 
-    async def test_update_habit_name_patch(self, client, db_session, setup_factories):
+    async def test_update_habit_name_patch(self, client, db_session, login_as):
         """Update habit name."""
         user = UserFactory()
         await db_session.commit()
@@ -850,12 +706,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user, name="Original Name")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -865,7 +716,7 @@ class TestUpdateHabitPatch:
         assert response.json()["name"] == "New Name"
 
     async def test_update_habit_question_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update habit question."""
         user = UserFactory()
@@ -874,12 +725,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -888,7 +734,7 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["question"] == "New question?"
 
-    async def test_update_habit_notes_patch(self, client, db_session, setup_factories):
+    async def test_update_habit_notes_patch(self, client, db_session, login_as):
         """Update habit notes."""
         user = UserFactory()
         await db_session.commit()
@@ -896,12 +742,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user, notes="Original notes")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -911,7 +752,7 @@ class TestUpdateHabitPatch:
         assert response.json()["notes"] == "Updated notes"
 
     async def test_update_habit_reminder_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Toggle reminder setting."""
         user = UserFactory()
@@ -920,12 +761,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user, reminder=False)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -935,7 +771,7 @@ class TestUpdateHabitPatch:
         assert response.json()["reminder"] is True
 
     async def test_update_habit_sort_order_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update sort order."""
         user = UserFactory()
@@ -944,12 +780,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user, sort_order=0)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -959,7 +790,7 @@ class TestUpdateHabitPatch:
         assert response.json()["sort_order"] == 50
 
     async def test_update_other_user_habit_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User cannot update other's habit (403)."""
         user1 = UserFactory()
@@ -969,12 +800,7 @@ class TestUpdateHabitPatch:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -986,7 +812,7 @@ class TestUpdateHabitPatch:
 class TestDeleteHabit:
     """Tests for DELETE /habits/{habit_id} endpoint."""
 
-    async def test_delete_own_habit(self, client, db_session, setup_factories):
+    async def test_delete_own_habit(self, client, db_session, login_as):
         """User can delete their own habit."""
         user = UserFactory()
         await db_session.commit()
@@ -995,12 +821,7 @@ class TestDeleteHabit:
         await db_session.commit()
         habit_id = habit.id
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete(f"/habits/{habit_id}")
         assert response.status_code == 200
@@ -1008,7 +829,7 @@ class TestDeleteHabit:
         result = await db_session.execute(select(Habit).filter(Habit.id == habit_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_other_user_habit(self, client, db_session, setup_factories):
+    async def test_delete_other_user_habit(self, client, db_session, login_as):
         """User cannot delete other's habit (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -1017,17 +838,12 @@ class TestDeleteHabit:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.delete(f"/habits/{habit.id}")
         assert response.status_code == 403
 
-    async def test_delete_habit_as_admin(self, client, db_session, setup_factories):
+    async def test_delete_habit_as_admin(self, client, db_session, login_as):
         """Admin can delete any habit."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -1037,33 +853,23 @@ class TestDeleteHabit:
         await db_session.commit()
         habit_id = habit.id
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.delete(f"/habits/{habit_id}")
         assert response.status_code == 200
 
-    async def test_delete_nonexistent_habit(self, client, db_session, setup_factories):
+    async def test_delete_nonexistent_habit(self, client, db_session, login_as):
         """Return 404 for non-existent habit."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete("/habits/99999")
         assert response.status_code == 404
 
     async def test_delete_habit_cascades_to_trackers(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify trackers are deleted with habit."""
         user = UserFactory()
@@ -1077,12 +883,7 @@ class TestDeleteHabit:
         habit_id = habit.id
         tracker_id = tracker.id
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete(f"/habits/{habit_id}")
         assert response.status_code == 200
@@ -1093,1064 +894,10 @@ class TestDeleteHabit:
         assert result.scalar_one_or_none() is None
 
 
-class TestListHabitTrackers:
-    """Tests for GET /habits/{habit_id}/trackers endpoint."""
-
-    async def test_list_habit_trackers_basic(self, client, db_session, setup_factories):
-        """List trackers for a habit."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today())
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["trackers"]) == 2
-
-    async def test_list_habit_trackers_pagination(
-        self, client, db_session, setup_factories
-    ):
-        """Verify pagination with limit parameter."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        for i in range(10):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers?limit=3")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["trackers"]) == 3
-        assert data["limit"] == 3
-
-    async def test_list_habit_trackers_order(self, client, db_session, setup_factories):
-        """Verify trackers ordered by date descending."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=2))
-        TrackerFactory(habit=habit, dated=date.today())
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers")
-        assert response.status_code == 200
-        trackers = response.json()["trackers"]
-
-        # Should be ordered by date descending
-        dates = [t["dated"] for t in trackers]
-        assert dates == sorted(dates, reverse=True)
-
-    async def test_list_habit_trackers_empty(self, client, db_session, setup_factories):
-        """Return empty list for habit with no trackers."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["trackers"]) == 0
-        assert data["total"] == 0
-
-    async def test_list_habit_trackers_unauthorized(
-        self, client, db_session, setup_factories
-    ):
-        """User cannot access other's habit trackers (403)."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user2)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers")
-        assert response.status_code == 403
-
-    async def test_list_habit_trackers_default_limit(
-        self, client, db_session, setup_factories
-    ):
-        """Verify default limit of 5."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        for i in range(10):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["limit"] == 5
-        assert len(data["trackers"]) == 5
-
-    async def test_list_habit_trackers_custom_limit(
-        self, client, db_session, setup_factories
-    ):
-        """Test with custom limit value."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        for i in range(10):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers?limit=7")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["limit"] == 7
-        assert len(data["trackers"]) == 7
-
-    async def test_list_habit_trackers_returns_total(
-        self, client, db_session, setup_factories
-    ):
-        """Verify total count in response."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        for i in range(8):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers?limit=3")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 3  # Note: current impl returns len of returned items
-
-
-class TestListHabitTrackersLite:
-    """Tests for GET /habits/{habit_id}/trackers/lite endpoint with date-based pagination."""
-
-    async def test_list_trackers_lite_default_params(
-        self, client, db_session, setup_factories
-    ):
-        """List trackers with default parameters (today as end_date, 42 days)."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create trackers for last 10 days
-        for i in range(10):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 10
-        assert data["days"] == 42
-        assert data["end_date"] == date.today().isoformat()
-        assert data["has_previous"] is False
-
-    async def test_list_trackers_lite_with_end_date(
-        self, client, db_session, setup_factories
-    ):
-        """List trackers with specific end_date."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create trackers for specific dates
-        target_date = date.today() - timedelta(days=10)
-        for i in range(5):
-            TrackerFactory(habit=habit, dated=target_date - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(
-            f"/habits/{habit.id}/trackers/lite?end_date={target_date.isoformat()}&days=7"
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["end_date"] == target_date.isoformat()
-        assert data["days"] == 7
-        # Should include trackers from target_date to target_date - 6 days
-        assert data["total"] == 5
-
-    async def test_list_trackers_lite_has_previous_true(
-        self, client, db_session, setup_factories
-    ):
-        """has_previous is True when older trackers exist."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create recent trackers
-        for i in range(5):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        # Create older tracker outside the range
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=50))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=7")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["has_previous"] is True
-        assert data["total"] == 5  # Only recent 5 within the 7-day window
-
-    async def test_list_trackers_lite_has_previous_false(
-        self, client, db_session, setup_factories
-    ):
-        """has_previous is False when no older trackers exist."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create only recent trackers within the range
-        for i in range(3):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=42")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["has_previous"] is False
-
-    async def test_list_trackers_lite_pagination(
-        self, client, db_session, setup_factories
-    ):
-        """Test paginating through trackers with different end_dates."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create trackers spanning 60 days
-        for i in range(60):
-            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        # First page (most recent 30 days)
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=30")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 30
-        assert data["has_previous"] is True
-
-        # Second page (next 30 days)
-        prev_end_date = date.today() - timedelta(days=30)
-        response = await client.get(
-            f"/habits/{habit.id}/trackers/lite?end_date={prev_end_date.isoformat()}&days=30"
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 30
-        assert data["has_previous"] is False
-
-    async def test_list_trackers_lite_empty_range(
-        self, client, db_session, setup_factories
-    ):
-        """Returns empty list when no trackers in date range."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Create tracker outside the range
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=100))
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=7")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 0
-        assert len(data["trackers"]) == 0
-        assert data["has_previous"] is True  # There is an older tracker
-
-    async def test_list_trackers_lite_unauthorized(
-        self, client, db_session, setup_factories
-    ):
-        """User cannot list other user's trackers (403)."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user2)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite")
-        assert response.status_code == 403
-
-    async def test_list_trackers_lite_nonexistent_habit(
-        self, client, db_session, setup_factories
-    ):
-        """Return 404 for non-existent habit."""
-        user = UserFactory()
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get("/habits/99999/trackers/lite")
-        assert response.status_code == 404
-
-    async def test_list_trackers_lite_has_note_flag(
-        self, client, db_session, setup_factories
-    ):
-        """Verify has_note flag is correctly set."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today(), note="Has a note")
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1), note="")
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=2), note=None)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite")
-        assert response.status_code == 200
-        data = response.json()
-        trackers = data["trackers"]
-        assert len(trackers) == 3
-        # Ordered by date descending
-        assert trackers[0]["has_note"] is True  # today - has note
-        assert trackers[1]["has_note"] is False  # yesterday - empty string
-        assert trackers[2]["has_note"] is False  # 2 days ago - None
-
-    async def test_list_trackers_lite_large_days_value(
-        self, client, db_session, setup_factories
-    ):
-        """A large days value (full history for an old habit) is accepted."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today())
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=1000")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["days"] == 1000
-
-    async def test_list_trackers_lite_default_end_date_honors_tz(
-        self, client, db_session, setup_factories
-    ):
-        """The default end_date is "today" in the requested zone."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        for tz_name in ("Etc/GMT+12", "Etc/GMT-14"):
-            expected_today = datetime.now(ZoneInfo(tz_name)).date()
-            response = await client.get(
-                f"/habits/{habit.id}/trackers/lite", params={"tz": tz_name}
-            )
-            assert response.status_code == 200
-            assert response.json()["end_date"] == expected_today.isoformat()
-
-    async def test_list_trackers_lite_invalid_tz(
-        self, client, db_session, setup_factories
-    ):
-        """Invalid tz name is rejected with 422, not a server error."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(
-            f"/habits/{habit.id}/trackers/lite", params={"tz": "Not/AZone"}
-        )
-        assert response.status_code == 422
-        assert "Invalid timezone" in response.json()["detail"]
-
-    async def _login(self, client, user):
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-    async def test_auto_skipped_dates_use_history_outside_the_window(
-        self, client, db_session, setup_factories
-    ):
-        """A completion BEFORE the requested range still auto-skips days in it.
-
-        This is the whole point of returning the flag from the server: a 4-day
-        window (the phone dashboard) holds no tracker rows at all here, yet all
-        four days are auto-skipped by a completion 5 days back. A client
-        computing this from the response's own `trackers` could never know.
-        """
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=7)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=5))
-        await db_session.commit()
-
-        await self._login(client, user)
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
-        assert response.status_code == 200
-        data = response.json()
-
-        assert data["trackers"] == []  # nothing in the 4-day window
-        assert data["auto_skipped_dates"] == [
-            (date.today() - timedelta(days=offset)).isoformat()
-            for offset in (3, 2, 1, 0)
-        ]
-
-    async def test_auto_skipped_dates_empty_for_daily_habit(
-        self, client, db_session, setup_factories
-    ):
-        """frequency >= range: every day needs action, so nothing auto-skips."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=1)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1))
-        await db_session.commit()
-
-        await self._login(client, user)
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
-        assert response.status_code == 200
-        assert response.json()["auto_skipped_dates"] == []
-
-    async def test_auto_skipped_dates_ignore_skipped_trackers(
-        self, client, db_session, setup_factories
-    ):
-        """Only COMPLETED rows satisfy the goal - an explicit skip does not."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=7)
-        await db_session.commit()
-
-        TrackerFactory(
-            habit=habit,
-            dated=date.today() - timedelta(days=5),
-            status=TrackerStatus.SKIPPED,
-        )
-        await db_session.commit()
-
-        await self._login(client, user)
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
-        assert response.status_code == 200
-        assert response.json()["auto_skipped_dates"] == []
-
-    async def test_auto_skipped_dates_are_the_raw_date_predicate(
-        self, client, db_session, setup_factories
-    ):
-        """A date can be auto-skipped AND carry a completed row.
-
-        The endpoint reports the date-level predicate; letting an explicit row
-        win is the consumer's job (matches `calculate_streaks`).
-        """
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=7)
-        await db_session.commit()
-
-        TrackerFactory(habit=habit, dated=date.today() - timedelta(days=5))
-        TrackerFactory(habit=habit, dated=date.today())
-        await db_session.commit()
-
-        await self._login(client, user)
-
-        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=4")
-        assert response.status_code == 200
-        data = response.json()
-
-        assert date.today().isoformat() in data["auto_skipped_dates"]
-        assert [t["dated"] for t in data["trackers"]] == [date.today().isoformat()]
-
-
-class TestGetHabitKPIs:
-    """Tests for GET /habits/{habit_id}/kpis endpoint."""
-
-    async def test_get_habit_kpis_new_habit(self, client, db_session, setup_factories):
-        """KPIs for newly created habit (zeros)."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_completions"] == 0
-        assert data["current_streak"] == 0
-        assert data["longest_streak"] == 0
-
-    async def test_get_habit_kpis_current_streak(
-        self, client, db_session, setup_factories
-    ):
-        """Verify current streak calculation."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=1)
-        await db_session.commit()
-
-        # Create 5 consecutive days of completions
-        for i in range(5):
-            TrackerFactory(
-                habit=habit,
-                dated=date.today() - timedelta(days=i),
-                status=TrackerStatus.COMPLETED,
-            )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["current_streak"] >= 1
-
-    async def test_get_habit_kpis_total_completions(
-        self, client, db_session, setup_factories
-    ):
-        """Verify total completions count."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        for i in range(7):
-            TrackerFactory(
-                habit=habit,
-                dated=date.today() - timedelta(days=i),
-                status=TrackerStatus.COMPLETED,
-            )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total_completions"] == 7
-
-    async def test_get_habit_kpis_thirty_day_rate(
-        self, client, db_session, setup_factories
-    ):
-        """Verify 30-day completion rate."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        # Complete 15 of last 30 days
-        for i in range(15):
-            TrackerFactory(
-                habit=habit,
-                dated=date.today() - timedelta(days=i * 2),
-                status=TrackerStatus.COMPLETED,
-            )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["thirty_day_completion_rate"] >= 0
-
-    async def test_get_habit_kpis_last_completed(
-        self, client, db_session, setup_factories
-    ):
-        """Verify last completed date."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        last_date = date.today() - timedelta(days=3)
-        TrackerFactory(habit=habit, dated=last_date, status=TrackerStatus.COMPLETED)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["last_completed_date"] == last_date.isoformat()
-
-    async def test_get_habit_kpis_unauthorized(
-        self, client, db_session, setup_factories
-    ):
-        """User cannot access other's habit KPIs (403)."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user2)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/kpis")
-        assert response.status_code == 403
-
-    async def test_get_habit_kpis_invalid_tz(
-        self, client, db_session, setup_factories
-    ):
-        """Invalid tz name is rejected with 422, not a server error."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(
-            f"/habits/{habit.id}/kpis", params={"tz": "Not/AZone"}
-        )
-        assert response.status_code == 422
-        assert "Invalid timezone" in response.json()["detail"]
-
-    async def test_get_habit_kpis_tz_shifts_today(
-        self, client, db_session, setup_factories
-    ):
-        """current_streak is computed against "today" in the requested zone.
-
-        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
-        their calendar dates always differ. A daily habit completed on
-        "today" in one zone therefore has a current streak in that zone and
-        none in the other - deterministic regardless of when the test runs.
-        """
-        user = UserFactory()
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        for tz_name, other_tz_name in [
-            ("Etc/GMT+12", "Etc/GMT-14"),
-            ("Etc/GMT-14", "Etc/GMT+12"),
-        ]:
-            habit = HabitFactory(user=user, frequency=1, range=1)
-            await db_session.commit()
-
-            expected_today = datetime.now(ZoneInfo(tz_name)).date()
-            TrackerFactory(
-                habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
-            )
-            await db_session.commit()
-
-            response = await client.get(
-                f"/habits/{habit.id}/kpis", params={"tz": tz_name}
-            )
-            assert response.status_code == 200
-            assert response.json()["current_streak"] == 1
-
-            response = await client.get(
-                f"/habits/{habit.id}/kpis", params={"tz": other_tz_name}
-            )
-            assert response.status_code == 200
-            assert response.json()["current_streak"] == 0
-
-
-class TestGetHabitStreaks:
-    """Tests for GET /habits/{habit_id}/streaks endpoint."""
-
-    async def test_get_habit_streaks_empty(self, client, db_session, setup_factories):
-        """Empty list for habit with no completions."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/streaks")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 0
-
-    async def test_get_habit_streaks_single_streak(
-        self, client, db_session, setup_factories
-    ):
-        """Single continuous streak."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=1)
-        await db_session.commit()
-
-        for i in range(5):
-            TrackerFactory(
-                habit=habit,
-                dated=date.today() - timedelta(days=i),
-                status=TrackerStatus.COMPLETED,
-            )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/streaks")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) >= 1
-
-    async def test_get_habit_streaks_with_skips(
-        self, client, db_session, setup_factories
-    ):
-        """Streaks including skipped days."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=1)
-        await db_session.commit()
-
-        TrackerFactory(
-            habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED
-        )
-        TrackerFactory(
-            habit=habit,
-            dated=date.today() - timedelta(days=1),
-            status=TrackerStatus.SKIPPED,
-        )
-        TrackerFactory(
-            habit=habit,
-            dated=date.today() - timedelta(days=2),
-            status=TrackerStatus.COMPLETED,
-        )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/streaks")
-        assert response.status_code == 200
-
-    async def test_get_habit_streaks_unauthorized(
-        self, client, db_session, setup_factories
-    ):
-        """User cannot access other's habit streaks (403)."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user2)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(f"/habits/{habit.id}/streaks")
-        assert response.status_code == 403
-
-    async def test_get_habit_streaks_invalid_tz(
-        self, client, db_session, setup_factories
-    ):
-        """Invalid tz name is rejected with 422, not a server error."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(
-            f"/habits/{habit.id}/streaks", params={"tz": "Not/AZone"}
-        )
-        assert response.status_code == 422
-        assert "Invalid timezone" in response.json()["detail"]
-
-    async def test_get_habit_streaks_honors_tz(
-        self, client, db_session, setup_factories
-    ):
-        """Streaks run through "today" in the requested zone.
-
-        A daily habit with a single tracker dated "today" in the requested
-        zone yields exactly one streak ending on that date - deterministic
-        regardless of when the test runs.
-        """
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, frequency=1, range=1)
-        await db_session.commit()
-
-        tz_name = "Etc/GMT-14"
-        expected_today = datetime.now(ZoneInfo(tz_name)).date()
-        TrackerFactory(
-            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
-        )
-        await db_session.commit()
-
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        response = await client.get(
-            f"/habits/{habit.id}/streaks", params={"tz": tz_name}
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["end_date"] == expected_today.isoformat()
-        assert data[0]["length"] == 1
-
-
 class TestSortHabits:
     """Tests for PUT /habits/sort endpoint."""
 
-    async def test_sort_habits_basic(self, client, db_session, setup_factories):
+    async def test_sort_habits_basic(self, client, db_session, login_as):
         """Successfully reorder multiple habits."""
         user = UserFactory()
         await db_session.commit()
@@ -2161,12 +908,7 @@ class TestSortHabits:
         habit3 = HabitFactory(user=user, name="Habit 3")
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Reorder: habit3, habit1, habit2
         response = await client.put(
@@ -2187,7 +929,7 @@ class TestSortHabits:
         assert habit1.sort_order == 1
         assert habit2.sort_order == 2
 
-    async def test_sort_habits_archived(self, client, db_session, setup_factories):
+    async def test_sort_habits_archived(self, client, db_session, login_as):
         """Archived habits preserve their sort_order when sorting is applied."""
         user = UserFactory()
         await db_session.commit()
@@ -2198,12 +940,7 @@ class TestSortHabits:
         )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             "/habits/sort",
@@ -2221,7 +958,7 @@ class TestSortHabits:
         assert habit2.sort_order == 5
 
     async def test_sort_habits_archived_preserves_position(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Archived habits should slot back into their original position when unarchived."""
         user = UserFactory()
@@ -2234,12 +971,7 @@ class TestSortHabits:
         habit_d = HabitFactory(user=user, name="D", sort_order=0)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Sort only active habits A, C, D (B is archived)
         response = await client.put(
@@ -2262,7 +994,7 @@ class TestSortHabits:
         assert habit_c.sort_order == 1
         assert habit_d.sort_order == 3  # Skipped 2
 
-    async def test_sort_habits_single_habit(self, client, db_session, setup_factories):
+    async def test_sort_habits_single_habit(self, client, db_session, login_as):
         """Sorting a single habit should work."""
         user = UserFactory()
         await db_session.commit()
@@ -2270,12 +1002,7 @@ class TestSortHabits:
         habit = HabitFactory(user=user, sort_order=5)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             "/habits/sort",
@@ -2286,23 +1013,18 @@ class TestSortHabits:
         await db_session.refresh(habit)
         assert habit.sort_order == 0
 
-    async def test_sort_habits_empty_list(self, client, db_session, setup_factories):
+    async def test_sort_habits_empty_list(self, client, db_session, login_as):
         """Sorting empty list returns 400 Bad Request."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put("/habits/sort", json=[])
         assert response.status_code == 400
         assert "cannot be empty" in response.json()["detail"].lower()
 
-    async def test_sort_habits_duplicate_ids(self, client, db_session, setup_factories):
+    async def test_sort_habits_duplicate_ids(self, client, db_session, login_as):
         """Sorting with duplicate habit IDs returns 400 Bad Request."""
         user = UserFactory()
         await db_session.commit()
@@ -2310,18 +1032,13 @@ class TestSortHabits:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put("/habits/sort", json=[habit.id, habit.id])
         assert response.status_code == 400
         assert "duplicate" in response.json()["detail"].lower()
 
-    async def test_sort_habits_not_found(self, client, db_session, setup_factories):
+    async def test_sort_habits_not_found(self, client, db_session, login_as):
         """Cannot sort non-existent habit (404)."""
         user = UserFactory()
         await db_session.commit()
@@ -2329,18 +1046,13 @@ class TestSortHabits:
         HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put("/habits/sort", json=[99999])
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
-    async def test_sort_habits_unauthorized(self, client, db_session, setup_factories):
+    async def test_sort_habits_unauthorized(self, client, db_session, login_as):
         """User cannot sort other user's habits (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
@@ -2349,12 +1061,7 @@ class TestSortHabits:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.put(
             "/habits/sort",
@@ -2363,7 +1070,7 @@ class TestSortHabits:
         assert response.status_code == 403
 
     async def test_sort_habits_mixed_ownership(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Cannot sort habits when some belong to other users (403)."""
         user1 = UserFactory()
@@ -2374,12 +1081,7 @@ class TestSortHabits:
         habit2 = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.put(
             "/habits/sort",
@@ -2391,7 +1093,7 @@ class TestSortHabits:
         assert response.status_code == 403
 
     async def test_sort_habits_unauthenticated(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """Unauthenticated users cannot sort habits (401)."""
         user = UserFactory()
@@ -2405,3 +1107,40 @@ class TestSortHabits:
             json=[habit.id],
         )
         assert response.status_code == 401
+
+
+class TestDeleteAllHabits:
+    """Tests for DELETE /habits/ (bulk delete, profile-scoped)."""
+
+    async def test_deletes_habits_and_trackers_only_this_profile(
+        self, client, db_session, login_as
+    ):
+        """Deleting all habits in a profile also removes their trackers
+        (CASCADE) and leaves another profile's habits alone."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, profile=profile)
+        HabitFactory(user=user, profile=profile)
+        keep = HabitFactory(user=user, profile=other)
+        await db_session.commit()
+
+        tracker = TrackerFactory(habit=habit)
+        await db_session.commit()
+        tracker_id = tracker.id
+
+        await login_as(user)
+        response = await client.delete("/habits/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+
+        remaining = (await db_session.execute(select(Habit))).scalars().all()
+        assert [h.id for h in remaining] == [keep.id]
+        # Trackers of the deleted habits are gone too (expire first so the
+        # check re-reads from the DB rather than the session identity map).
+        db_session.expire_all()
+        assert await db_session.get(Tracker, tracker_id) is None

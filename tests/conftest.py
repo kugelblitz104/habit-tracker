@@ -20,6 +20,7 @@ from habit_tracker.schemas.db_models import Base
 from tests.factories import (
     AdminUserFactory,
     CalendarConnectionFactory,
+    CountdownFactory,
     DoneTaskFactory,
     HabitFactory,
     IntegrationConnectionFactory,
@@ -102,6 +103,31 @@ def _savepoint_sessionmaker(conn):
     )
 
 
+def _bind_factories(session: AsyncSession) -> None:
+    """Point every SQLAlchemy factory at this test's session.
+
+    Folded into ``db_session`` itself (rather than a separate
+    ``setup_factories`` fixture) so tests that need factories just request
+    ``db_session`` - and pure, session-free tests (e.g. test_habit_stats.py)
+    can skip it entirely without paying for a Postgres session.
+    """
+    # type: ignore comments needed because Pylance doesn't recognize
+    # SQLAlchemyModelFactory's extended FactoryOptions attributes
+    UserFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    AdminUserFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    ProfileFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    HabitFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    ProjectFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    CalendarConnectionFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    CountdownFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    IntegrationConnectionFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    TaskFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    DoneTaskFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    TimeEntryFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    RunningTimeEntryFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    TrackerFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+
+
 @pytest_asyncio.fixture
 async def db_session(setup_db_schema) -> AsyncIterator[AsyncSession]:
     """Isolated database session using transaction rollback.
@@ -115,6 +141,7 @@ async def db_session(setup_db_schema) -> AsyncIterator[AsyncSession]:
     async with engine.connect() as conn:
         outer = await conn.begin()
         async with _savepoint_sessionmaker(conn)() as session:
+            _bind_factories(session)
             yield session
         if outer.is_active:
             await outer.rollback()
@@ -177,22 +204,19 @@ async def shared_client(shared_db_session: AsyncSession) -> AsyncIterator[AsyncC
     app.dependency_overrides.clear()
 
 
-@pytest.fixture
-def setup_factories(db_session: AsyncSession) -> None:
-    """Fixture to setup factories with the test database session."""
+@pytest_asyncio.fixture
+async def login_as(client: AsyncClient):
+    """Callable fixture: log in as a given user and attach the bearer token
+    to the ``client`` fixture's headers. Returns the access token.
+    """
 
-    # Set the session for all factories
-    # type: ignore comments needed because Pylance doesn't recognize
-    # SQLAlchemyModelFactory's extended FactoryOptions attributes
-    UserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    AdminUserFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    ProfileFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    HabitFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    ProjectFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    CalendarConnectionFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    IntegrationConnectionFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    TaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    DoneTaskFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    TimeEntryFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    RunningTimeEntryFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
-    TrackerFactory._meta.sqlalchemy_session = db_session  # type: ignore[attr-defined]
+    async def _login_as(user) -> str:
+        login_response = await client.post(
+            "/auth/login",
+            data={"username": user.username, "password": "password123"},
+        )
+        token = login_response.json()["access_token"]
+        client.headers.update({"Authorization": f"Bearer {token}"})
+        return token
+
+    return _login_as

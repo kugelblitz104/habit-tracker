@@ -3,28 +3,28 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TimeEntryKind
 from habit_tracker.core.dependencies import (
-    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
 )
+from habit_tracker.core.http import bulk_delete_in_profile, integrity_conflict
 from habit_tracker.models import (
     ProjectTimeSummary,
     TaskTimeSummary,
-    TimeEntry,
     TimeEntryCreate,
     TimeEntryList,
     TimeEntryRead,
     TimeEntrySummary,
     TimeEntryUpdate,
 )
-from habit_tracker.schemas.db_models import Project, Task, User
+from habit_tracker.schemas.db_models import Project, Task, TimeEntry, User
 
 router = APIRouter(
     prefix="/time-entries",
@@ -118,13 +118,13 @@ async def _get_entry_and_authorize(
 ) -> TimeEntry:
     """Fetch a time entry by ID (404 if missing) and authorize the caller
     against the owning profile."""
-    entry = await db.get(TimeEntry, entry_id)
-    if not entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Time entry not found"
-        )
-    await authorize_parent_profile(
-        db, entry.profile_id, current_user, "time entry"
+    entry, _ = await get_owned_child(
+        db,
+        TimeEntry,
+        entry_id,
+        current_user,
+        not_found_detail="Time entry not found",
+        resource_name="time entry",
     )
     return entry
 
@@ -172,6 +172,12 @@ async def list_time_entries(
     - **limit**: Maximum number of entries to return (default: 100, max: 100)
     - **offset**: Number of entries to skip (default: 0)
     """
+    # Hand-rolled rather than an Enum-typed Query: the models/ field
+    # validators only run on request bodies, never on query strings, so they
+    # can't cover kind here. Declaring kind as an Enum-typed Query param
+    # instead would add an `enum` array to the OpenAPI parameter schema and
+    # change the 422 detail shape - both schema-breaking in this phase - so
+    # the check stays manual.
     if kind is not None and kind not in [k.value for k in TimeEntryKind]:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -520,10 +526,7 @@ async def patch_time_entry(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Time entry change violates a database constraint",
-        )
+        raise integrity_conflict("Time entry change violates a database constraint")
     await db.refresh(entry)
     return _to_read(entry)
 
@@ -542,19 +545,13 @@ async def delete_all_time_entries(
     This action cannot be undone. Any running (unstopped) entry is deleted
     too. Linked tasks and projects are not affected.
     """
-    await get_owned_profile(db, profile_id, current_user, "time entry")
-
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(TimeEntry)
-            .filter(TimeEntry.profile_id == profile_id)
-        )
-    ).scalar() or 0
-    await db.execute(delete(TimeEntry).where(TimeEntry.profile_id == profile_id))
-    await db.commit()
-    return JSONResponse(
-        content={"detail": f"Deleted {count} time entries", "deleted": count}
+    return await bulk_delete_in_profile(
+        db,
+        TimeEntry,
+        profile_id,
+        current_user,
+        resource_name="time entry",
+        detail="Deleted {count} time entries",
     )
 
 

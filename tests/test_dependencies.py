@@ -1,38 +1,40 @@
-"""Dependency injection tests."""
+"""Dependency injection tests.
 
+Unit tests of the callables in core/dependencies.py and the plumbing they
+sit behind (auth, DB session, admin/owner checks) - no HTTP-level
+authorization *behavior* here; that belongs in test_authorization.py.
+"""
+
+import pytest
+
+from habit_tracker.core.dependencies import (
+    authorize_resource_access,
+    is_admin_or_owner,
+    require_admin,
+)
 from tests.factories import AdminUserFactory, UserFactory
 
 
 class TestDatabaseDependency:
     """Tests for database dependency."""
 
-    async def test_database_session_provided(self, client, db_session, setup_factories):
+    async def test_database_session_provided(self, client, db_session, login_as):
         """Database session is available to endpoints."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # If endpoints work, database session is properly injected
         response = await client.get(f"/users/{user.id}")
         assert response.status_code == 200
 
-    async def test_database_isolation(self, client, db_session, setup_factories):
+    async def test_database_isolation(self, client, db_session, login_as):
         """Database transactions are isolated."""
         user1 = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Changes in one request shouldn't leak to others incorrectly
         response = await client.post(
@@ -53,18 +55,13 @@ class TestDatabaseDependency:
         assert get_response.status_code == 200
 
     async def test_database_rollback_on_error(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Database rolls back on error."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # Try invalid request
         response = await client.post(
@@ -97,18 +94,13 @@ class TestAuthDependency:
     """Tests for authentication dependency."""
 
     async def test_current_user_from_valid_token(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Current user is extracted from valid token."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         # User info should be accessible
         response = await client.get(f"/users/{user.id}")
@@ -116,14 +108,14 @@ class TestAuthDependency:
         data = response.json()
         assert data["username"] == user.username
 
-    async def test_invalid_token_rejected(self, client, db_session, setup_factories):
+    async def test_invalid_token_rejected(self, client, db_session):
         """Invalid token is rejected."""
         client.headers.update({"Authorization": "Bearer invalid_token"})
 
         response = await client.get("/users/")
         assert response.status_code == 401
 
-    async def test_expired_token_rejected(self, client, db_session, setup_factories):
+    async def test_expired_token_rejected(self, client, db_session):
         """Expired token is rejected."""
         # We can't easily create an expired token in tests without mocking time
         # Instead, test with a malformed token
@@ -136,176 +128,88 @@ class TestAuthDependency:
         response = await client.get("/users/")
         assert response.status_code == 401
 
-    async def test_missing_token_rejected(self, client, db_session, setup_factories):
+    async def test_missing_token_rejected(self, client, db_session):
         """Missing token is rejected."""
         # Don't set Authorization header
         response = await client.get("/users/")
         assert response.status_code == 401
 
 
-class TestAdminDependency:
-    """Tests for admin dependency."""
+class TestAuthorizationHelperFunctions:
+    """Tests for authorization helper functions."""
 
-    async def test_admin_access_granted(self, client, db_session, setup_factories):
-        """Admin users get access to admin endpoints."""
-        admin = AdminUserFactory()
+    async def test_authorize_resource_access_owner(self, db_session):
+        """Owner can access their resources."""
+        user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        # Should not raise exception
+        authorize_resource_access(user, user.id, "test")
 
-        # Admin can list all users
-        response = await client.get("/users/")
-        assert response.status_code == 200
-
-    async def test_non_admin_restricted(self, client, db_session, setup_factories):
-        """Non-admin users are restricted from admin endpoints."""
-        user = UserFactory()
+    async def test_authorize_resource_access_admin(self, db_session):
+        """Admin can access any resource."""
+        admin = AdminUserFactory()
         other_user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        # Should not raise exception
+        authorize_resource_access(admin, other_user.id, "test")
 
-        # Non-admin cannot delete other users
-        response = await client.delete(f"/users/{other_user.id}")
-        assert response.status_code == 403
-
-
-class TestOwnerDependency:
-    """Tests for owner authorization dependency."""
-
-    async def test_owner_can_access_own_resource(
-        self, client, db_session, setup_factories
+    async def test_authorize_resource_access_unauthorized(
+        self, db_session
     ):
-        """Owner can access their own resources."""
-        user = UserFactory()
-        await db_session.commit()
+        """Unauthorized access raises 403."""
+        from fastapi import HTTPException
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
-
-        # Create habit
-        create_response = await client.post(
-            "/habits/",
-            json={
-                "name": "My Habit",
-                "question": "Done?",
-                "color": "#FF0000",
-                "frequency": 1,
-                "range": 1,
-            },
-        )
-        habit_id = create_response.json()["id"]
-
-        # Owner can access
-        response = await client.get(f"/habits/{habit_id}")
-        assert response.status_code == 200
-
-    async def test_non_owner_cannot_access_resource(
-        self, client, db_session, setup_factories
-    ):
-        """Non-owner cannot access others' resources."""
         user1 = UserFactory()
         user2 = UserFactory()
         await db_session.commit()
 
-        # User1 creates habit
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        with pytest.raises(HTTPException) as exc_info:
+            authorize_resource_access(user1, user2.id, "test")
+        assert exc_info.value.status_code == 403
 
-        create_response = await client.post(
-            "/habits/",
-            json={
-                "name": "User1 Habit",
-                "question": "Done?",
-                "color": "#FF0000",
-                "frequency": 1,
-                "range": 1,
-            },
-        )
-        habit_id = create_response.json()["id"]
+    async def test_is_admin_or_owner_as_admin(self, db_session):
+        """Admin check returns true."""
+        admin = AdminUserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
 
-        # User2 tries to access
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user2.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        result = is_admin_or_owner(admin, other_user.id)
+        assert result is True
 
-        response = await client.get(f"/habits/{habit_id}")
-        assert response.status_code == 403
-
-    async def test_admin_can_access_any_resource(
-        self, client, db_session, setup_factories
-    ):
-        """Admin can access any user's resources."""
+    async def test_is_admin_or_owner_as_owner(self, db_session):
+        """Owner check returns true."""
         user = UserFactory()
+        await db_session.commit()
+
+        result = is_admin_or_owner(user, user.id)
+        assert result is True
+
+    async def test_is_admin_or_owner_neither(self, db_session):
+        """Neither admin nor owner returns false."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        await db_session.commit()
+
+        result = is_admin_or_owner(user1, user2.id)
+        assert result is False
+
+    async def test_require_admin_with_admin(self, db_session):
+        """Admin passes admin requirement."""
         admin = AdminUserFactory()
         await db_session.commit()
 
-        # User creates habit
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        result = require_admin(admin)
+        assert result == admin
 
-        create_response = await client.post(
-            "/habits/",
-            json={
-                "name": "User Habit",
-                "question": "Done?",
-                "color": "#FF0000",
-                "frequency": 1,
-                "range": 1,
-            },
-        )
-        habit_id = create_response.json()["id"]
+    async def test_require_admin_with_regular_user(self, db_session):
+        """Regular user fails admin requirement."""
+        from fastapi import HTTPException
 
-        # Admin accesses
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        user = UserFactory()
+        await db_session.commit()
 
-        response = await client.get(f"/habits/{habit_id}")
-        assert response.status_code == 200
-
-
-class TestConfigDependency:
-    """Tests for configuration dependency."""
-
-    async def test_app_starts_with_config(self, client, db_session, setup_factories):
-        """Application starts with proper configuration."""
-        # If we can make requests, config is working
-        response = await client.get("/openapi.json")
-        assert response.status_code == 200
-
-    async def test_cors_headers_present(self, client, db_session, setup_factories):
-        """CORS headers are present in responses."""
-        # Make OPTIONS request
-        response = await client.options("/users/")
-        # CORS may or may not be configured depending on settings
-        # Just verify the endpoint doesn't error
-        assert response.status_code in [200, 204, 401, 405]
+        with pytest.raises(HTTPException) as exc_info:
+            require_admin(user)
+        assert exc_info.value.status_code == 403

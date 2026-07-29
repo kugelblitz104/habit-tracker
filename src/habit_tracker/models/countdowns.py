@@ -1,26 +1,25 @@
-import re
-from datetime import date, datetime, time
+from datetime import date, time
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
+from habit_tracker.constants import CountdownRepeat
+from habit_tracker.models._base import _StampedRead
+from habit_tracker.models._validators import (
+    non_blank_string,
+    reject_null,
+    validate_hex_color,
+    validate_membership,
+)
 
 # "monthly_weekday" recurs on the Nth weekday of the month (e.g. 3rd Monday),
 # with N + weekday derived from the anchor target_date; the rest are calendar
 # rules (same day-of-month / same month+day).
-REPEAT_VALUES = ("none", "weekly", "monthly", "monthly_weekday", "yearly")
-
-
-def _validate_hex_color(v: Optional[str]) -> Optional[str]:
-    if v is not None and not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-        raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
-    return v
+REPEAT_VALUES = tuple(r.value for r in CountdownRepeat)
 
 
 def _validate_repeat(v: Optional[str]) -> Optional[str]:
-    if v is not None and v not in REPEAT_VALUES:
-        raise ValueError(f"repeat must be one of {REPEAT_VALUES}")
-    return v
+    return validate_membership(v, REPEAT_VALUES, f"repeat must be one of {REPEAT_VALUES}")
 
 
 # Countdown Schemas
@@ -42,14 +41,12 @@ class CountdownBase(BaseModel):
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Title cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Title")
 
     @field_validator("color")
     @classmethod
     def validate_color(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_hex_color(v)
+        return validate_hex_color(v)
 
     @field_validator("repeat")
     @classmethod
@@ -61,12 +58,8 @@ class CountdownCreate(CountdownBase):
     pass
 
 
-class CountdownRead(CountdownBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_date: datetime
-    updated_date: Optional[datetime] = None
+class CountdownRead(_StampedRead, CountdownBase):
+    pass
 
 
 class CountdownUpdate(BaseModel):
@@ -82,24 +75,18 @@ class CountdownUpdate(BaseModel):
 
     @field_validator("profile_id", "title", "target_date", "repeat", "show_occurrence")
     @classmethod
-    def reject_null(cls, v: object, info: ValidationInfo) -> object:
-        # These columns are NOT NULL in the database; omitting a field means
-        # "leave unchanged", but an explicit null is always invalid
-        if v is None:
-            raise ValueError(f"{info.field_name} cannot be null")
-        return v
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        return reject_null(v, info)
 
     @field_validator("title")
     @classmethod
     def validate_title(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            raise ValueError("Title cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Title")
 
     @field_validator("color")
     @classmethod
     def validate_color(cls, v: Optional[str]) -> Optional[str]:
-        return _validate_hex_color(v)
+        return validate_hex_color(v)
 
     @field_validator("repeat")
     @classmethod

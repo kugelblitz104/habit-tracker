@@ -3,27 +3,29 @@ from typing import List, Optional
 
 from pydantic import (
     BaseModel,
-    ConfigDict,
     ValidationInfo,
     field_validator,
     model_validator,
 )
 
 from habit_tracker.constants import IntegrationProvider
+from habit_tracker.models._base import _FromORM
+from habit_tracker.models._validators import (
+    non_blank_string,
+    non_empty_token,
+    normalize_base_url,
+    reject_null,
+    validate_membership,
+    validate_owner_repo,
+)
 
 _PROVIDER_VALUES = {p.value for p in IntegrationProvider}
 
 
-def _normalize_base_url(v: Optional[str]) -> Optional[str]:
-    """Empty/whitespace -> None (public cloud). Otherwise require an http(s)
-    scheme and strip any trailing slash so it joins cleanly with the org/project
-    path segments."""
-    if v is None or not v.strip():
-        return None
-    v = v.strip().rstrip("/")
-    if not v.startswith(("http://", "https://")):
-        raise ValueError("base_url must start with http:// or https://")
-    return v
+def _validate_provider(v: str) -> str:
+    return validate_membership(
+        v, _PROVIDER_VALUES, f"provider must be one of {sorted(_PROVIDER_VALUES)}"
+    )
 
 
 class IntegrationConnectionBase(BaseModel):
@@ -43,18 +45,12 @@ class IntegrationConnectionBase(BaseModel):
     @field_validator("provider")
     @classmethod
     def validate_provider(cls, v: str) -> str:
-        if v not in _PROVIDER_VALUES:
-            raise ValueError(
-                f"provider must be one of {sorted(_PROVIDER_VALUES)}"
-            )
-        return v
+        return _validate_provider(v)
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator("default_repo")
     @classmethod
@@ -62,16 +58,12 @@ class IntegrationConnectionBase(BaseModel):
         # Empty string -> treat as unset; otherwise must look like "owner/repo".
         if v is None or not v.strip():
             return None
-        v = v.strip()
-        parts = v.split("/")
-        if len(parts) != 2 or not all(parts):
-            raise ValueError('default_repo must be in the form "owner/repo"')
-        return v
+        return validate_owner_repo(v.strip())
 
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
-        return _normalize_base_url(v)
+        return normalize_base_url(v)
 
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "IntegrationConnectionBase":
@@ -94,14 +86,10 @@ class IntegrationConnectionCreate(IntegrationConnectionBase):
     @field_validator("token")
     @classmethod
     def validate_token(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("token (PAT) cannot be empty")
-        return v.strip()
+        return non_empty_token(v)
 
 
-class IntegrationConnectionRead(IntegrationConnectionBase):
-    model_config = ConfigDict(from_attributes=True)
-
+class IntegrationConnectionRead(IntegrationConnectionBase, _FromORM):
     id: int
     profile_id: int
     has_token: bool = False
@@ -124,40 +112,30 @@ class IntegrationConnectionUpdate(BaseModel):
 
     @field_validator("name", "enabled")
     @classmethod
-    def reject_null(cls, v: object, info: ValidationInfo) -> object:
-        if v is None:
-            raise ValueError(f"{info.field_name} cannot be null")
-        return v
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        return reject_null(v, info)
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator("token")
     @classmethod
     def validate_token(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            raise ValueError("token (PAT) cannot be empty")
-        return v.strip() if v is not None else v
+        return non_empty_token(v)
 
     @field_validator("default_repo")
     @classmethod
     def validate_default_repo(cls, v: Optional[str]) -> Optional[str]:
         if v is None or not v.strip():
             return v
-        v = v.strip()
-        parts = v.split("/")
-        if len(parts) != 2 or not all(parts):
-            raise ValueError('default_repo must be in the form "owner/repo"')
-        return v
+        return validate_owner_repo(v.strip())
 
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, v: Optional[str]) -> Optional[str]:
-        return _normalize_base_url(v)
+        return normalize_base_url(v)
 
 
 class IntegrationConnectionList(BaseModel):

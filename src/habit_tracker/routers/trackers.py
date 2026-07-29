@@ -1,8 +1,10 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -10,16 +12,14 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
-    get_owned_profile,
 )
+from habit_tracker.core.http import bulk_delete_in_profile, integrity_conflict
 from habit_tracker.models import (
-    Habit,
-    Tracker,
     TrackerCreate,
     TrackerRead,
     TrackerUpdate,
 )
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Habit, Tracker, User
 
 router = APIRouter(
     prefix="/trackers", tags=["trackers"], responses={404: {"description": "Not found"}}
@@ -30,7 +30,12 @@ async def _get_owned_tracker(
     db: AsyncSession, tracker_id: int, current_user: User
 ) -> Tracker:
     """Fetch a tracker by ID (404 if missing) and verify its habit exists
-    (404) and belongs to the caller (403)."""
+    (404) and belongs to the caller (403).
+
+    Deliberately NOT folded into get_owned_child: a tracker authorizes via
+    its habit's user_id, not a profile_id, and raises a second 404
+    ("Habit not found") that no other child-resource helper does.
+    """
     tracker = await db.get(Tracker, tracker_id)
     if not tracker:
         raise HTTPException(
@@ -68,18 +73,9 @@ async def create_tracker(
     db.add(db_tracker)
     try:
         await db.commit()
-    except Exception as e:
+    except IntegrityError:
         await db.rollback()
-        if "unique constraint" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Tracker entry for this habit and date already exists",
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create tracker entry",
-            )
+        raise integrity_conflict("Tracker entry for this habit and date already exists")
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
 
@@ -119,6 +115,7 @@ async def update_tracker(
     tracker_data = tracker_update.model_dump()
     for key, value in tracker_data.items():
         setattr(db_tracker, key, value)
+    db_tracker.updated_date = datetime.now()  # server-stamped, never client-set
     await db.commit()
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
@@ -149,6 +146,7 @@ async def patch_tracker(
     tracker_data = tracker_update.model_dump(exclude_unset=True)
     for key, value in tracker_data.items():
         setattr(db_tracker, key, value)
+    db_tracker.updated_date = datetime.now()  # server-stamped, never client-set
     await db.commit()
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
@@ -168,20 +166,15 @@ async def delete_all_trackers(
 
     This action cannot be undone.
     """
-    await get_owned_profile(db, profile_id, current_user, "tracker")
-
     habit_ids = select(Habit.id).where(Habit.profile_id == profile_id)
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Tracker)
-            .where(Tracker.habit_id.in_(habit_ids))
-        )
-    ).scalar() or 0
-    await db.execute(delete(Tracker).where(Tracker.habit_id.in_(habit_ids)))
-    await db.commit()
-    return JSONResponse(
-        content={"detail": f"Deleted {count} trackers", "deleted": count}
+    return await bulk_delete_in_profile(
+        db,
+        Tracker,
+        profile_id,
+        current_user,
+        resource_name="tracker",
+        detail="Deleted {count} trackers",
+        where=Tracker.habit_id.in_(habit_ids),
     )
 
 

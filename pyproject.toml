@@ -38,9 +38,15 @@ test = [
     "pytest-xdist>=3.6.0",
     "factory-boy>=3.3.3",
 ]
+dev = ["ruff>=0.14", "basedpyright>=1.31"]
 
-[project.scripts]
-habit-tracker = "habit_tracker.main:app"
+[tool.ruff]
+line-length = 88
+src = ["src", "tests"]
+
+[tool.basedpyright]
+include = ["src", "tests"]
+typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

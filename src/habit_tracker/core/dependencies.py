@@ -1,18 +1,34 @@
 import logging
 from datetime import date, datetime
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Protocol, TypeVar
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import Mapped
 
 from habit_tracker.database import SessionLocal
 from habit_tracker.schemas.db_models import Habit, Profile, User
 from habit_tracker.core.security import decode_token
 
 logger = logging.getLogger(__name__)
+
+
+class _HasProfileId(Protocol):
+    """Structural type for get_owned_child's model param - any ORM row with a
+    profile_id column (Task, Project, Countdown, TimeEntry, ...).
+
+    Annotated `Mapped[int]`, not `int`, so the SQLAlchemy models actually match:
+    they declare `profile_id: Mapped[int]`, and a Protocol member typed `int`
+    fails structurally against that, which made every call site a type error.
+    """
+
+    profile_id: Mapped[int]
+
+
+T = TypeVar("T", bound=_HasProfileId)
 
 
 async def get_db():
@@ -89,6 +105,10 @@ def require_admin(current_user: User) -> User:
     """
     Dependency that requires the current user to be an admin.
     Raises 403 if the user is not an admin.
+
+    Deliberately unwired: no route uses this yet. Kept here as the canonical
+    guard for the first genuinely admin-only endpoint, rather than having
+    that endpoint reinvent the check.
     """
     if not current_user.is_admin:
         raise HTTPException(
@@ -191,6 +211,52 @@ async def authorize_parent_profile(
     profile = await db.get(Profile, profile_id)
     authorize_resource_access(current_user, profile.user_id, resource_name)
     return profile
+
+
+async def get_owned_child(
+    db: AsyncSession,
+    model: type[T],
+    row_id: int,
+    current_user: User,
+    *,
+    not_found_detail: str,
+    resource_name: str,
+) -> tuple[T, Profile]:
+    """
+    Fetch a child row (task/project/calendar connection/...) by ID and
+    authorize the caller against its owning profile.
+
+    Backs each router's private `_get_<entity>_and_authorize` one-line
+    wrapper (calendar connections, countdowns, integration connections, time
+    entries, tasks, projects). The row's FK guarantees the profile exists, so
+    only the row lookup gets a 404 - the profile itself is loaded via
+    authorize_parent_profile, matching the child-resource shape everywhere
+    else in this module.
+
+    Args:
+        db: The database session
+        model: The ORM model class to fetch (must have a profile_id column)
+        row_id: The row's ID
+        current_user: The authenticated user
+        not_found_detail: 404 detail to use when the row does not exist
+        resource_name: Name of the resource for the 403 error message
+
+    Returns:
+        (row, profile) tuple - callers that only need the row discard profile
+
+    Raises:
+        HTTPException: 404 if the row does not exist, 403 if the caller is
+        neither the profile's owner nor an admin
+    """
+    row = await db.get(model, row_id)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=not_found_detail
+        )
+    profile = await authorize_parent_profile(
+        db, row.profile_id, current_user, resource_name
+    )
+    return row, profile
 
 
 async def resolve_habit_profile_id(

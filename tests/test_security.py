@@ -292,3 +292,32 @@ class TestTokenTypes:
         assert refresh_payload is not None
         assert access_payload["type"] != refresh_payload["type"]
         assert access_payload["type"] != refresh_payload["type"]
+
+
+class TestCORS:
+    """Tests for the CORSMiddleware configuration in main.py.
+
+    ``allow_origin_regex`` permits any localhost/127.0.0.1 port (the Vite dev
+    server); anything else must be listed in the CORS_ORIGINS env var (unset
+    in tests, so nothing outside localhost is allowed here).
+    """
+
+    async def test_localhost_origin_is_echoed_back(self, client):
+        """A localhost dev-server origin gets the CORS headers it needs."""
+        response = await client.get(
+            "/openapi.json", headers={"Origin": "http://localhost:5173"}
+        )
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"]
+            == "http://localhost:5173"
+        )
+        assert response.headers["access-control-allow-credentials"] == "true"
+
+    async def test_disallowed_origin_gets_no_cors_headers(self, client):
+        """An origin outside CORS_ORIGINS and the localhost regex is not echoed."""
+        response = await client.get(
+            "/openapi.json", headers={"Origin": "http://evil.example.com"}
+        )
+        assert response.status_code == 200
+        assert "access-control-allow-origin" not in response.headers

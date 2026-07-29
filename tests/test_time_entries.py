@@ -16,50 +16,40 @@ from tests.factories import (
 )
 
 
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-
-
 class TestListTimeEntries:
     """Tests for GET /time-entries/ endpoint."""
 
-    async def test_requires_profile_id(self, client, db_session, setup_factories):
+    async def test_requires_profile_id(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/time-entries/")
         assert response.status_code == 422
 
-    async def test_unknown_profile(self, client, db_session, setup_factories):
+    async def test_unknown_profile(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/time-entries/", params={"profile_id": 99999})
         assert response.status_code == 404
 
-    async def test_foreign_profile(self, client, db_session, setup_factories):
+    async def test_foreign_profile(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/", params={"profile_id": other.profiles[0].id}
         )
         assert response.status_code == 403
 
-    async def test_empty_list(self, client, db_session, setup_factories):
+    async def test_empty_list(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/", params={"profile_id": user.profiles[0].id}
@@ -69,7 +59,7 @@ class TestListTimeEntries:
         assert body["total"] == 0
         assert body["time_entries"] == []
 
-    async def test_ordered_started_at_desc(self, client, db_session, setup_factories):
+    async def test_ordered_started_at_desc(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         base = datetime(2026, 7, 1, 9, 0, 0)
@@ -78,7 +68,7 @@ class TestListTimeEntries:
             profile=profile, started_at=base + timedelta(hours=2)
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/", params={"profile_id": profile.id}
@@ -87,7 +77,7 @@ class TestListTimeEntries:
         ids = [e["id"] for e in response.json()["time_entries"]]
         assert ids == [newer.id, older.id]
 
-    async def test_filter_by_task(self, client, db_session, setup_factories):
+    async def test_filter_by_task(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task = TaskFactory(profile=profile)
@@ -95,7 +85,7 @@ class TestListTimeEntries:
         matching = TimeEntryFactory(profile=profile, task=task)
         TimeEntryFactory(profile=profile, task=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/",
@@ -106,7 +96,7 @@ class TestListTimeEntries:
         assert body["total"] == 1
         assert body["time_entries"][0]["id"] == matching.id
 
-    async def test_filter_by_project(self, client, db_session, setup_factories):
+    async def test_filter_by_project(self, client, db_session, login_as):
         """project_id returns task-attached (via task's project) + adhoc entries."""
         user = UserFactory()
         profile = user.profiles[0]
@@ -121,7 +111,7 @@ class TestListTimeEntries:
         TimeEntryFactory(profile=profile, task=other_task)
         TimeEntryFactory(profile=profile, task=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/",
@@ -133,13 +123,13 @@ class TestListTimeEntries:
         ids = {e["id"] for e in body["time_entries"]}
         assert ids == {via_task.id, adhoc.id}
 
-    async def test_filter_by_kind(self, client, db_session, setup_factories):
+    async def test_filter_by_kind(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         pomodoro = TimeEntryFactory(profile=profile, kind=TimeEntryKind.POMODORO)
         TimeEntryFactory(profile=profile, kind=TimeEntryKind.STOPWATCH)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/",
@@ -150,13 +140,13 @@ class TestListTimeEntries:
         assert body["total"] == 1
         assert body["time_entries"][0]["id"] == pomodoro.id
 
-    async def test_filter_by_running(self, client, db_session, setup_factories):
+    async def test_filter_by_running(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         running = RunningTimeEntryFactory(profile=profile)
         TimeEntryFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/", params={"profile_id": profile.id, "running": "true"}
@@ -167,10 +157,10 @@ class TestListTimeEntries:
         assert body["time_entries"][0]["id"] == running.id
         assert body["time_entries"][0]["is_running"] is True
 
-    async def test_invalid_kind(self, client, db_session, setup_factories):
+    async def test_invalid_kind(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/",
@@ -182,10 +172,10 @@ class TestListTimeEntries:
 class TestCreateTimeEntry:
     """Tests for POST /time-entries/ endpoint."""
 
-    async def test_start_running_timer(self, client, db_session, setup_factories):
+    async def test_start_running_timer(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/", json={"profile_id": user.profiles[0].id}
@@ -198,12 +188,12 @@ class TestCreateTimeEntry:
         assert body["started_at"] is not None
         assert body["kind"] == TimeEntryKind.STOPWATCH.value
 
-    async def test_start_with_task(self, client, db_session, setup_factories):
+    async def test_start_with_task(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task = TaskFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -219,13 +209,13 @@ class TestCreateTimeEntry:
         assert body["kind"] == TimeEntryKind.POMODORO.value
 
     async def test_second_running_timer_conflicts(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = user.profiles[0]
         RunningTimeEntryFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/", json={"profile_id": profile.id}
@@ -233,11 +223,11 @@ class TestCreateTimeEntry:
         assert response.status_code == 409
 
     async def test_log_completed_entry_computes_duration(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         start = datetime(2026, 7, 1, 9, 0, 0)
         end = start + timedelta(minutes=25)
@@ -255,14 +245,14 @@ class TestCreateTimeEntry:
         assert body["duration_seconds"] == 25 * 60
 
     async def test_completed_entry_ignores_running_guard(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Logging a completed entry is allowed even while a timer runs."""
         user = UserFactory()
         profile = user.profiles[0]
         RunningTimeEntryFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         start = datetime(2026, 7, 1, 9, 0, 0)
         response = await client.post(
@@ -275,10 +265,10 @@ class TestCreateTimeEntry:
         )
         assert response.status_code == 201
 
-    async def test_ended_before_started(self, client, db_session, setup_factories):
+    async def test_ended_before_started(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         start = datetime(2026, 7, 1, 9, 0, 0)
         response = await client.post(
@@ -291,13 +281,13 @@ class TestCreateTimeEntry:
         )
         assert response.status_code == 400
 
-    async def test_task_in_other_profile(self, client, db_session, setup_factories):
+    async def test_task_in_other_profile(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         other_profile = ProfileFactory(user=user)
         task = TaskFactory(profile=other_profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -305,21 +295,21 @@ class TestCreateTimeEntry:
         )
         assert response.status_code == 400
 
-    async def test_foreign_profile(self, client, db_session, setup_factories):
+    async def test_foreign_profile(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/", json={"profile_id": other.profiles[0].id}
         )
         assert response.status_code == 403
 
-    async def test_invalid_kind(self, client, db_session, setup_factories):
+    async def test_invalid_kind(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -331,13 +321,13 @@ class TestCreateTimeEntry:
 class TestActiveTimeEntry:
     """Tests for GET /time-entries/active endpoint."""
 
-    async def test_returns_running_entry(self, client, db_session, setup_factories):
+    async def test_returns_running_entry(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         running = RunningTimeEntryFactory(profile=profile)
         TimeEntryFactory(profile=profile)  # completed - not returned
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/active", params={"profile_id": profile.id}
@@ -348,12 +338,12 @@ class TestActiveTimeEntry:
         assert body["id"] == running.id
         assert body["is_running"] is True
 
-    async def test_returns_null_when_none(self, client, db_session, setup_factories):
+    async def test_returns_null_when_none(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         TimeEntryFactory(profile=profile)  # completed only
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/active", params={"profile_id": profile.id}
@@ -361,11 +351,11 @@ class TestActiveTimeEntry:
         assert response.status_code == 200
         assert response.json() is None
 
-    async def test_foreign_profile(self, client, db_session, setup_factories):
+    async def test_foreign_profile(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/active", params={"profile_id": other.profiles[0].id}
@@ -376,14 +366,14 @@ class TestActiveTimeEntry:
 class TestStopTimeEntry:
     """Tests for POST /time-entries/{id}/stop endpoint."""
 
-    async def test_stop_running(self, client, db_session, setup_factories):
+    async def test_stop_running(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         entry = RunningTimeEntryFactory(
             profile=profile, started_at=datetime.now() - timedelta(minutes=10)
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(f"/time-entries/{entry.id}/stop")
         assert response.status_code == 200
@@ -393,30 +383,30 @@ class TestStopTimeEntry:
         # ~10 minutes elapsed
         assert body["duration_seconds"] >= 60 * 9
 
-    async def test_stop_already_stopped(self, client, db_session, setup_factories):
+    async def test_stop_already_stopped(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         entry = TimeEntryFactory(profile=profile)  # completed
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(f"/time-entries/{entry.id}/stop")
         assert response.status_code == 400
 
-    async def test_stop_unknown(self, client, db_session, setup_factories):
+    async def test_stop_unknown(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/time-entries/99999/stop")
         assert response.status_code == 404
 
-    async def test_stop_foreign(self, client, db_session, setup_factories):
+    async def test_stop_foreign(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         entry = RunningTimeEntryFactory(profile=other.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(f"/time-entries/{entry.id}/stop")
         assert response.status_code == 403
@@ -425,7 +415,7 @@ class TestStopTimeEntry:
 class TestTimeEntrySummary:
     """Tests for GET /time-entries/summary endpoint."""
 
-    async def test_aggregates_per_task(self, client, db_session, setup_factories):
+    async def test_aggregates_per_task(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task_a = TaskFactory(profile=profile)
@@ -437,7 +427,7 @@ class TestTimeEntrySummary:
         # running entry (no duration) must be excluded
         RunningTimeEntryFactory(profile=profile, task=task_a)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/summary", params={"profile_id": profile.id}
@@ -450,12 +440,12 @@ class TestTimeEntrySummary:
         assert per_task[task_a.id]["entry_count"] == 2
         assert per_task[task_b.id]["total_seconds"] == 50
 
-    async def test_untethered_bucket(self, client, db_session, setup_factories):
+    async def test_untethered_bucket(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         TimeEntryFactory(profile=profile, task=None, duration_seconds=120)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/summary", params={"profile_id": profile.id}
@@ -466,11 +456,11 @@ class TestTimeEntrySummary:
         assert body["per_task"][0]["task_id"] is None
         assert body["per_task"][0]["total_seconds"] == 120
 
-    async def test_foreign_profile(self, client, db_session, setup_factories):
+    async def test_foreign_profile(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/summary",
@@ -482,30 +472,30 @@ class TestTimeEntrySummary:
 class TestReadTimeEntry:
     """Tests for GET /time-entries/{id} endpoint."""
 
-    async def test_read(self, client, db_session, setup_factories):
+    async def test_read(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/time-entries/{entry.id}")
         assert response.status_code == 200
         assert response.json()["id"] == entry.id
 
-    async def test_read_unknown(self, client, db_session, setup_factories):
+    async def test_read_unknown(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/time-entries/99999")
         assert response.status_code == 404
 
-    async def test_read_foreign(self, client, db_session, setup_factories):
+    async def test_read_foreign(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         entry = TimeEntryFactory(profile=other.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/time-entries/{entry.id}")
         assert response.status_code == 403
@@ -514,11 +504,11 @@ class TestReadTimeEntry:
 class TestPatchTimeEntry:
     """Tests for PATCH /time-entries/{id} endpoint."""
 
-    async def test_update_note(self, client, db_session, setup_factories):
+    async def test_update_note(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0], note=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"note": "focus block"}
@@ -526,13 +516,13 @@ class TestPatchTimeEntry:
         assert response.status_code == 200
         assert response.json()["note"] == "focus block"
 
-    async def test_attach_and_detach_task(self, client, db_session, setup_factories):
+    async def test_attach_and_detach_task(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task = TaskFactory(profile=profile)
         entry = TimeEntryFactory(profile=profile, task=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         attach = await client.patch(
             f"/time-entries/{entry.id}", json={"task_id": task.id}
@@ -546,14 +536,14 @@ class TestPatchTimeEntry:
         assert detach.status_code == 200
         assert detach.json()["task_id"] is None
 
-    async def test_task_in_other_profile(self, client, db_session, setup_factories):
+    async def test_task_in_other_profile(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         other_profile = ProfileFactory(user=user)
         task = TaskFactory(profile=other_profile)
         entry = TimeEntryFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"task_id": task.id}
@@ -561,7 +551,7 @@ class TestPatchTimeEntry:
         assert response.status_code == 400
 
     async def test_change_ended_at_recomputes_duration(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = user.profiles[0]
@@ -573,7 +563,7 @@ class TestPatchTimeEntry:
             duration_seconds=600,
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}",
@@ -582,11 +572,11 @@ class TestPatchTimeEntry:
         assert response.status_code == 200
         assert response.json()["duration_seconds"] == 30 * 60
 
-    async def test_reopen_makes_running(self, client, db_session, setup_factories):
+    async def test_reopen_makes_running(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"ended_at": None}
@@ -597,21 +587,21 @@ class TestPatchTimeEntry:
         assert body["duration_seconds"] is None
 
     async def test_reopen_conflicts_with_running(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = user.profiles[0]
         RunningTimeEntryFactory(profile=profile)
         entry = TimeEntryFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"ended_at": None}
         )
         assert response.status_code == 409
 
-    async def test_ended_before_started(self, client, db_session, setup_factories):
+    async def test_ended_before_started(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         start = datetime(2026, 7, 1, 9, 0, 0)
@@ -622,7 +612,7 @@ class TestPatchTimeEntry:
             duration_seconds=600,
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}",
@@ -630,23 +620,23 @@ class TestPatchTimeEntry:
         )
         assert response.status_code == 400
 
-    async def test_reject_null_kind(self, client, db_session, setup_factories):
+    async def test_reject_null_kind(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"kind": None}
         )
         assert response.status_code == 422
 
-    async def test_foreign(self, client, db_session, setup_factories):
+    async def test_foreign(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         entry = TimeEntryFactory(profile=other.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"note": "x"}
@@ -657,11 +647,11 @@ class TestPatchTimeEntry:
 class TestDeleteTimeEntry:
     """Tests for DELETE /time-entries/{id} endpoint."""
 
-    async def test_delete(self, client, db_session, setup_factories):
+    async def test_delete(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/time-entries/{entry.id}")
         assert response.status_code == 200
@@ -671,20 +661,20 @@ class TestDeleteTimeEntry:
         )
         assert remaining.scalar_one_or_none() is None
 
-    async def test_delete_unknown(self, client, db_session, setup_factories):
+    async def test_delete_unknown(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete("/time-entries/99999")
         assert response.status_code == 404
 
-    async def test_delete_foreign(self, client, db_session, setup_factories):
+    async def test_delete_foreign(self, client, db_session, login_as):
         user = UserFactory()
         other = UserFactory()
         entry = TimeEntryFactory(profile=other.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/time-entries/{entry.id}")
         assert response.status_code == 403
@@ -694,7 +684,7 @@ class TestTimeEntryCascade:
     """Deleting a task or profile removes its time entries (DB cascade)."""
 
     async def test_deleting_task_deletes_entries(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = user.profiles[0]
@@ -702,7 +692,7 @@ class TestTimeEntryCascade:
         await db_session.flush()
         entry = TimeEntryFactory(profile=profile, task=task)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/tasks/{task.id}")
         assert response.status_code == 200
@@ -716,12 +706,12 @@ class TestTimeEntryCascade:
 class TestTimeEntryProjectAndLabel:
     """Adhoc project attachment + label on time entries."""
 
-    async def test_create_adhoc_project_entry(self, client, db_session, setup_factories):
+    async def test_create_adhoc_project_entry(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         project = ProjectFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -737,14 +727,14 @@ class TestTimeEntryProjectAndLabel:
         assert body["task_id"] is None
         assert body["label"] == "Roadmap planning"
 
-    async def test_task_wins_over_project(self, client, db_session, setup_factories):
+    async def test_task_wins_over_project(self, client, db_session, login_as):
         """When both are supplied, the task attaches and project is dropped."""
         user = UserFactory()
         profile = user.profiles[0]
         project = ProjectFactory(profile=profile)
         task = TaskFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -759,13 +749,13 @@ class TestTimeEntryProjectAndLabel:
         assert body["task_id"] == task.id
         assert body["project_id"] is None
 
-    async def test_project_in_other_profile(self, client, db_session, setup_factories):
+    async def test_project_in_other_profile(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         other_profile = ProfileFactory(user=user)
         project = ProjectFactory(profile=other_profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -774,11 +764,11 @@ class TestTimeEntryProjectAndLabel:
         assert response.status_code == 400
 
     async def test_blank_label_normalized_to_null(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/time-entries/",
@@ -787,11 +777,11 @@ class TestTimeEntryProjectAndLabel:
         assert response.status_code == 201
         assert response.json()["label"] is None
 
-    async def test_patch_label(self, client, db_session, setup_factories):
+    async def test_patch_label(self, client, db_session, login_as):
         user = UserFactory()
         entry = TimeEntryFactory(profile=user.profiles[0], label=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"label": "Standup"}
@@ -799,7 +789,7 @@ class TestTimeEntryProjectAndLabel:
         assert response.status_code == 200
         assert response.json()["label"] == "Standup"
 
-    async def test_patch_task_clears_project(self, client, db_session, setup_factories):
+    async def test_patch_task_clears_project(self, client, db_session, login_as):
         """Attaching a task to an adhoc project entry drops the project."""
         user = UserFactory()
         profile = user.profiles[0]
@@ -807,7 +797,7 @@ class TestTimeEntryProjectAndLabel:
         task = TaskFactory(profile=profile)
         entry = TimeEntryFactory(profile=profile, project_id=project.id)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"task_id": task.id}
@@ -818,14 +808,14 @@ class TestTimeEntryProjectAndLabel:
         assert body["project_id"] is None
 
     async def test_patch_attach_project_to_adhoc(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = user.profiles[0]
         project = ProjectFactory(profile=profile)
         entry = TimeEntryFactory(profile=profile, task=None)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/time-entries/{entry.id}", json={"project_id": project.id}
@@ -837,7 +827,7 @@ class TestTimeEntryProjectAndLabel:
 class TestTimeEntrySummaryPerProject:
     """Per-project aggregation resolves task-attached and adhoc entries."""
 
-    async def test_per_project_rollup(self, client, db_session, setup_factories):
+    async def test_per_project_rollup(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         project = ProjectFactory(profile=profile)
@@ -850,7 +840,7 @@ class TestTimeEntrySummaryPerProject:
             profile=profile, task=None, project_id=project.id, duration_seconds=50
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/summary", params={"profile_id": profile.id}
@@ -861,14 +851,14 @@ class TestTimeEntrySummaryPerProject:
         assert per_project[project.id]["total_seconds"] == 150
         assert per_project[project.id]["entry_count"] == 2
 
-    async def test_per_project_null_bucket(self, client, db_session, setup_factories):
+    async def test_per_project_null_bucket(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
         task = TaskFactory(profile=profile, project=None)
         await db_session.flush()
         TimeEntryFactory(profile=profile, task=task, duration_seconds=30)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/time-entries/summary", params={"profile_id": profile.id}
@@ -882,11 +872,11 @@ class TestTaskEstimatedEffort:
     """Task gains an estimated_effort field (minutes)."""
 
     async def test_create_with_estimated_effort(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -899,10 +889,10 @@ class TestTaskEstimatedEffort:
         assert response.status_code == 201
         assert response.json()["estimated_effort"] == 90
 
-    async def test_default_is_null(self, client, db_session, setup_factories):
+    async def test_default_is_null(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -911,11 +901,11 @@ class TestTaskEstimatedEffort:
         assert response.status_code == 201
         assert response.json()["estimated_effort"] is None
 
-    async def test_patch_estimated_effort(self, client, db_session, setup_factories):
+    async def test_patch_estimated_effort(self, client, db_session, login_as):
         user = UserFactory()
         task = TaskFactory(profile=user.profiles[0])
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/tasks/{task.id}", json={"estimated_effort": 45}
@@ -923,10 +913,10 @@ class TestTaskEstimatedEffort:
         assert response.status_code == 200
         assert response.json()["estimated_effort"] == 45
 
-    async def test_negative_rejected(self, client, db_session, setup_factories):
+    async def test_negative_rejected(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/tasks/",
@@ -942,10 +932,10 @@ class TestTaskEstimatedEffort:
 class TestProfilePomodoroSettings:
     """Profiles carry per-profile pomodoro defaults."""
 
-    async def test_defaults(self, client, db_session, setup_factories):
+    async def test_defaults(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/", json={"name": "Focus"}
@@ -957,10 +947,10 @@ class TestProfilePomodoroSettings:
         assert body["pomodoro_long_break_minutes"] == 15
         assert body["pomodoro_cycles"] == 4
 
-    async def test_create_custom(self, client, db_session, setup_factories):
+    async def test_create_custom(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/",
@@ -977,10 +967,10 @@ class TestProfilePomodoroSettings:
         assert body["pomodoro_work_minutes"] == 50
         assert body["pomodoro_cycles"] == 3
 
-    async def test_patch(self, client, db_session, setup_factories):
+    async def test_patch(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{user.profiles[0].id}",
@@ -989,10 +979,10 @@ class TestProfilePomodoroSettings:
         assert response.status_code == 200
         assert response.json()["pomodoro_work_minutes"] == 45
 
-    async def test_zero_rejected(self, client, db_session, setup_factories):
+    async def test_zero_rejected(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/",
@@ -1001,22 +991,22 @@ class TestProfilePomodoroSettings:
         assert response.status_code == 422
 
     async def test_show_estimated_effort_defaults_off(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/profiles/", json={"name": "Estimator"})
         assert response.status_code == 201
         assert response.json()["show_estimated_effort"] is False
 
     async def test_toggle_show_estimated_effort(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{user.profiles[0].id}",
@@ -1024,3 +1014,32 @@ class TestProfilePomodoroSettings:
         )
         assert response.status_code == 200
         assert response.json()["show_estimated_effort"] is True
+
+
+class TestDeleteAllTimeEntries:
+    """Tests for DELETE /time-entries/ (bulk delete, profile-scoped)."""
+
+    async def test_deletes_running_and_completed_only_this_profile(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        TimeEntryFactory(profile=profile)
+        RunningTimeEntryFactory(profile=profile)  # unstopped entry is removed too
+        keep = TimeEntryFactory(profile=other)
+        await db_session.commit()
+
+        await login_as(user)
+        response = await client.delete(
+            "/time-entries/", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 2
+
+        remaining = (await db_session.execute(select(TimeEntry))).scalars().all()
+        assert [e.id for e in remaining] == [keep.id]

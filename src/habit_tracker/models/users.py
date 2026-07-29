@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from habit_tracker.models._base import _StampedRead
+from habit_tracker.models._validators import non_blank_string
 
 
 # User Schemas
@@ -14,21 +17,15 @@ class UserBase(BaseModel):
     @field_validator("username")
     @classmethod
     def validate_username(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Username cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Username")
 
 
 class UserCreate(UserBase):
     plaintext_password: str
 
 
-class UserRead(UserBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_date: datetime
-    updated_date: Optional[datetime] = None
+class UserRead(_StampedRead, UserBase):
+    pass
 
 
 class UserUpdate(BaseModel):
@@ -47,19 +44,10 @@ class UserList(BaseModel):
     offset: int
 
 
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class Token(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-
-
-class TokenData(BaseModel):
-    user_id: Optional[int] = None
 
 
 class RefreshTokenRequest(BaseModel):

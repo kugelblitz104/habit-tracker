@@ -36,7 +36,7 @@ class TestUserRegistration:
         assert user is not None
         assert user.email == "newuser@example.com"
 
-    async def test_register_duplicate_email(self, client, db_session, setup_factories):
+    async def test_register_duplicate_email(self, client, db_session):
         """Reject registration with existing email (400)."""
         UserFactory(email="existing@example.com")
         await db_session.commit()
@@ -55,7 +55,7 @@ class TestUserRegistration:
         assert "Email already registered" in response.json()["detail"]
 
     async def test_register_duplicate_username(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """Reject registration with existing username (400)."""
         UserFactory(username="existinguser")
@@ -175,7 +175,7 @@ class TestUserRegistration:
 class TestUserLogin:
     """Tests for /auth/login endpoint."""
 
-    async def test_login_with_username(self, client, db_session, setup_factories):
+    async def test_login_with_username(self, client, db_session):
         """Successfully login with username and password."""
         user = UserFactory()
         await db_session.commit()
@@ -189,7 +189,7 @@ class TestUserLogin:
         assert "access_token" in data
         assert "refresh_token" in data
 
-    async def test_login_with_email(self, client, db_session, setup_factories):
+    async def test_login_with_email(self, client, db_session):
         """Successfully login with email in the username field."""
         user = UserFactory()
         await db_session.commit()
@@ -203,7 +203,7 @@ class TestUserLogin:
         assert "access_token" in data
         assert "refresh_token" in data
 
-    async def test_login_wrong_password(self, client, db_session, setup_factories):
+    async def test_login_wrong_password(self, client, db_session):
         """Reject login with incorrect password (401)."""
         user = UserFactory(username="wrongpassuser")
         await db_session.commit()
@@ -224,7 +224,7 @@ class TestUserLogin:
         assert response.status_code == 401
         assert "Incorrect username/email or password" in response.json()["detail"]
 
-    async def test_login_returns_tokens(self, client, db_session, setup_factories):
+    async def test_login_returns_tokens(self, client, db_session):
         """Verify login returns both access and refresh tokens."""
         user = UserFactory()
         await db_session.commit()
@@ -240,7 +240,7 @@ class TestUserLogin:
         assert len(data["access_token"]) > 0
         assert len(data["refresh_token"]) > 0
 
-    async def test_login_token_type(self, client, db_session, setup_factories):
+    async def test_login_token_type(self, client, db_session):
         """Verify token_type is 'bearer'."""
         user = UserFactory()
         await db_session.commit()
@@ -257,7 +257,7 @@ class TestUserLogin:
 class TestTokenRefresh:
     """Tests for /auth/refresh endpoint."""
 
-    async def test_refresh_with_valid_token(self, client, db_session, setup_factories):
+    async def test_refresh_with_valid_token(self, client, db_session):
         """Successfully refresh with valid refresh token."""
         user = UserFactory()
         await db_session.commit()
@@ -278,7 +278,7 @@ class TestTokenRefresh:
         assert "access_token" in data
         assert "refresh_token" in data
 
-    async def test_refresh_with_access_token(self, client, db_session, setup_factories):
+    async def test_refresh_with_access_token(self, client, db_session):
         """Reject refresh attempt with access token (401)."""
         user = UserFactory()
         await db_session.commit()
@@ -299,7 +299,7 @@ class TestTokenRefresh:
         assert "Invalid refresh token" in response.json()["detail"]
 
     async def test_refresh_with_expired_token(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """Reject refresh with expired token (401)."""
         # Create an expired token manually
@@ -343,7 +343,7 @@ class TestForgotPassword:
     """Tests for /auth/forgot-password endpoint."""
 
     async def test_forgot_password_existing_email(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """A registered email gets the generic 200 response."""
         user = UserFactory(email="real@example.com")
@@ -379,7 +379,7 @@ class TestForgotPassword:
 class TestResetPassword:
     """Tests for /auth/reset-password endpoint."""
 
-    async def test_reset_password_success(self, client, db_session, setup_factories):
+    async def test_reset_password_success(self, client, db_session):
         """A valid reset token sets a new password that can be used to log in."""
         from habit_tracker.core.security import create_reset_token
 
@@ -408,17 +408,13 @@ class TestResetPassword:
         assert new_login.status_code == 200
 
     async def test_reset_password_rejects_access_token(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A non-reset token type is rejected (400)."""
         user = UserFactory()
         await db_session.commit()
 
-        login = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        access_token = login.json()["access_token"]
+        access_token = await login_as(user)
 
         response = await client.post(
             "/auth/reset-password",
@@ -428,7 +424,7 @@ class TestResetPassword:
         assert "Invalid or expired reset token" in response.json()["detail"]
 
     async def test_reset_password_expired_token(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """An expired reset token is rejected (400)."""
         from datetime import datetime, timedelta, timezone
@@ -464,7 +460,7 @@ class TestResetPassword:
         )
         assert response.status_code == 400
 
-    async def test_reset_password_too_short(self, client, db_session, setup_factories):
+    async def test_reset_password_too_short(self, client, db_session):
         """A too-short new password is rejected by validation (422)."""
         from habit_tracker.core.security import create_reset_token
 

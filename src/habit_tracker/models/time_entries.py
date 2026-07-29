@@ -1,9 +1,21 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, overload
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 from habit_tracker.constants import TimeEntryKind
+from habit_tracker.models._base import _FromORM
+from habit_tracker.models._validators import blank_to_none, reject_null, validate_membership
+
+_KIND_VALUES = [k.value for k in TimeEntryKind]
+
+
+@overload
+def _validate_kind(v: int) -> int: ...
+@overload
+def _validate_kind(v: None) -> None: ...
+def _validate_kind(v: Optional[int]) -> Optional[int]:
+    return validate_membership(v, _KIND_VALUES, "Kind must be a valid TimeEntryKind value")
 
 
 # Time Entry Schemas
@@ -20,17 +32,13 @@ class TimeEntryBase(BaseModel):
     @field_validator("kind")
     @classmethod
     def validate_kind(cls, v: int) -> int:
-        if v not in [k.value for k in TimeEntryKind]:
-            raise ValueError("Kind must be a valid TimeEntryKind value")
-        return v
+        return _validate_kind(v)
 
     @field_validator("label")
     @classmethod
     def validate_label(cls, v: Optional[str]) -> Optional[str]:
         # Normalize blank labels to null so autofill never suggests empties.
-        if v is not None and not v.strip():
-            return None
-        return v
+        return blank_to_none(v)
 
 
 class TimeEntryCreate(TimeEntryBase):
@@ -41,9 +49,7 @@ class TimeEntryCreate(TimeEntryBase):
     ended_at: Optional[datetime] = None
 
 
-class TimeEntryRead(TimeEntryBase):
-    model_config = ConfigDict(from_attributes=True)
-
+class TimeEntryRead(TimeEntryBase, _FromORM):
     id: int
     started_at: datetime
     ended_at: Optional[datetime] = None
@@ -65,28 +71,21 @@ class TimeEntryUpdate(BaseModel):
 
     @field_validator("kind", "started_at")
     @classmethod
-    def reject_null(cls, v: object, info: ValidationInfo) -> object:
-        # These columns are NOT NULL in the database; omitting a field means
-        # "leave unchanged", but an explicit null is always invalid. (task_id,
-        # project_id, label, note and ended_at ARE nullable, so an explicit
-        # null clears them - nulling ended_at reopens the entry as running.)
-        if v is None:
-            raise ValueError(f"{info.field_name} cannot be null")
-        return v
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        # (task_id, project_id, label, note and ended_at ARE nullable, so an
+        # explicit null clears them - nulling ended_at reopens the entry as
+        # running.)
+        return reject_null(v, info)
 
     @field_validator("kind")
     @classmethod
     def validate_kind(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v not in [k.value for k in TimeEntryKind]:
-            raise ValueError("Kind must be a valid TimeEntryKind value")
-        return v
+        return _validate_kind(v)
 
     @field_validator("label")
     @classmethod
     def validate_label(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            return None
-        return v
+        return blank_to_none(v)
 
 
 class TimeEntryList(BaseModel):

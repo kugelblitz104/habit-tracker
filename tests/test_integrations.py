@@ -24,15 +24,6 @@ from tests.factories import (
 )
 
 
-async def login_as(client, user):
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-
-
 class FakeClient:
     """Canned integration client (dependency-override target)."""
 
@@ -68,11 +59,11 @@ def override_builder(fake):
 
 
 class TestIntegrationConnectionCrud:
-    async def test_create_github_connection(self, client, db_session, setup_factories):
+    async def test_create_github_connection(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/integrations/",
@@ -94,12 +85,12 @@ class TestIntegrationConnectionCrud:
         assert "ghp_secrettoken" not in response.text
 
     async def test_create_azure_requires_org_and_project(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/integrations/",
@@ -112,11 +103,11 @@ class TestIntegrationConnectionCrud:
         )
         assert response.status_code == 422
 
-    async def test_create_azure_connection(self, client, db_session, setup_factories):
+    async def test_create_azure_connection(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/integrations/",
@@ -132,11 +123,11 @@ class TestIntegrationConnectionCrud:
         assert response.status_code == 201
         assert response.json()["organization"] == "contoso"
 
-    async def test_invalid_provider_rejected(self, client, db_session, setup_factories):
+    async def test_invalid_provider_rejected(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/integrations/",
@@ -149,12 +140,12 @@ class TestIntegrationConnectionCrud:
         )
         assert response.status_code == 422
 
-    async def test_list_omits_token(self, client, db_session, setup_factories):
+    async def test_list_omits_token(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         IntegrationConnectionFactory(profile=profile, name="GH")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/integrations/", params={"profile_id": profile.id})
         assert response.status_code == 200
@@ -164,25 +155,25 @@ class TestIntegrationConnectionCrud:
         assert "encrypted_token" not in response.text
 
     async def test_list_foreign_profile_forbidden(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         other = UserFactory()
         foreign = ProfileFactory(user=other, name="Theirs")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/integrations/", params={"profile_id": foreign.id})
         assert response.status_code == 403
 
     async def test_patch_rotates_token_and_updates_name(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(profile=profile, name="Old")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/integrations/{conn.id}",
@@ -192,12 +183,12 @@ class TestIntegrationConnectionCrud:
         assert response.json()["name"] == "New"
         assert response.json()["has_token"] is True
 
-    async def test_delete_connection(self, client, db_session, setup_factories):
+    async def test_delete_connection(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(profile=profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/integrations/{conn.id}")
         assert response.status_code == 200
@@ -209,12 +200,12 @@ class TestIntegrationConnectionCrud:
 
 
 class TestIntegrationSync:
-    async def test_sync_imports_tasks(self, client, db_session, setup_factories):
+    async def test_sync_imports_tasks(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(profile=profile, provider="github")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         fake = FakeClient(
             items=[
@@ -254,12 +245,12 @@ class TestIntegrationSync:
             == "https://github.com/octocat/hello/issues/1"
         )
 
-    async def test_sync_is_idempotent(self, client, db_session, setup_factories):
+    async def test_sync_is_idempotent(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(profile=profile, provider="github")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         items = [
             ExternalItem(
@@ -283,12 +274,12 @@ class TestIntegrationSync:
         )
         assert len(count.scalars().all()) == 1
 
-    async def test_sync_provider_error_502(self, client, db_session, setup_factories):
+    async def test_sync_provider_error_502(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(profile=profile, provider="github")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         override_builder(
             FakeClient(list_error=IntegrationError("GitHub returned 401 Unauthorized"))
@@ -303,14 +294,14 @@ class TestIntegrationSync:
         assert refreshed.last_error is not None
 
     async def test_sync_foreign_connection_forbidden(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         other = UserFactory()
         foreign_profile = ProfileFactory(user=other, name="Theirs")
         conn = IntegrationConnectionFactory(profile=foreign_profile)
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         override_builder(FakeClient(items=[]))
         response = await client.post(f"/integrations/{conn.id}/sync")
@@ -318,7 +309,7 @@ class TestIntegrationSync:
 
 
 class TestIntegrationPublish:
-    async def test_publish_creates_and_links(self, client, db_session, setup_factories):
+    async def test_publish_creates_and_links(self, client, db_session, login_as):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
         conn = IntegrationConnectionFactory(
@@ -329,7 +320,7 @@ class TestIntegrationPublish:
         )
         task = TaskFactory(profile=profile, title="Ship it", notes="the details")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         fake = FakeClient()
         override_builder(fake)
@@ -349,7 +340,7 @@ class TestIntegrationPublish:
         assert task.external_url.endswith("/999")
 
     async def test_publish_rejects_already_linked(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
@@ -361,7 +352,7 @@ class TestIntegrationPublish:
             external_url="https://dev.azure.com/c/p/_workitems/edit/5",
         )
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         override_builder(FakeClient())
         response = await client.post(
@@ -371,7 +362,7 @@ class TestIntegrationPublish:
         assert "already linked" in response.json()["detail"].lower()
 
     async def test_publish_task_from_other_profile_400(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         profile = ProfileFactory(user=user, name="Main")
@@ -381,7 +372,7 @@ class TestIntegrationPublish:
         )
         task = TaskFactory(profile=other_profile, title="Elsewhere")
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         override_builder(FakeClient())
         response = await client.post(

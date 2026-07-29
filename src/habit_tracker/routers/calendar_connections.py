@@ -1,21 +1,21 @@
 from datetime import date, datetime, timedelta
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
-    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
     resolve_timezone,
 )
+from habit_tracker.core.http import integrity_conflict
 from habit_tracker.models import (
-    CalendarConnection,
     CalendarConnectionCreate,
     CalendarConnectionList,
     CalendarConnectionRead,
@@ -23,7 +23,7 @@ from habit_tracker.models import (
     CalendarEventList,
     CalendarEventRead,
 )
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import CalendarConnection, User
 from habit_tracker.services.calendar_events import (
     IcsFetcher,
     get_ics_fetcher,
@@ -43,14 +43,13 @@ async def _get_connection_and_authorize(
 ) -> CalendarConnection:
     """Fetch a calendar connection by ID (404 if missing) and authorize the
     caller against the owning profile."""
-    connection = await db.get(CalendarConnection, connection_id)
-    if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar connection not found",
-        )
-    await authorize_parent_profile(
-        db, connection.profile_id, current_user, "calendar connection"
+    connection, _ = await get_owned_child(
+        db,
+        CalendarConnection,
+        connection_id,
+        current_user,
+        not_found_detail="Calendar connection not found",
+        resource_name="calendar connection",
     )
     return connection
 
@@ -287,10 +286,7 @@ async def patch_calendar_connection(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Calendar connection change violates a database constraint",
-        )
+        raise integrity_conflict("Calendar connection change violates a database constraint")
     await db.refresh(db_connection)
 
     return CalendarConnectionRead.model_validate(db_connection)

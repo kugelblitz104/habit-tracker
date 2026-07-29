@@ -3,34 +3,33 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
-    get_owned_profile,
     resolve_habit_profile_id,
     resolve_timezone,
     resolve_today,
 )
+from habit_tracker.core.http import bulk_delete_in_profile, validate_sort_ids
 from habit_tracker.models import (
-    Habit,
     HabitCreate,
     HabitKPIs,
     HabitRead,
     HabitStreak,
     HabitUpdate,
-    Tracker,
     TrackerList,
     TrackerLite,
     TrackerLiteList,
     TrackerRead,
 )
 from habit_tracker.constants import TrackerStatus
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Habit, Tracker, User
 from habit_tracker.services.habit_stats import (
+    auto_skip_lookback_start,
     calculate_kpis,
     calculate_streaks,
     is_auto_skipped,
@@ -90,18 +89,7 @@ async def sort_habits(
     The first ID gets the lowest sort_order, last ID gets the highest.
     Habits are displayed in ascending sort_order.
     """
-    # Validate input
-    if not habit_ids:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="habit_ids list cannot be empty",
-        )
-
-    if len(habit_ids) != len(set(habit_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Duplicate habit IDs in request",
-        )
+    validate_sort_ids(habit_ids, noun="habit")
 
     # Fetch ALL user's habits
     all_habits_result = await db.execute(
@@ -177,8 +165,12 @@ async def read_habit(
         )
     ).scalar()
 
-    habit_read.completed_today = today_tracker.status == 2 if today_tracker else False
-    habit_read.skipped_today = today_tracker.status == 1 if today_tracker else False
+    habit_read.completed_today = (
+        today_tracker.status == TrackerStatus.COMPLETED if today_tracker else False
+    )
+    habit_read.skipped_today = (
+        today_tracker.status == TrackerStatus.SKIPPED if today_tracker else False
+    )
 
     return habit_read
 
@@ -303,7 +295,7 @@ async def list_habit_trackers_lite(
     # day in this range needs completions from up to range - 1 days BEFORE
     # start_date. Querying that here is what lets callers fetch only the days
     # they actually render - the lookback never crosses the wire.
-    lookback_start = start_date - timedelta(days=habit.range - 1)
+    lookback_start = auto_skip_lookback_start(start_date, habit.range)
     completed_result = await db.execute(
         select(Tracker.dated)
         .filter(Tracker.habit_id == habit_id)
@@ -416,6 +408,28 @@ async def read_habit_streaks(
     )
 
 
+async def _apply_habit_update(
+    db: AsyncSession, db_habit: Habit, habit_data: dict
+) -> None:
+    """Apply an update dict to a habit - shared by PUT (full model_dump) and
+    PATCH (model_dump(exclude_unset=True)).
+
+    profile_id is resolved against the habit's owner, not the caller: an
+    admin editing another user's habit may only use that user's profiles.
+    A None/omitted profile_id keeps the habit's current profile - profile_id
+    is never nulled.
+    """
+    if habit_data.get("profile_id") is None:
+        habit_data.pop("profile_id", None)
+    else:
+        habit_data["profile_id"] = await resolve_habit_profile_id(
+            db, db_habit.user_id, habit_data["profile_id"]
+        )
+    for key, value in habit_data.items():
+        setattr(db_habit, key, value)
+    db_habit.updated_date = datetime.now()  # server-stamped, never client-set
+
+
 @router.put("/{habit_id}", summary="Replace a habit (full update)")
 async def update_habit(
     habit_id: int,
@@ -432,18 +446,7 @@ async def update_habit(
     - **habit_id**: The unique identifier of the habit to update
     """
     db_habit = await get_owned_habit(db, habit_id, current_user)
-    habit_data = habit_update.model_dump()
-    if habit_data.get("profile_id") is None:
-        # Keep the habit's current profile - profile_id is never nulled
-        habit_data.pop("profile_id", None)
-    else:
-        # Validate against the habit's owner, not the caller: an admin editing
-        # another user's habit may only use that user's profiles
-        habit_data["profile_id"] = await resolve_habit_profile_id(
-            db, db_habit.user_id, habit_data["profile_id"]
-        )
-    for key, value in habit_data.items():
-        setattr(db_habit, key, value)
+    await _apply_habit_update(db, db_habit, habit_update.model_dump())
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
@@ -480,18 +483,7 @@ async def patch_habit(
 
     """
     db_habit = await get_owned_habit(db, habit_id, current_user)
-    habit_data = habit_update.model_dump(exclude_unset=True)
-    if habit_data.get("profile_id") is None:
-        # Keep the habit's current profile - profile_id is never nulled
-        habit_data.pop("profile_id", None)
-    else:
-        # Validate against the habit's owner, not the caller: an admin editing
-        # another user's habit may only use that user's profiles
-        habit_data["profile_id"] = await resolve_habit_profile_id(
-            db, db_habit.user_id, habit_data["profile_id"]
-        )
-    for key, value in habit_data.items():
-        setattr(db_habit, key, value)
+    await _apply_habit_update(db, db_habit, habit_update.model_dump(exclude_unset=True))
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
@@ -511,22 +503,13 @@ async def delete_all_habits(
     This action cannot be undone. Each habit's tracker history is deleted
     with it (ON DELETE CASCADE).
     """
-    await get_owned_profile(db, profile_id, current_user, "habit")
-
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Habit)
-            .filter(Habit.profile_id == profile_id)
-        )
-    ).scalar() or 0
-    await db.execute(delete(Habit).where(Habit.profile_id == profile_id))
-    await db.commit()
-    return JSONResponse(
-        content={
-            "detail": f"Deleted {count} habits and their trackers",
-            "deleted": count,
-        }
+    return await bulk_delete_in_profile(
+        db,
+        Habit,
+        profile_id,
+        current_user,
+        resource_name="habit",
+        detail="Deleted {count} habits and their trackers",
     )
 
 

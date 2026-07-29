@@ -2,9 +2,11 @@
 
 from datetime import date, datetime, time, timedelta
 
+from sqlalchemy import select
+
 from habit_tracker.constants import TaskStatus
 from habit_tracker.schemas.db_models import Task
-from habit_tracker.services.task_export import render_tasks_markdown
+from habit_tracker.services.task_export import _active_sort_key, render_tasks_markdown
 from tests.factories import (
     DoneTaskFactory,
     ProfileFactory,
@@ -12,16 +14,6 @@ from tests.factories import (
     TaskFactory,
     UserFactory,
 )
-
-
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
 
 
 def _task(**overrides) -> Task:
@@ -155,7 +147,7 @@ class TestExportTasksMarkdown:
     """Tests for GET /tasks/export endpoint."""
 
     async def test_export_groups_tasks_by_band(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Tasks land in Now/Soon/Whenever/Completed sections by band."""
         user = UserFactory()
@@ -173,7 +165,7 @@ class TestExportTasksMarkdown:
         DoneTaskFactory(profile=profile, title="Finished thing")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -191,7 +183,7 @@ class TestExportTasksMarkdown:
         )
 
     async def test_export_subtasks_nested_under_parent(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Subtasks export as indented checklist lines under their parent."""
         user = UserFactory()
@@ -216,7 +208,7 @@ class TestExportTasksMarkdown:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -229,7 +221,7 @@ class TestExportTasksMarkdown:
         assert "## Completed & cancelled" not in body
 
     async def test_export_header_has_profile_name_and_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """The document header carries the profile name and export date."""
         user = UserFactory()
@@ -237,14 +229,14 @@ class TestExportTasksMarkdown:
         profile = ProfileFactory(user=user, name="Work")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         assert "# Work — Tasks" in response.text
         assert f"_Exported {date.today().isoformat()}_" in response.text
 
     async def test_export_done_checked_cancelled_unchecked(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Done tasks get [x]; cancelled stay [ ] with a Status line."""
         user = UserFactory()
@@ -261,7 +253,7 @@ class TestExportTasksMarkdown:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -269,7 +261,7 @@ class TestExportTasksMarkdown:
         assert "- [ ] Abandoned thing\n  - Status: Cancelled" in body
 
     async def test_export_optional_fields_omitted_when_unset(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A bare open task renders as a single checklist line, no details."""
         user = UserFactory()
@@ -280,7 +272,7 @@ class TestExportTasksMarkdown:
         TaskFactory(profile=profile, title="Bare task")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -290,7 +282,7 @@ class TestExportTasksMarkdown:
             assert detail not in body
 
     async def test_export_renders_set_detail_fields(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Status/priority/due/scheduled/project/block reason all render."""
         user = UserFactory()
@@ -322,7 +314,7 @@ class TestExportTasksMarkdown:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -336,7 +328,7 @@ class TestExportTasksMarkdown:
         assert f"  - Scheduled: {scheduled.isoformat()} 09:15" in body
 
     async def test_export_multiline_notes_indented(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Every notes line is indented under the task's Notes bullet."""
         user = UserFactory()
@@ -351,7 +343,7 @@ class TestExportTasksMarkdown:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         assert (
@@ -360,7 +352,7 @@ class TestExportTasksMarkdown:
         )
 
     async def test_export_empty_profile_valid_doc(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A profile without tasks exports header only, sections omitted."""
         user = UserFactory()
@@ -368,7 +360,7 @@ class TestExportTasksMarkdown:
         profile = ProfileFactory(user=user, name="Empty")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         body = response.text
@@ -376,19 +368,19 @@ class TestExportTasksMarkdown:
         assert "## " not in body  # empty sections are omitted entirely
 
     async def test_export_unknown_profile_returns_404(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Exporting a nonexistent profile returns 404."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": 999999})
         assert response.status_code == 404
         assert response.json()["detail"] == "Profile not found"
 
     async def test_export_other_users_profile_forbidden(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Exporting another user's profile returns 403."""
         owner = UserFactory()
@@ -397,12 +389,12 @@ class TestExportTasksMarkdown:
         profile = ProfileFactory(user=owner, name="Private")
         await db_session.commit()
 
-        await login_as(client, intruder)
+        await login_as(intruder)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 403
 
     async def test_export_content_type_is_markdown(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """The response is raw text/markdown, not JSON-wrapped."""
         user = UserFactory()
@@ -410,7 +402,86 @@ class TestExportTasksMarkdown:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
         response = await client.get("/tasks/export", params={"profile_id": profile.id})
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/markdown")
+
+
+class TestActiveSortKeyMatchesListEndpointOrdering:
+    """Pins ``_active_sort_key`` (Python) against ``list_tasks``' SQL ordering.
+
+    ``routers.tasks.list_tasks`` orders active tasks in the database
+    (``Task.priority.desc(), Task.due_date.asc().nulls_last(),
+    Task.created_date.asc()``); the Markdown export has no database to order
+    in, so it re-implements the same ordering in
+    ``services.task_export._active_sort_key``. The two can't share code
+    (SQL vs. Python), so this test is the drift protection: it fetches a
+    fixture set with the endpoint's own SQL ordering and asserts that
+    sorting the same set in Python with ``_active_sort_key`` agrees.
+    """
+
+    async def test_sql_and_python_orderings_agree(
+        self, client, db_session
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        today = date.today()
+        base = datetime(2026, 1, 1, 9, 0)
+        # Deliberately scrambled priority / due_date / created_date so a
+        # coincidental agreement can't hide a real ordering bug.
+        TaskFactory(
+            profile=profile, title="Low, due soon, created late",
+            priority=1, due_date=today + timedelta(days=1),
+            created_date=base + timedelta(minutes=5),
+        )
+        TaskFactory(
+            profile=profile, title="High, no due date, created first",
+            priority=3, due_date=None, created_date=base,
+        )
+        TaskFactory(
+            profile=profile, title="High, due far, created middle",
+            priority=3, due_date=today + timedelta(days=10),
+            created_date=base + timedelta(minutes=1),
+        )
+        TaskFactory(
+            profile=profile, title="Low, no due date, created early",
+            priority=1, due_date=None, created_date=base + timedelta(seconds=1),
+        )
+        TaskFactory(
+            profile=profile, title="Medium, due near, created last",
+            priority=2, due_date=today + timedelta(days=2),
+            created_date=base + timedelta(minutes=10),
+        )
+        TaskFactory(
+            profile=profile, title="High, due near, created last",
+            priority=3, due_date=today + timedelta(days=1),
+            created_date=base + timedelta(minutes=20),
+        )
+        await db_session.commit()
+
+        # The endpoint's own ordering, straight from the database.
+        db_result = await db_session.execute(
+            select(Task)
+            .filter(Task.profile_id == profile.id)
+            .order_by(
+                Task.priority.desc(),
+                Task.due_date.asc().nulls_last(),
+                Task.created_date.asc(),
+            )
+        )
+        sql_ordered_titles = [t.title for t in db_result.scalars().all()]
+
+        # The same tasks, fetched unordered and sorted in Python.
+        unordered_result = await db_session.execute(
+            select(Task).filter(Task.profile_id == profile.id)
+        )
+        python_ordered_titles = [
+            t.title
+            for t in sorted(unordered_result.scalars().all(), key=_active_sort_key)
+        ]
+
+        assert python_ordered_titles == sql_ordered_titles

@@ -8,6 +8,7 @@ import httpx
 from habit_tracker.services.integrations.base import (
     ExternalItem,
     IntegrationError,
+    raise_for_status,
     transport_error_message,
 )
 
@@ -42,7 +43,7 @@ class GitHubClient:
                     f"{API_BASE}/issues",
                     params={"filter": "assigned", "state": "open", "per_page": 100},
                 )
-                _raise_for_status(resp, "GitHub")
+                raise_for_status(resp, "GitHub")
         except httpx.HTTPError as exc:
             raise IntegrationError(
                 transport_error_message(exc, "GitHub", API_BASE)
@@ -81,7 +82,7 @@ class GitHubClient:
                     f"{API_BASE}/repos/{self.default_repo}/issues",
                     json={"title": title, "body": body or ""},
                 )
-                _raise_for_status(resp, "GitHub")
+                raise_for_status(resp, "GitHub")
         except httpx.HTTPError as exc:
             raise IntegrationError(
                 transport_error_message(exc, "GitHub", API_BASE)
@@ -95,12 +96,3 @@ class GitHubClient:
             title=title,
             description=body,
         )
-
-
-def _raise_for_status(resp: httpx.Response, provider: str) -> None:
-    if resp.is_success:
-        return
-    detail = resp.text[:300] if resp.text else ""
-    raise IntegrationError(
-        f"{provider} returned {resp.status_code} {resp.reason_phrase}. {detail}".strip()
-    )

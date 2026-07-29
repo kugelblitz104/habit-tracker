@@ -1,7 +1,4 @@
-from typing import Union
-
 from dotenv import load_dotenv
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -14,9 +11,8 @@ class Settings(BaseSettings):
     # for local development only
     secret_key: str = "secretsecretsecret"
 
-    cors_origins: Union[list[str], str] = ["http://localhost:3000"]
-    host: str = "0.0.0.0"
-    port: int = 8080
+    # cors_origins lived here but was never read; main.py reads CORS_ORIGINS
+    # from the environment directly via os.getenv(). Don't re-add it here.
 
     # extra="ignore": the shared .env also holds tooling vars that aren't app
     # settings (e.g. ZSCALER_CA_PATH for the Docker build/compose), so ignore
@@ -53,14 +49,6 @@ class Settings(BaseSettings):
     # so users would re-enter them). Generate a dedicated key with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     integration_encryption_key: str = ""
-
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str):
-            # Handle comma-separated string
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return v
 
 
 settings = Settings()

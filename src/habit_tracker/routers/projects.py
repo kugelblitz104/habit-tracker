@@ -3,27 +3,25 @@ from typing import Annotated, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TaskStatus
 from habit_tracker.core.dependencies import (
-    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
 )
+from habit_tracker.core.http import bulk_delete_in_profile, integrity_conflict
 from habit_tracker.models import (
-    Profile,
-    Project,
     ProjectCreate,
     ProjectList,
     ProjectRead,
     ProjectUpdate,
-    Task,
 )
-from habit_tracker.schemas.db_models import User
+from habit_tracker.schemas.db_models import Profile, Project, Task, User
 
 router = APIRouter(
     prefix="/projects", tags=["projects"], responses={404: {"description": "Not found"}}
@@ -80,15 +78,14 @@ async def _get_project_and_profile(
 ) -> tuple[Project, Profile]:
     """Fetch a project by ID (404 if missing) and authorize the caller against
     the owning profile. Returns the project with its (FK-guaranteed) profile."""
-    project = await db.get(Project, project_id)
-    if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
-        )
-    profile = await authorize_parent_profile(
-        db, project.profile_id, current_user, "project"
+    return await get_owned_child(
+        db,
+        Project,
+        project_id,
+        current_user,
+        not_found_detail="Project not found",
+        resource_name="project",
     )
-    return project, profile
 
 
 @router.get("/", summary="List projects for a profile")
@@ -233,10 +230,7 @@ async def patch_project(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Project change violates a database constraint",
-        )
+        raise integrity_conflict("Project change violates a database constraint")
     await db.refresh(db_project)
 
     counts = await _get_task_counts(db, [db_project.id])
@@ -258,22 +252,13 @@ async def delete_all_projects(
     NOT deleted - they are kept and their project association is cleared
     (the DB sets task.project_id to NULL).
     """
-    await get_owned_profile(db, profile_id, current_user, "project")
-
-    count = (
-        await db.execute(
-            select(func.count())
-            .select_from(Project)
-            .filter(Project.profile_id == profile_id)
-        )
-    ).scalar() or 0
-    await db.execute(delete(Project).where(Project.profile_id == profile_id))
-    await db.commit()
-    return JSONResponse(
-        content={
-            "detail": f"Deleted {count} projects; their tasks were kept and unassigned",
-            "deleted": count,
-        }
+    return await bulk_delete_in_profile(
+        db,
+        Project,
+        profile_id,
+        current_user,
+        resource_name="project",
+        detail="Deleted {count} projects; their tasks were kept and unassigned",
     )
 
 

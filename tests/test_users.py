@@ -13,18 +13,13 @@ from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, User
 class TestGetUser:
     """Tests for GET /users/{user_id} endpoint."""
 
-    async def test_get_own_user(self, client, db_session, setup_factories):
+    async def test_get_own_user(self, client, db_session, login_as):
         """User can retrieve their own profile."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}")
         assert response.status_code == 200
@@ -33,37 +28,27 @@ class TestGetUser:
         assert data["username"] == user.username
         assert data["email"] == user.email
 
-    async def test_get_other_user_as_regular(self, client, db_session, setup_factories):
+    async def test_get_other_user_as_regular(self, client, db_session, login_as):
         """Regular user cannot access other user profiles (403)."""
         user1 = UserFactory()
         user2 = UserFactory()
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Try to access user2's profile
         response = await client.get(f"/users/{user2.id}")
         assert response.status_code == 403
 
-    async def test_get_other_user_as_admin(self, client, db_session, setup_factories):
+    async def test_get_other_user_as_admin(self, client, db_session, login_as):
         """Admin can access any user profile."""
         admin = AdminUserFactory()
         regular_user = UserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         # Access regular user's profile
         response = await client.get(f"/users/{regular_user.id}")
@@ -71,23 +56,18 @@ class TestGetUser:
         data = response.json()
         assert data["id"] == regular_user.id
 
-    async def test_get_nonexistent_user(self, client, db_session, setup_factories):
+    async def test_get_nonexistent_user(self, client, db_session, login_as):
         """Return 404 for non-existent user."""
         admin = AdminUserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get("/users/99999")
         assert response.status_code == 404
 
-    async def test_get_user_without_auth(self, client, db_session, setup_factories):
+    async def test_get_user_without_auth(self, client, db_session):
         """Reject request without authentication token (401)."""
         user = UserFactory()
         await db_session.commit()
@@ -100,7 +80,7 @@ class TestListUsers:
     """Tests for GET /users/ endpoint."""
 
     async def test_list_users_as_regular_user(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Regular user sees only themselves."""
         user1 = UserFactory()
@@ -108,12 +88,7 @@ class TestListUsers:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.get("/users/")
         assert response.status_code == 200
@@ -122,7 +97,7 @@ class TestListUsers:
         assert len(data["users"]) == 1
         assert data["users"][0]["id"] == user1.id
 
-    async def test_list_users_as_admin(self, client, db_session, setup_factories):
+    async def test_list_users_as_admin(self, client, db_session, login_as):
         """Admin sees all users."""
         admin = AdminUserFactory()
         UserFactory()
@@ -130,19 +105,14 @@ class TestListUsers:
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get("/users/")
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 3  # admin + 2 users
 
-    async def test_list_users_pagination(self, client, db_session, setup_factories):
+    async def test_list_users_pagination(self, client, db_session, login_as):
         """Verify pagination with limit parameter."""
         admin = AdminUserFactory()
         for _ in range(10):
@@ -150,12 +120,7 @@ class TestListUsers:
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get("/users/?limit=3")
         assert response.status_code == 200
@@ -164,7 +129,7 @@ class TestListUsers:
         assert data["total"] == 11  # admin + 10 users
         assert data["limit"] == 3
 
-    async def test_list_users_default_limit(self, client, db_session, setup_factories):
+    async def test_list_users_default_limit(self, client, db_session, login_as):
         """Verify default limit of 5."""
         admin = AdminUserFactory()
         for _ in range(10):
@@ -172,12 +137,7 @@ class TestListUsers:
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get("/users/")
         assert response.status_code == 200
@@ -185,25 +145,20 @@ class TestListUsers:
         assert data["limit"] == 5
         assert len(data["users"]) == 5
 
-    async def test_list_users_max_limit(self, client, db_session, setup_factories):
+    async def test_list_users_max_limit(self, client, db_session, login_as):
         """Verify max limit of 100."""
         admin = AdminUserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         # Requesting beyond max should be rejected
         response = await client.get("/users/?limit=101")
         assert response.status_code == 422  # Validation error
 
     async def test_list_users_returns_total_count(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify total count in response."""
         admin = AdminUserFactory()
@@ -212,12 +167,7 @@ class TestListUsers:
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get("/users/?limit=3")
         assert response.status_code == 200
@@ -229,18 +179,13 @@ class TestListUsers:
 class TestUpdateUserPut:
     """Tests for PUT /users/{user_id} endpoint."""
 
-    async def test_update_own_user_put(self, client, db_session, setup_factories):
+    async def test_update_own_user_put(self, client, db_session, login_as):
         """User can update their own profile (full update)."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/users/{user.id}",
@@ -260,7 +205,7 @@ class TestUpdateUserPut:
         assert data["email"] == "updated@example.com"
 
     async def test_update_other_user_as_regular_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Regular user cannot update other profiles (403)."""
         user1 = UserFactory()
@@ -268,12 +213,7 @@ class TestUpdateUserPut:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Try to update user2's profile
         response = await client.put(
@@ -288,19 +228,14 @@ class TestUpdateUserPut:
         )
         assert response.status_code == 403
 
-    async def test_update_user_as_admin_put(self, client, db_session, setup_factories):
+    async def test_update_user_as_admin_put(self, client, db_session, login_as):
         """Admin can update any user profile."""
         admin = AdminUserFactory()
         user = UserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.put(
             f"/users/{user.id}",
@@ -317,7 +252,7 @@ class TestUpdateUserPut:
         assert data["username"] == "adminupdated"
 
     async def test_update_user_all_fields_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify all fields are updated."""
         user = UserFactory(
@@ -329,12 +264,7 @@ class TestUpdateUserPut:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.put(
             f"/users/{user.id}",
@@ -354,19 +284,14 @@ class TestUpdateUserPut:
         assert data["email"] == "new@example.com"
 
     async def test_update_nonexistent_user_put(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for non-existent user."""
         admin = AdminUserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.put(
             "/users/99999",
@@ -380,18 +305,13 @@ class TestUpdateUserPut:
         )
         assert response.status_code == 404
 
-    async def test_update_user_password(self, client, db_session, setup_factories):
+    async def test_update_user_password(self, client, db_session, login_as):
         """Verify password is updated correctly."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         new_password = "updatedpassword789"
         response = await client.put(
@@ -417,18 +337,13 @@ class TestUpdateUserPut:
 class TestUpdateUserPatch:
     """Tests for PATCH /users/{user_id} endpoint."""
 
-    async def test_update_own_user_patch(self, client, db_session, setup_factories):
+    async def test_update_own_user_patch(self, client, db_session, login_as):
         """User can partially update their profile."""
         user = UserFactory(username="patchuser", first_name="Original")
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -440,7 +355,7 @@ class TestUpdateUserPatch:
         assert data["username"] == "patchuser"  # Unchanged
 
     async def test_update_user_single_field_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update only one field."""
         user = UserFactory()
@@ -448,12 +363,7 @@ class TestUpdateUserPatch:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -465,19 +375,14 @@ class TestUpdateUserPatch:
         assert data["username"] == original_username
 
     async def test_update_user_multiple_fields_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update multiple fields."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -489,19 +394,14 @@ class TestUpdateUserPatch:
         assert data["last_name"] == "Update"
 
     async def test_update_user_username_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Update username."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -511,18 +411,13 @@ class TestUpdateUserPatch:
         data = response.json()
         assert data["username"] == "newusernamepatched"
 
-    async def test_update_user_email_patch(self, client, db_session, setup_factories):
+    async def test_update_user_email_patch(self, client, db_session, login_as):
         """Update email."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -532,18 +427,13 @@ class TestUpdateUserPatch:
         data = response.json()
         assert data["email"] == "newemail@example.com"
 
-    async def test_update_user_names_patch(self, client, db_session, setup_factories):
+    async def test_update_user_names_patch(self, client, db_session, login_as):
         """Update first and last name."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -555,19 +445,14 @@ class TestUpdateUserPatch:
         assert data["last_name"] == "NewLast"
 
     async def test_update_user_password_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify password can be updated via PATCH."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         new_password = "newpatchpassword789"
         response = await client.patch(
@@ -584,7 +469,7 @@ class TestUpdateUserPatch:
         assert login_response.status_code == 200
 
     async def test_update_other_user_as_regular_patch(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Regular user cannot update others (403)."""
         user1 = UserFactory()
@@ -592,12 +477,7 @@ class TestUpdateUserPatch:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Try to update user2
         response = await client.patch(
@@ -610,19 +490,14 @@ class TestUpdateUserPatch:
 class TestDeleteUser:
     """Tests for DELETE /users/{user_id} endpoint."""
 
-    async def test_delete_own_user(self, client, db_session, setup_factories):
+    async def test_delete_own_user(self, client, db_session, login_as):
         """User can delete their own account."""
         user = UserFactory()
         await db_session.commit()
         user_id = user.id
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete(f"/users/{user_id}")
         assert response.status_code == 200
@@ -632,7 +507,7 @@ class TestDeleteUser:
         assert result.scalar_one_or_none() is None
 
     async def test_delete_other_user_as_regular(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Regular user cannot delete other accounts (403)."""
         user1 = UserFactory()
@@ -640,18 +515,13 @@ class TestDeleteUser:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Try to delete user2
         response = await client.delete(f"/users/{user2.id}")
         assert response.status_code == 403
 
-    async def test_delete_user_as_admin(self, client, db_session, setup_factories):
+    async def test_delete_user_as_admin(self, client, db_session, login_as):
         """Admin can delete any user account."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -659,12 +529,7 @@ class TestDeleteUser:
         user_id = user.id
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.delete(f"/users/{user_id}")
         assert response.status_code == 200
@@ -673,24 +538,19 @@ class TestDeleteUser:
         result = await db_session.execute(select(User).filter(User.id == user_id))
         assert result.scalar_one_or_none() is None
 
-    async def test_delete_nonexistent_user(self, client, db_session, setup_factories):
+    async def test_delete_nonexistent_user(self, client, db_session, login_as):
         """Return 404 for non-existent user."""
         admin = AdminUserFactory()
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.delete("/users/99999")
         assert response.status_code == 404
 
     async def test_delete_user_cascades_to_habits(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify habits are deleted with user."""
         user = UserFactory()
@@ -702,12 +562,7 @@ class TestDeleteUser:
         habit_id = habit.id
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete(f"/users/{user_id}")
         assert response.status_code == 200
@@ -717,7 +572,7 @@ class TestDeleteUser:
         assert result.scalar_one_or_none() is None
 
     async def test_delete_user_cascades_to_trackers(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify trackers are deleted with user."""
         user = UserFactory()
@@ -732,12 +587,7 @@ class TestDeleteUser:
         tracker_id = tracker.id
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.delete(f"/users/{user_id}")
         assert response.status_code == 200
@@ -752,7 +602,7 @@ class TestDeleteUser:
 class TestListUserHabits:
     """Tests for GET /users/{user_id}/habits endpoint."""
 
-    async def test_list_own_habits(self, client, db_session, setup_factories):
+    async def test_list_own_habits(self, client, db_session, login_as):
         """User can list their own habits."""
         user = UserFactory()
         await db_session.commit()
@@ -762,12 +612,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits")
         assert response.status_code == 200
@@ -776,7 +621,7 @@ class TestListUserHabits:
         assert len(data["habits"]) == 2
 
     async def test_list_other_user_habits_as_regular(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Regular user cannot list others' habits (403)."""
         user1 = UserFactory()
@@ -787,18 +632,13 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login as user1
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Try to list user2's habits
         response = await client.get(f"/users/{user2.id}/habits")
         assert response.status_code == 403
 
-    async def test_list_user_habits_as_admin(self, client, db_session, setup_factories):
+    async def test_list_user_habits_as_admin(self, client, db_session, login_as):
         """Admin can list any user's habits."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -808,12 +648,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login as admin
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get(f"/users/{user.id}/habits")
         assert response.status_code == 200
@@ -821,7 +656,7 @@ class TestListUserHabits:
         assert data["total"] == 1
 
     async def test_list_user_habits_pagination(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify pagination with limit parameter."""
         user = UserFactory()
@@ -832,12 +667,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits?limit=3")
         assert response.status_code == 200
@@ -847,7 +677,7 @@ class TestListUserHabits:
         assert data["limit"] == 3
 
     async def test_list_user_habits_includes_today_status(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify completed_today and skipped_today fields."""
         from datetime import date
@@ -868,12 +698,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits")
         assert response.status_code == 200
@@ -891,7 +716,7 @@ class TestListUserHabits:
         assert habits_by_name["No Tracker Habit"]["skipped_today"] is False
 
     async def test_list_user_habits_today_status_honors_tz(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """completed_today is computed against "today" in the requested zone.
 
@@ -913,12 +738,7 @@ class TestListUserHabits:
         )
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(
             f"/users/{user.id}/habits", params={"tz": tz_name}
@@ -933,18 +753,13 @@ class TestListUserHabits:
         assert response.json()["habits"][0]["completed_today"] is False
 
     async def test_list_user_habits_invalid_tz(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid tz name is rejected with 422, not a server error."""
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(
             f"/users/{user.id}/habits", params={"tz": "Not/AZone"}
@@ -953,7 +768,7 @@ class TestListUserHabits:
         assert "Invalid timezone" in response.json()["detail"]
 
     async def test_list_user_habits_returns_total_count(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Verify total count in response."""
         user = UserFactory()
@@ -964,12 +779,7 @@ class TestListUserHabits:
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits?limit=3")
         assert response.status_code == 200
@@ -977,18 +787,13 @@ class TestListUserHabits:
         assert data["total"] == 8
         assert len(data["habits"]) == 3
 
-    async def test_list_user_habits_empty(self, client, db_session, setup_factories):
+    async def test_list_user_habits_empty(self, client, db_session, login_as):
         """Return empty list for user with no habits."""
         user = UserFactory()
         await db_session.commit()
 
         # Login
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits")
         assert response.status_code == 200

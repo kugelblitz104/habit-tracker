@@ -27,18 +27,14 @@ Two things are deliberately NOT round-tripped:
 from datetime import date, datetime, time
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
+
+from habit_tracker.models._base import _FromORM
 
 # Bump VERSION on any breaking change to the document shape; FORMAT lets the
 # importer reject an unrelated JSON file with a clear message.
 BACKUP_FORMAT = "habit-tracker-profile-backup"
 BACKUP_VERSION = 1
-
-
-class _FromORM(BaseModel):
-    """Base that reads straight off SQLAlchemy ORM attributes."""
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 class ProfileSettings(_FromORM):

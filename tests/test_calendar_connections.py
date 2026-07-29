@@ -5,123 +5,44 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from habit_tracker.main import app
 from habit_tracker.schemas.db_models import CalendarConnection
-from habit_tracker.services.calendar_events import get_ics_fetcher
 from tests.factories import (
     CalendarConnectionFactory,
     ProfileFactory,
     UserFactory,
 )
-
-
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-
+from tests.fixtures_ics import CANNED_ICS, FakeFetcher, override_fetcher
 
 # A fixed, deterministic day: 2026-07-09 is a Thursday
 TARGET_DATE = date(2026, 7, 9)
-
-# Canned feed containing, relative to TARGET_DATE:
-# - a timed event that day (14:00-15:00 New York)
-# - an all-day event that day
-# - a weekly Thursday RRULE event whose expansion lands that day (09:00)
-# - a timed event the NEXT day (must not appear)
-CANNED_ICS = """BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Test//Test//EN
-BEGIN:VEVENT
-UID:timed-1
-DTSTART;TZID=America/New_York:20260709T140000
-DTEND;TZID=America/New_York:20260709T150000
-SUMMARY:Timed meeting
-LOCATION:Room 4
-END:VEVENT
-BEGIN:VEVENT
-UID:allday-1
-DTSTART;VALUE=DATE:20260709
-DTEND;VALUE=DATE:20260710
-SUMMARY:All day thing
-END:VEVENT
-BEGIN:VEVENT
-UID:weekly-1
-DTSTART;TZID=America/New_York:20260702T090000
-DTEND;TZID=America/New_York:20260702T093000
-RRULE:FREQ=WEEKLY;BYDAY=TH
-SUMMARY:Weekly standup
-END:VEVENT
-BEGIN:VEVENT
-UID:other-day
-DTSTART;TZID=America/New_York:20260710T100000
-DTEND;TZID=America/New_York:20260710T110000
-SUMMARY:Tomorrow only
-END:VEVENT
-END:VCALENDAR
-"""
-
-
-class FakeFetcher:
-    """Canned ICS fetcher that counts calls (dependency override target)."""
-
-    def __init__(self, status_code=200, body=CANNED_ICS, etag='"v1"', exc=None):
-        self.status_code = status_code
-        self.body = body
-        self.etag = etag
-        self.exc = exc
-        self.calls = 0
-        self.urls: list[str] = []
-
-    async def __call__(self, url, etag):
-        self.calls += 1
-        self.urls.append(url)
-        if self.exc is not None:
-            raise self.exc
-        if self.status_code == 304:
-            return 304, None, etag
-        return self.status_code, self.body, self.etag
-
-
-def override_fetcher(fetcher):
-    """Route the events endpoint's ICS fetches to the given fake.
-
-    The client fixture clears app.dependency_overrides at teardown, so this
-    never leaks into other tests.
-    """
-    app.dependency_overrides[get_ics_fetcher] = lambda: fetcher
 
 
 class TestListCalendarConnections:
     """Tests for GET /calendar-connections/ endpoint."""
 
-    async def test_list_requires_profile_id(self, client, db_session, setup_factories):
+    async def test_list_requires_profile_id(self, client, db_session, login_as):
         """profile_id query parameter is required (422 if missing)."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/calendar-connections/")
         assert response.status_code == 422
 
-    async def test_list_unknown_profile(self, client, db_session, setup_factories):
+    async def test_list_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/", params={"profile_id": 99999}
         )
         assert response.status_code == 404
 
-    async def test_list_foreign_profile(self, client, db_session, setup_factories):
+    async def test_list_foreign_profile(self, client, db_session, login_as):
         """Cannot list connections of another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -130,14 +51,14 @@ class TestListCalendarConnections:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/", params={"profile_id": foreign.id}
         )
         assert response.status_code == 403
 
-    async def test_list_scoped_to_profile(self, client, db_session, setup_factories):
+    async def test_list_scoped_to_profile(self, client, db_session, login_as):
         """Only connections of the requested profile are returned."""
         user = UserFactory()
         await db_session.commit()
@@ -151,7 +72,7 @@ class TestListCalendarConnections:
         CalendarConnectionFactory(profile=other_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/", params={"profile_id": profile.id}
@@ -163,7 +84,7 @@ class TestListCalendarConnections:
         assert ids == {conn1.id, conn2.id}
 
     async def test_list_does_not_expose_cache_internals(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """cached_ics and etag are internal and never serialized."""
         user = UserFactory()
@@ -177,7 +98,7 @@ class TestListCalendarConnections:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/", params={"profile_id": profile.id}
@@ -191,7 +112,7 @@ class TestListCalendarConnections:
 class TestCreateCalendarConnection:
     """Tests for POST /calendar-connections/ endpoint."""
 
-    async def test_create_connection_basic(self, client, db_session, setup_factories):
+    async def test_create_connection_basic(self, client, db_session, login_as):
         """Create a connection and get its fields echoed back."""
         user = UserFactory()
         await db_session.commit()
@@ -199,7 +120,7 @@ class TestCreateCalendarConnection:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -223,7 +144,7 @@ class TestCreateCalendarConnection:
         assert data["last_error"] is None
 
     async def test_create_connection_webcal_url_normalized(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """webcal:// subscription links (Proton/Apple style) are rewritten to https://."""
         user = UserFactory()
@@ -232,7 +153,7 @@ class TestCreateCalendarConnection:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -254,7 +175,7 @@ class TestCreateCalendarConnection:
         )
 
     async def test_patch_connection_webcal_url_normalized(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """PATCHing a webcal:// url stores the https:// form."""
         user = UserFactory()
@@ -264,7 +185,7 @@ class TestCreateCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}",
@@ -274,7 +195,7 @@ class TestCreateCalendarConnection:
         assert response.json()["url"] == "https://example.com/feed.ics"
 
     async def test_create_connection_foreign_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Cannot create a connection in another user's profile (403)."""
         user = UserFactory()
@@ -284,7 +205,7 @@ class TestCreateCalendarConnection:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -298,13 +219,13 @@ class TestCreateCalendarConnection:
         assert response.status_code == 403
 
     async def test_create_connection_unknown_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -318,7 +239,7 @@ class TestCreateCalendarConnection:
         assert response.status_code == 404
 
     async def test_create_connection_invalid_url(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A URL that is not http(s)/webcal is rejected (422)."""
         user = UserFactory()
@@ -327,7 +248,7 @@ class TestCreateCalendarConnection:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -341,7 +262,7 @@ class TestCreateCalendarConnection:
         assert response.status_code == 422
 
     async def test_create_connection_invalid_color(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid color is rejected (422)."""
         user = UserFactory()
@@ -350,7 +271,7 @@ class TestCreateCalendarConnection:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/calendar-connections/",
@@ -367,7 +288,7 @@ class TestCreateCalendarConnection:
 class TestGetCalendarConnection:
     """Tests for GET /calendar-connections/{connection_id} endpoint."""
 
-    async def test_get_connection(self, client, db_session, setup_factories):
+    async def test_get_connection(self, client, db_session, login_as):
         """Retrieve a connection by its ID."""
         user = UserFactory()
         await db_session.commit()
@@ -378,7 +299,7 @@ class TestGetCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile, name="Work")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/calendar-connections/{connection.id}")
         assert response.status_code == 200
@@ -387,19 +308,19 @@ class TestGetCalendarConnection:
         assert data["name"] == "Work"
 
     async def test_get_nonexistent_connection(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for non-existent connection."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/calendar-connections/99999")
         assert response.status_code == 404
 
     async def test_get_other_user_connection(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User cannot access a connection in another user's profile (403)."""
         user = UserFactory()
@@ -412,7 +333,7 @@ class TestGetCalendarConnection:
         connection = CalendarConnectionFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/calendar-connections/{connection.id}")
         assert response.status_code == 403
@@ -421,7 +342,7 @@ class TestGetCalendarConnection:
 class TestPatchCalendarConnection:
     """Tests for PATCH /calendar-connections/{connection_id} endpoint."""
 
-    async def test_patch_connection_rename(self, client, db_session, setup_factories):
+    async def test_patch_connection_rename(self, client, db_session, login_as):
         """Rename a connection; updated_date is stamped."""
         user = UserFactory()
         await db_session.commit()
@@ -432,7 +353,7 @@ class TestPatchCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile, name="Old Name")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}", json={"name": "New Name"}
@@ -442,7 +363,7 @@ class TestPatchCalendarConnection:
         assert data["name"] == "New Name"
         assert data["updated_date"] is not None
 
-    async def test_patch_connection_disable(self, client, db_session, setup_factories):
+    async def test_patch_connection_disable(self, client, db_session, login_as):
         """Disable a connection."""
         user = UserFactory()
         await db_session.commit()
@@ -453,7 +374,7 @@ class TestPatchCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile, enabled=True)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}", json={"enabled": False}
@@ -462,7 +383,7 @@ class TestPatchCalendarConnection:
         assert response.json()["enabled"] is False
 
     async def test_patch_url_change_clears_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Changing the URL clears cached_ics/etag/last_fetched_at/last_error."""
         user = UserFactory()
@@ -480,7 +401,7 @@ class TestPatchCalendarConnection:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}",
@@ -496,7 +417,7 @@ class TestPatchCalendarConnection:
         assert connection.last_error is None
 
     async def test_patch_same_url_keeps_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Re-sending the same URL does not throw the cache away."""
         user = UserFactory()
@@ -514,7 +435,7 @@ class TestPatchCalendarConnection:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}",
@@ -527,7 +448,7 @@ class TestPatchCalendarConnection:
         assert connection.etag == '"v1"'
 
     async def test_patch_connection_null_name(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An explicit null for the non-nullable name is rejected (422)."""
         user = UserFactory()
@@ -539,7 +460,7 @@ class TestPatchCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}", json={"name": None}
@@ -547,7 +468,7 @@ class TestPatchCalendarConnection:
         assert response.status_code == 422
 
     async def test_patch_other_user_connection(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User cannot patch a connection in another user's profile (403)."""
         user = UserFactory()
@@ -560,7 +481,7 @@ class TestPatchCalendarConnection:
         connection = CalendarConnectionFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/calendar-connections/{connection.id}", json={"name": "Hijacked"}
@@ -571,7 +492,7 @@ class TestPatchCalendarConnection:
 class TestDeleteCalendarConnection:
     """Tests for DELETE /calendar-connections/{connection_id} endpoint."""
 
-    async def test_delete_connection(self, client, db_session, setup_factories):
+    async def test_delete_connection(self, client, db_session, login_as):
         """Delete a connection by its ID."""
         user = UserFactory()
         await db_session.commit()
@@ -582,7 +503,7 @@ class TestDeleteCalendarConnection:
         connection = CalendarConnectionFactory(profile=profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/calendar-connections/{connection.id}")
         assert response.status_code == 200
@@ -595,7 +516,7 @@ class TestDeleteCalendarConnection:
         assert result.scalar_one_or_none() is None
 
     async def test_delete_other_user_connection(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User cannot delete a connection in another user's profile (403)."""
         user = UserFactory()
@@ -608,19 +529,19 @@ class TestDeleteCalendarConnection:
         connection = CalendarConnectionFactory(profile=foreign_profile)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/calendar-connections/{connection.id}")
         assert response.status_code == 403
 
     async def test_delete_nonexistent_connection(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Return 404 for non-existent connection."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete("/calendar-connections/99999")
         assert response.status_code == 404
@@ -630,7 +551,7 @@ class TestCalendarEvents:
     """Tests for GET /calendar-connections/events endpoint."""
 
     async def test_events_normalized_and_ordered(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Events are normalized, recurrence-expanded, all-day first, then by
         start; events on other days are excluded."""
@@ -648,7 +569,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher()
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -678,7 +599,7 @@ class TestCalendarEvents:
         assert timed["location"] == "Room 4"
 
     async def test_events_default_date_is_today(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Without target_date the endpoint returns today's events."""
         user = UserFactory()
@@ -700,7 +621,7 @@ class TestCalendarEvents:
         )
         override_fetcher(FakeFetcher(body=ics_today))
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events", params={"profile_id": profile.id}
@@ -710,20 +631,20 @@ class TestCalendarEvents:
         assert data["date"] == today.isoformat()
         assert [e["title"] for e in data["events"]] == ["Today marker"]
 
-    async def test_events_unknown_profile(self, client, db_session, setup_factories):
+    async def test_events_unknown_profile(self, client, db_session, login_as):
         """Return 404 for a non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
         override_fetcher(FakeFetcher())
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events", params={"profile_id": 99999}
         )
         assert response.status_code == 404
 
-    async def test_events_foreign_profile(self, client, db_session, setup_factories):
+    async def test_events_foreign_profile(self, client, db_session, login_as):
         """Cannot read another user's calendar events (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -733,7 +654,7 @@ class TestCalendarEvents:
         await db_session.commit()
 
         override_fetcher(FakeFetcher())
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events", params={"profile_id": foreign.id}
@@ -741,7 +662,7 @@ class TestCalendarEvents:
         assert response.status_code == 403
 
     async def test_events_skips_disabled_connections(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Disabled connections are neither fetched nor included."""
         user = UserFactory()
@@ -757,7 +678,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher()
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -770,7 +691,7 @@ class TestCalendarEvents:
         assert {e["connection_id"] for e in data["events"]} == {enabled.id}
 
     async def test_events_cache_hit_within_ttl(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Two events calls within the TTL fetch the feed exactly once."""
         user = UserFactory()
@@ -785,7 +706,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher()
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         params = {"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()}
         first = await client.get("/calendar-connections/events", params=params)
@@ -805,7 +726,7 @@ class TestCalendarEvents:
         assert connection.last_error is None
 
     async def test_events_fetch_exception_serves_stale_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A raising fetcher keeps the stale cache serving events, reports the
         failure in errors, persists last_error and records the attempt time
@@ -827,7 +748,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher(exc=RuntimeError("connection refused")))
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -847,7 +768,7 @@ class TestCalendarEvents:
         assert connection.last_fetched_at > stale  # attempt time recorded
 
     async def test_events_failure_backoff(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A failed feed is not re-attempted within the 5-minute error TTL
         (stale cache still served), but IS re-attempted once the backoff has
@@ -870,7 +791,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher(exc=RuntimeError("connection refused"))
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         params = {"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()}
 
@@ -898,7 +819,7 @@ class TestCalendarEvents:
         assert fetcher.calls == 2  # error TTL elapsed -> re-fetched
 
     async def test_events_http_error_serves_stale_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A non-2xx response keeps the stale cache and reports 'Name: HTTP n'."""
         user = UserFactory()
@@ -918,7 +839,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher(status_code=404, body="not found"))
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -935,7 +856,7 @@ class TestCalendarEvents:
         assert connection.last_fetched_at > stale  # attempt time recorded
 
     async def test_events_unparseable_200_keeps_good_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A 200 response with a non-ICS body (e.g. an HTML maintenance page)
         must not clobber a good cache: events keep coming from the stale
@@ -959,7 +880,7 @@ class TestCalendarEvents:
             FakeFetcher(body="<html><body>Down for maintenance</body></html>")
         )
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -977,7 +898,7 @@ class TestCalendarEvents:
         assert connection.last_fetched_at > stale  # attempt time recorded
 
     async def test_events_oversized_feed_keeps_stale_cache(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A feed body over 5 MB is treated as a fetch failure: stale cache
         kept and served, 'feed too large' recorded."""
@@ -999,7 +920,7 @@ class TestCalendarEvents:
         oversized = "X" * (5 * 1024 * 1024 + 1)
         override_fetcher(FakeFetcher(body=oversized))
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1015,7 +936,7 @@ class TestCalendarEvents:
         assert connection.last_error == "feed too large"
 
     async def test_events_304_keeps_cache_and_bumps_timestamp(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """304 Not Modified keeps the cached body and bumps last_fetched_at."""
         user = UserFactory()
@@ -1036,7 +957,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher(status_code=304)
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1056,7 +977,7 @@ class TestCalendarEvents:
         assert connection.last_error is None
 
     async def test_events_malformed_feed_reports_error(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A malformed feed becomes a connection-level error, not a 500."""
         user = UserFactory()
@@ -1070,7 +991,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher(body="this is not an ICS feed"))
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1083,7 +1004,7 @@ class TestCalendarEvents:
         assert data["errors"][0].startswith("Broken:")
 
     async def test_events_tz_day_boundaries(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A UTC-encoded evening event (2026-07-10T01:00Z == 2026-07-09 21:00
         in New York) belongs to 2026-07-09 when tz=America/New_York, but not
@@ -1105,7 +1026,7 @@ class TestCalendarEvents:
         )
         override_fetcher(FakeFetcher(body=utc_evening_ics))
 
-        await login_as(client, user)
+        await login_as(user)
 
         base = {"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()}
 
@@ -1130,7 +1051,7 @@ class TestCalendarEvents:
         assert response.json()["events"] == []
 
     async def test_events_tz_all_day_events_match_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """All-day events still land on the right date when tz is passed."""
         user = UserFactory()
@@ -1144,7 +1065,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher())
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1164,7 +1085,7 @@ class TestCalendarEvents:
         assert all_day["all_day"] is True
 
     async def test_events_invalid_tz_rejected(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An invalid IANA timezone name is rejected with 422."""
         user = UserFactory()
@@ -1174,7 +1095,7 @@ class TestCalendarEvents:
         await db_session.commit()
 
         override_fetcher(FakeFetcher())
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1184,7 +1105,7 @@ class TestCalendarEvents:
         assert "Invalid timezone" in response.json()["detail"]
 
     async def test_events_default_date_uses_tz_today(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Without target_date, 'today' is computed in the requested zone,
         not server-local time."""
@@ -1198,7 +1119,7 @@ class TestCalendarEvents:
         await db_session.commit()
 
         override_fetcher(FakeFetcher())
-        await login_as(client, user)
+        await login_as(user)
 
         # UTC+14: the zone most likely to differ from server-local today
         zone_name = "Pacific/Kiritimati"
@@ -1213,7 +1134,7 @@ class TestCalendarEvents:
         # Tolerate a midnight rollover between the two datetime.now() calls
         assert response.json()["date"] in {before.isoformat(), after.isoformat()}
 
-    async def test_events_no_connections(self, client, db_session, setup_factories):
+    async def test_events_no_connections(self, client, db_session, login_as):
         """A profile without connections gets an empty, error-free response."""
         user = UserFactory()
         await db_session.commit()
@@ -1224,7 +1145,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher()
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events", params={"profile_id": profile.id}
@@ -1236,7 +1157,7 @@ class TestCalendarEvents:
         assert fetcher.calls == 0
 
     async def test_events_multi_day_window(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """days=2 returns both days' events, each stamped with the event_date
         it belongs to, ordered by (event_date, all-day first, start); the feed
@@ -1253,7 +1174,7 @@ class TestCalendarEvents:
         fetcher = FakeFetcher()
         override_fetcher(fetcher)
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",
@@ -1277,7 +1198,7 @@ class TestCalendarEvents:
         ]
 
     async def test_events_multi_day_recurring_no_duplicates(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A weekly RRULE event expands to one occurrence per matching day of
         the window - never duplicated within a day."""
@@ -1292,7 +1213,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher())
 
-        await login_as(client, user)
+        await login_as(user)
 
         # 8-day window 2026-07-09..2026-07-16 covers exactly two Thursdays
         response = await client.get(
@@ -1317,7 +1238,7 @@ class TestCalendarEvents:
         assert titles.count("Timed meeting") == 1
         assert titles.count("Tomorrow only") == 1
 
-    async def test_events_days_bounds(self, client, db_session, setup_factories):
+    async def test_events_days_bounds(self, client, db_session, login_as):
         """days outside 1..14 is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -1326,7 +1247,7 @@ class TestCalendarEvents:
         await db_session.commit()
 
         override_fetcher(FakeFetcher())
-        await login_as(client, user)
+        await login_as(user)
 
         base = {"profile_id": profile.id, "target_date": TARGET_DATE.isoformat()}
 
@@ -1341,7 +1262,7 @@ class TestCalendarEvents:
         assert response.status_code == 422
 
     async def test_events_default_days_single_day(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Without days the endpoint returns exactly the single-day events as
         before, each stamped with event_date == target_date."""
@@ -1356,7 +1277,7 @@ class TestCalendarEvents:
 
         override_fetcher(FakeFetcher())
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             "/calendar-connections/events",

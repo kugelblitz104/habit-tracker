@@ -1,8 +1,36 @@
-import re
-from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, overload
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
+
+from habit_tracker.constants import DefaultLanding
+from habit_tracker.models._base import _StampedRead
+from habit_tracker.models._validators import (
+    min_value_int,
+    non_blank_string,
+    reject_null,
+    validate_hex_color,
+    validate_membership,
+)
+
+_DEFAULT_LANDING_VALUES = tuple(d.value for d in DefaultLanding)
+
+
+@overload
+def _validate_pomodoro(v: int) -> int: ...
+@overload
+def _validate_pomodoro(v: None) -> None: ...
+def _validate_pomodoro(v: Optional[int]) -> Optional[int]:
+    return min_value_int(v, 1, "Pomodoro settings")
+
+
+@overload
+def _validate_default_landing(v: str) -> str: ...
+@overload
+def _validate_default_landing(v: None) -> None: ...
+def _validate_default_landing(v: Optional[str]) -> Optional[str]:
+    return validate_membership(
+        v, _DEFAULT_LANDING_VALUES, "Default landing must be 'today' or 'habits'"
+    )
 
 
 # Profile Schemas
@@ -27,9 +55,7 @@ class ProfileBase(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator(
         "pomodoro_work_minutes",
@@ -39,35 +65,25 @@ class ProfileBase(BaseModel):
     )
     @classmethod
     def validate_pomodoro(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("Pomodoro settings must be at least 1")
-        return v
+        return _validate_pomodoro(v)
 
     @field_validator("color_start", "color_end")
     @classmethod
     def validate_color(cls, v: str) -> str:
-        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-            raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
-        return v
+        return validate_hex_color(v)
 
     @field_validator("default_landing")
     @classmethod
     def validate_default_landing(cls, v: str) -> str:
-        if v not in ("today", "habits"):
-            raise ValueError("Default landing must be 'today' or 'habits'")
-        return v
+        return _validate_default_landing(v)
 
 
 class ProfileCreate(ProfileBase):
     pass
 
 
-class ProfileRead(ProfileBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    created_date: datetime
-    updated_date: Optional[datetime] = None
+class ProfileRead(_StampedRead, ProfileBase):
+    pass
 
 
 class ProfileUpdate(BaseModel):
@@ -107,12 +123,8 @@ class ProfileUpdate(BaseModel):
         "pomodoro_cycles",
     )
     @classmethod
-    def reject_null(cls, v: object, info: ValidationInfo) -> object:
-        # These columns are NOT NULL in the database; omitting a field means
-        # "leave unchanged", but an explicit null is always invalid
-        if v is None:
-            raise ValueError(f"{info.field_name} cannot be null")
-        return v
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        return reject_null(v, info)
 
     @field_validator(
         "pomodoro_work_minutes",
@@ -122,30 +134,22 @@ class ProfileUpdate(BaseModel):
     )
     @classmethod
     def validate_pomodoro(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and v < 1:
-            raise ValueError("Pomodoro settings must be at least 1")
-        return v
+        return _validate_pomodoro(v)
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator("color_start", "color_end")
     @classmethod
     def validate_color(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-            raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
-        return v
+        return validate_hex_color(v)
 
     @field_validator("default_landing")
     @classmethod
     def validate_default_landing(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in ("today", "habits"):
-            raise ValueError("Default landing must be 'today' or 'habits'")
-        return v
+        return _validate_default_landing(v)
 
 
 class ProfileList(BaseModel):

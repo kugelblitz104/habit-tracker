@@ -1,8 +1,29 @@
-import re
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, overload
 
-from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
+
+from habit_tracker.models._base import _FromORM
+from habit_tracker.models._validators import (
+    non_blank_string,
+    reject_null,
+    validate_hex_color,
+)
+
+
+@overload
+def _validate_calendar_url(v: str) -> str: ...
+@overload
+def _validate_calendar_url(v: None) -> None: ...
+def _validate_calendar_url(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return v
+    if not v.strip():
+        raise ValueError("URL cannot be empty or whitespace")
+    v = normalize_ics_url(v)
+    if not v.startswith(("http://", "https://")):
+        raise ValueError("URL must start with http://, https://, or webcal://")
+    return v
 
 
 # Calendar Connection Schemas
@@ -16,26 +37,17 @@ class CalendarConnectionBase(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator("color")
     @classmethod
     def validate_color(cls, v: str) -> str:
-        if not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-            raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
-        return v
+        return validate_hex_color(v)
 
     @field_validator("url")
     @classmethod
     def validate_url(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("URL cannot be empty or whitespace")
-        v = normalize_ics_url(v)
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("URL must start with http://, https://, or webcal://")
-        return v
+        return _validate_calendar_url(v)
 
 
 def normalize_ics_url(url: str) -> str:
@@ -55,9 +67,7 @@ class CalendarConnectionCreate(CalendarConnectionBase):
     profile_id: int
 
 
-class CalendarConnectionRead(CalendarConnectionBase):
-    model_config = ConfigDict(from_attributes=True)
-
+class CalendarConnectionRead(CalendarConnectionBase, _FromORM):
     id: int
     profile_id: int
     created_date: datetime
@@ -75,37 +85,23 @@ class CalendarConnectionUpdate(BaseModel):
 
     @field_validator("name", "color", "url", "enabled")
     @classmethod
-    def reject_null(cls, v: object, info: ValidationInfo) -> object:
-        # These columns are NOT NULL in the database; omitting a field means
-        # "leave unchanged", but an explicit null is always invalid
-        if v is None:
-            raise ValueError(f"{info.field_name} cannot be null")
-        return v
+    def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
+        return reject_null(v, info)
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not v.strip():
-            raise ValueError("Name cannot be empty or whitespace")
-        return v
+        return non_blank_string(v, "Name")
 
     @field_validator("color")
     @classmethod
     def validate_color(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and not re.match(r"^#[0-9A-Fa-f]{6}$", v):
-            raise ValueError("Color must be a valid hex code, e.g., #FFFFFF")
-        return v
+        return validate_hex_color(v)
 
     @field_validator("url")
     @classmethod
     def validate_url(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None:
-            if not v.strip():
-                raise ValueError("URL cannot be empty or whitespace")
-            v = normalize_ics_url(v)
-            if not v.startswith(("http://", "https://")):
-                raise ValueError("URL must start with http://, https://, or webcal://")
-        return v
+        return _validate_calendar_url(v)
 
 
 class CalendarConnectionList(BaseModel):

@@ -1,12 +1,9 @@
-"""Tests for authorization and access control."""
+"""Tests for authorization and access control (HTTP-level behavior).
 
-import pytest
+Exercises admin/owner access rules through the API. Unit tests of the
+underlying callables (core/dependencies.py) live in test_dependencies.py.
+"""
 
-from habit_tracker.core.dependencies import (
-    authorize_resource_access,
-    is_admin_or_owner,
-    require_admin,
-)
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
@@ -19,7 +16,7 @@ class TestAdminAccess:
     """Tests for admin access rights."""
 
     async def test_admin_can_access_all_users(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can view all users."""
         admin = AdminUserFactory()
@@ -27,12 +24,7 @@ class TestAdminAccess:
         user2 = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         # Can access user1
         response = await client.get(f"/users/{user1.id}")
@@ -43,19 +35,14 @@ class TestAdminAccess:
         assert response.status_code == 200
 
     async def test_admin_can_modify_all_users(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can update any user."""
         admin = AdminUserFactory()
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.patch(
             f"/users/{user.id}",
@@ -64,24 +51,19 @@ class TestAdminAccess:
         assert response.status_code == 200
         assert response.json()["first_name"] == "AdminModified"
 
-    async def test_admin_can_delete_any_user(self, client, db_session, setup_factories):
+    async def test_admin_can_delete_any_user(self, client, db_session, login_as):
         """Admin can delete any user."""
         admin = AdminUserFactory()
         user = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.delete(f"/users/{user.id}")
         assert response.status_code == 200
 
     async def test_admin_can_access_all_habits(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can view all habits."""
         admin = AdminUserFactory()
@@ -91,18 +73,13 @@ class TestAdminAccess:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 200
 
     async def test_admin_can_modify_all_habits(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can update any habit."""
         admin = AdminUserFactory()
@@ -112,12 +89,7 @@ class TestAdminAccess:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -127,7 +99,7 @@ class TestAdminAccess:
         assert response.json()["name"] == "AdminModified"
 
     async def test_admin_can_access_all_trackers(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can view all trackers."""
         admin = AdminUserFactory()
@@ -140,12 +112,7 @@ class TestAdminAccess:
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": admin.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(admin)
 
         response = await client.get(f"/trackers/{tracker.id}")
         assert response.status_code == 200
@@ -155,19 +122,14 @@ class TestRegularUserAccess:
     """Tests for regular user access rights."""
 
     async def test_user_can_only_see_own_data(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User sees only their own data."""
         user1 = UserFactory()
         user2 = UserFactory()
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         # Can see own profile
         response = await client.get(f"/users/{user1.id}")
@@ -178,7 +140,7 @@ class TestRegularUserAccess:
         assert response.status_code == 403
 
     async def test_user_cannot_access_other_habits(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User denied access to other's habits."""
         user1 = UserFactory()
@@ -188,18 +150,13 @@ class TestRegularUserAccess:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.get(f"/habits/{habit.id}")
         assert response.status_code == 403
 
     async def test_user_cannot_modify_other_habits(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User denied modification of other's habits."""
         user1 = UserFactory()
@@ -209,12 +166,7 @@ class TestRegularUserAccess:
         habit = HabitFactory(user=user2)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.patch(
             f"/habits/{habit.id}",
@@ -223,7 +175,7 @@ class TestRegularUserAccess:
         assert response.status_code == 403
 
     async def test_user_cannot_access_other_trackers(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User denied access to other's trackers."""
         user1 = UserFactory()
@@ -236,18 +188,13 @@ class TestRegularUserAccess:
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.get(f"/trackers/{tracker.id}")
         assert response.status_code == 403
 
     async def test_user_cannot_modify_other_trackers(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """User denied modification of other's trackers."""
         user1 = UserFactory()
@@ -260,12 +207,7 @@ class TestRegularUserAccess:
         tracker = TrackerFactory(habit=habit)
         await db_session.commit()
 
-        login_response = await client.post(
-            "/auth/login",
-            data={"username": user1.username, "password": "password123"},
-        )
-        token = login_response.json()["access_token"]
-        client.headers.update({"Authorization": f"Bearer {token}"})
+        await login_as(user1)
 
         response = await client.patch(
             f"/trackers/{tracker.id}",
@@ -274,81 +216,116 @@ class TestRegularUserAccess:
         assert response.status_code == 403
 
 
-class TestAuthorizationHelperFunctions:
-    """Tests for authorization helper functions."""
+class TestAdminDependency:
+    """Tests for admin dependency."""
 
-    async def test_authorize_resource_access_owner(self, db_session, setup_factories):
-        """Owner can access their resources."""
-        user = UserFactory()
+    async def test_admin_access_granted(self, client, db_session, login_as):
+        """Admin users get access to admin endpoints."""
+        admin = AdminUserFactory()
         await db_session.commit()
 
-        # Should not raise exception
-        authorize_resource_access(user, user.id, "test")
+        await login_as(admin)
 
-    async def test_authorize_resource_access_admin(self, db_session, setup_factories):
-        """Admin can access any resource."""
-        admin = AdminUserFactory()
+        # Admin can list all users
+        response = await client.get("/users/")
+        assert response.status_code == 200
+
+    async def test_non_admin_restricted(self, client, db_session, login_as):
+        """Non-admin users are restricted from admin endpoints."""
+        user = UserFactory()
         other_user = UserFactory()
         await db_session.commit()
 
-        # Should not raise exception
-        authorize_resource_access(admin, other_user.id, "test")
+        await login_as(user)
 
-    async def test_authorize_resource_access_unauthorized(
-        self, db_session, setup_factories
+        # Non-admin cannot delete other users
+        response = await client.delete(f"/users/{other_user.id}")
+        assert response.status_code == 403
+
+
+class TestOwnerDependency:
+    """Tests for owner authorization dependency."""
+
+    async def test_owner_can_access_own_resource(
+        self, client, db_session, login_as
     ):
-        """Unauthorized access raises 403."""
-        from fastapi import HTTPException
+        """Owner can access their own resources."""
+        user = UserFactory()
+        await db_session.commit()
 
+        await login_as(user)
+
+        # Create habit
+        create_response = await client.post(
+            "/habits/",
+            json={
+                "name": "My Habit",
+                "question": "Done?",
+                "color": "#FF0000",
+                "frequency": 1,
+                "range": 1,
+            },
+        )
+        habit_id = create_response.json()["id"]
+
+        # Owner can access
+        response = await client.get(f"/habits/{habit_id}")
+        assert response.status_code == 200
+
+    async def test_non_owner_cannot_access_resource(
+        self, client, db_session, login_as
+    ):
+        """Non-owner cannot access others' resources."""
         user1 = UserFactory()
         user2 = UserFactory()
         await db_session.commit()
 
-        with pytest.raises(HTTPException) as exc_info:
-            authorize_resource_access(user1, user2.id, "test")
-        assert exc_info.value.status_code == 403
+        # User1 creates habit
+        await login_as(user1)
 
-    async def test_is_admin_or_owner_as_admin(self, db_session, setup_factories):
-        """Admin check returns true."""
-        admin = AdminUserFactory()
-        other_user = UserFactory()
-        await db_session.commit()
+        create_response = await client.post(
+            "/habits/",
+            json={
+                "name": "User1 Habit",
+                "question": "Done?",
+                "color": "#FF0000",
+                "frequency": 1,
+                "range": 1,
+            },
+        )
+        habit_id = create_response.json()["id"]
 
-        result = is_admin_or_owner(admin, other_user.id)
-        assert result is True
+        # User2 tries to access
+        await login_as(user2)
 
-    async def test_is_admin_or_owner_as_owner(self, db_session, setup_factories):
-        """Owner check returns true."""
+        response = await client.get(f"/habits/{habit_id}")
+        assert response.status_code == 403
+
+    async def test_admin_can_access_any_resource(
+        self, client, db_session, login_as
+    ):
+        """Admin can access any user's resources."""
         user = UserFactory()
-        await db_session.commit()
-
-        result = is_admin_or_owner(user, user.id)
-        assert result is True
-
-    async def test_is_admin_or_owner_neither(self, db_session, setup_factories):
-        """Neither admin nor owner returns false."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        result = is_admin_or_owner(user1, user2.id)
-        assert result is False
-
-    async def test_require_admin_with_admin(self, db_session, setup_factories):
-        """Admin passes admin requirement."""
         admin = AdminUserFactory()
         await db_session.commit()
 
-        result = require_admin(admin)
-        assert result == admin
+        # User creates habit
+        await login_as(user)
 
-    async def test_require_admin_with_regular_user(self, db_session, setup_factories):
-        """Regular user fails admin requirement."""
-        from fastapi import HTTPException
+        create_response = await client.post(
+            "/habits/",
+            json={
+                "name": "User Habit",
+                "question": "Done?",
+                "color": "#FF0000",
+                "frequency": 1,
+                "range": 1,
+            },
+        )
+        habit_id = create_response.json()["id"]
 
-        user = UserFactory()
-        await db_session.commit()
+        # Admin accesses
+        await login_as(admin)
 
-        with pytest.raises(HTTPException) as exc_info:
-            require_admin(user)
-        assert exc_info.value.status_code == 403
+        response = await client.get(f"/habits/{habit_id}")
+        assert response.status_code == 200

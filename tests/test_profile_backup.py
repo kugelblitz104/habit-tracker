@@ -18,6 +18,7 @@ from habit_tracker.schemas.db_models import (
 from habit_tracker.services.profile_backup import build_profile_backup
 from tests.factories import (
     CalendarConnectionFactory,
+    CountdownFactory,
     HabitFactory,
     IntegrationConnectionFactory,
     ProfileFactory,
@@ -27,16 +28,6 @@ from tests.factories import (
     TrackerFactory,
     UserFactory,
 )
-
-
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
 
 
 class TestBackupModelShape:
@@ -136,14 +127,13 @@ async def _seed_full_profile(db_session, user):
     )
     await db_session.commit()
 
-    countdown = Countdown(
-        profile_id=profile.id,
-        task_id=parent.id,
+    CountdownFactory(
+        profile=profile,
+        task=parent,
         title="Launch day",
         target_date=date.today() + timedelta(days=10),
         repeat="none",
     )
-    db_session.add(countdown)
 
     # A task-attached entry and an adhoc project entry.
     TimeEntryFactory(
@@ -177,13 +167,13 @@ async def _seed_full_profile(db_session, user):
 
 class TestExport:
     async def test_export_contains_every_entity_and_no_token(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
         profile, *_ = await _seed_full_profile(db_session, user)
 
-        await login_as(client, user)
+        await login_as(user)
         resp = await client.get(f"/backup/profiles/{profile.id}")
         assert resp.status_code == 200
         body = resp.json()
@@ -206,16 +196,16 @@ class TestExport:
         assert "cached_ics" not in body["calendar_connections"][0]
 
     async def test_export_unknown_profile_returns_404(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
         resp = await client.get("/backup/profiles/999999")
         assert resp.status_code == 404
 
     async def test_export_other_users_profile_forbidden(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         owner = UserFactory()
         intruder = UserFactory()
@@ -223,20 +213,20 @@ class TestExport:
         profile = ProfileFactory(user=owner, name="Private")
         await db_session.commit()
 
-        await login_as(client, intruder)
+        await login_as(intruder)
         resp = await client.get(f"/backup/profiles/{profile.id}")
         assert resp.status_code == 403
 
 
 class TestImportRoundTrip:
     async def test_roundtrip_recreates_entities_with_remapped_relationships(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
         src_profile, *_ = await _seed_full_profile(db_session, user)
 
-        await login_as(client, user)
+        await login_as(user)
         export = (await client.get(f"/backup/profiles/{src_profile.id}")).json()
 
         resp = await client.post("/backup/profiles", json=export)
@@ -342,17 +332,17 @@ class TestImportRoundTrip:
         assert conn.has_token is False
 
     async def test_import_as_different_user_keeps_name_and_owner(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         owner = UserFactory()
         other = UserFactory()
         await db_session.commit()
         src_profile, *_ = await _seed_full_profile(db_session, owner)
 
-        await login_as(client, owner)
+        await login_as(owner)
         export = (await client.get(f"/backup/profiles/{src_profile.id}")).json()
 
-        await login_as(client, other)
+        await login_as(other)
         resp = await client.post("/backup/profiles", json=export)
         assert resp.status_code == 201
         summary = resp.json()
@@ -362,11 +352,11 @@ class TestImportRoundTrip:
         assert new_profile.user_id == other.id
 
     async def test_import_rejects_unknown_format(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         user = UserFactory()
         await db_session.commit()
-        await login_as(client, user)
+        await login_as(user)
 
         backup = ProfileBackup(
             exported_at=datetime(2026, 7, 24, 12, 0),
@@ -396,7 +386,7 @@ class TestImportRoundTrip:
         assert "format" in resp.json()["detail"].lower()
 
     async def test_import_requires_authentication(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         resp = await client.post("/backup/profiles", json={})
         assert resp.status_code in (401, 422)

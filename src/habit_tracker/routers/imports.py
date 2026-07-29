@@ -25,37 +25,19 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
     resolve_habit_profile_id,
 )
-from habit_tracker.models.habits import loopHabitColors
 from habit_tracker.models.imports import (
     ExportResult,
     ImportedHabitSummary,
     ImportResult,
 )
 from habit_tracker.schemas.db_models import Habit, Tracker, User
+from habit_tracker.services.loop_format import map_color, reverse_map_color
 
 router = APIRouter(
     prefix="/import",
     tags=["import"],
     responses={404: {"description": "Not found"}},
 )
-
-
-def map_color(color_index: int) -> str:
-    """Map Loop Habit Tracker color index to hex color code."""
-    if 0 <= color_index < len(loopHabitColors):
-        return loopHabitColors[color_index]
-    # Default to blue if index is out of range
-    return "#1976D2"
-
-
-def reverse_map_color(hex_color: str) -> int:
-    """Map hex color code back to Loop Habit Tracker color index."""
-    hex_upper = hex_color.upper()
-    for index, color in enumerate(loopHabitColors):
-        if color.upper() == hex_upper:
-            return index
-    # Default to blue (index 11) if not found
-    return 11
 
 
 def date_to_timestamp(dt: datetime) -> int:

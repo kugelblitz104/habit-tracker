@@ -10,11 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from habit_tracker.constants import TaskStatus
 from habit_tracker.core.crypto import decrypt_secret, encrypt_secret
 from habit_tracker.core.dependencies import (
-    authorize_parent_profile,
     get_current_user,
     get_db,
+    get_owned_child,
     get_owned_profile,
 )
+from habit_tracker.core.http import integrity_conflict
 from habit_tracker.models import (
     IntegrationConnectionCreate,
     IntegrationConnectionList,
@@ -41,14 +42,13 @@ router = APIRouter(
 async def _get_connection_and_authorize(
     db: AsyncSession, connection_id: int, current_user: User
 ) -> IntegrationConnection:
-    connection = await db.get(IntegrationConnection, connection_id)
-    if not connection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Integration connection not found",
-        )
-    await authorize_parent_profile(
-        db, connection.profile_id, current_user, "integration connection"
+    connection, _ = await get_owned_child(
+        db,
+        IntegrationConnection,
+        connection_id,
+        current_user,
+        not_found_detail="Integration connection not found",
+        resource_name="integration connection",
     )
     return connection
 
@@ -148,10 +148,7 @@ async def patch_integration_connection(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Integration connection change violates a database constraint",
-        )
+        raise integrity_conflict("Integration connection change violates a database constraint")
     await db.refresh(db_connection)
     return IntegrationConnectionRead.model_validate(db_connection)
 

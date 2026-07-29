@@ -15,20 +15,10 @@ from tests.factories import (
 )
 
 
-async def login_as(client, user):
-    """Log in as the given user and attach the bearer token to the client."""
-    login_response = await client.post(
-        "/auth/login",
-        data={"username": user.username, "password": "password123"},
-    )
-    token = login_response.json()["access_token"]
-    client.headers.update({"Authorization": f"Bearer {token}"})
-
-
 class TestListProfiles:
     """Tests for GET /profiles/ endpoint."""
 
-    async def test_list_own_profiles_only(self, client, db_session, setup_factories):
+    async def test_list_own_profiles_only(self, client, db_session, login_as):
         """User sees only their own profiles."""
         user = UserFactory(default_profile=False)
         other_user = UserFactory(default_profile=False)
@@ -39,7 +29,7 @@ class TestListProfiles:
         ProfileFactory(user=other_user, name="Other")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/profiles/")
         assert response.status_code == 200
@@ -49,7 +39,7 @@ class TestListProfiles:
         assert names == {"Personal", "Work"}
 
     async def test_list_profiles_ordered_by_created_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Profiles are ordered by creation date ascending."""
         user = UserFactory(default_profile=False)
@@ -65,7 +55,7 @@ class TestListProfiles:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/profiles/")
         assert response.status_code == 200
@@ -73,7 +63,7 @@ class TestListProfiles:
         assert names == ["Oldest", "Middle", "Newest"]
 
     async def test_list_profiles_admin_with_user_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can list another user's profiles via user_id."""
         admin = AdminUserFactory(default_profile=False)
@@ -84,7 +74,7 @@ class TestListProfiles:
         ProfileFactory(user=user, name="Target Personal")
         await db_session.commit()
 
-        await login_as(client, admin)
+        await login_as(admin)
 
         response = await client.get("/profiles/", params={"user_id": user.id})
         assert response.status_code == 200
@@ -93,7 +83,7 @@ class TestListProfiles:
         assert data["profiles"][0]["name"] == "Target Personal"
 
     async def test_list_profiles_non_admin_with_other_user_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Non-admin cannot list another user's profiles (403)."""
         user = UserFactory()
@@ -103,13 +93,13 @@ class TestListProfiles:
         ProfileFactory(user=other_user, name="Other Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/profiles/", params={"user_id": other_user.id})
         assert response.status_code == 403
 
     async def test_list_profiles_unauthenticated(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """Unauthenticated request is rejected (401)."""
         response = await client.get("/profiles/")
@@ -119,12 +109,12 @@ class TestListProfiles:
 class TestCreateProfile:
     """Tests for POST /profiles/ endpoint."""
 
-    async def test_create_profile_basic(self, client, db_session, setup_factories):
+    async def test_create_profile_basic(self, client, db_session, login_as):
         """Create profile with just a name and get defaults back."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/profiles/", json={"name": "Work"})
         assert response.status_code == 201
@@ -139,12 +129,12 @@ class TestCreateProfile:
         assert data["week_start_monday"] is True
         assert data["use_habit_color_accent"] is False
 
-    async def test_create_profile_all_fields(self, client, db_session, setup_factories):
+    async def test_create_profile_all_fields(self, client, db_session, login_as):
         """Create profile with all fields and get them echoed back."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/",
@@ -173,7 +163,7 @@ class TestCreateProfile:
         assert data["use_habit_color_accent"] is True
 
     async def test_create_profile_duplicate_name(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Duplicate profile name for the same user is rejected (409)."""
         user = UserFactory()
@@ -182,13 +172,13 @@ class TestCreateProfile:
         ProfileFactory(user=user, name="Work")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/profiles/", json={"name": "Work"})
         assert response.status_code == 409
 
     async def test_create_profile_same_name_different_user(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Two different users may each have a profile with the same name."""
         user = UserFactory()
@@ -198,19 +188,19 @@ class TestCreateProfile:
         ProfileFactory(user=other_user, name="Work")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/profiles/", json={"name": "Work"})
         assert response.status_code == 201
 
     async def test_create_profile_invalid_color(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid gradient color is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/", json={"name": "Work", "color_start": "red"}
@@ -218,13 +208,13 @@ class TestCreateProfile:
         assert response.status_code == 422
 
     async def test_create_profile_invalid_default_landing(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid default_landing is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/", json={"name": "Work", "default_landing": "dashboard"}
@@ -232,14 +222,14 @@ class TestCreateProfile:
         assert response.status_code == 422
 
     async def test_create_profile_user_id_not_spoofable(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A user_id in the payload is ignored - profile belongs to caller."""
         user = UserFactory()
         other_user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/profiles/", json={"name": "Sneaky", "user_id": other_user.id}
@@ -254,7 +244,7 @@ class TestCreateProfile:
 class TestGetProfile:
     """Tests for GET /profiles/{profile_id} endpoint."""
 
-    async def test_get_own_profile(self, client, db_session, setup_factories):
+    async def test_get_own_profile(self, client, db_session, login_as):
         """User can retrieve their own profile."""
         user = UserFactory()
         await db_session.commit()
@@ -262,7 +252,7 @@ class TestGetProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/profiles/{profile.id}")
         assert response.status_code == 200
@@ -270,7 +260,7 @@ class TestGetProfile:
         assert data["id"] == profile.id
         assert data["name"] == "Personal"
 
-    async def test_get_other_user_profile(self, client, db_session, setup_factories):
+    async def test_get_other_user_profile(self, client, db_session, login_as):
         """User cannot access another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -279,12 +269,12 @@ class TestGetProfile:
         profile = ProfileFactory(user=other_user, name="Other")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(f"/profiles/{profile.id}")
         assert response.status_code == 403
 
-    async def test_get_profile_as_admin(self, client, db_session, setup_factories):
+    async def test_get_profile_as_admin(self, client, db_session, login_as):
         """Admin can access any profile."""
         admin = AdminUserFactory()
         user = UserFactory()
@@ -293,17 +283,17 @@ class TestGetProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, admin)
+        await login_as(admin)
 
         response = await client.get(f"/profiles/{profile.id}")
         assert response.status_code == 200
 
-    async def test_get_nonexistent_profile(self, client, db_session, setup_factories):
+    async def test_get_nonexistent_profile(self, client, db_session, login_as):
         """Return 404 for non-existent profile."""
         user = UserFactory()
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get("/profiles/99999")
         assert response.status_code == 404
@@ -313,7 +303,7 @@ class TestPatchProfile:
     """Tests for PATCH /profiles/{profile_id} endpoint."""
 
     async def test_patch_profile_partial_update(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Updating one field leaves the others untouched."""
         user = UserFactory()
@@ -324,7 +314,7 @@ class TestPatchProfile:
         )
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"name": "Renamed"}
@@ -336,7 +326,7 @@ class TestPatchProfile:
         assert data["default_landing"] == "habits"
 
     async def test_patch_profile_sets_updated_date(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Patching a profile stamps its updated_date."""
         user = UserFactory()
@@ -345,7 +335,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"name": "Renamed"}
@@ -354,7 +344,7 @@ class TestPatchProfile:
         assert response.json()["updated_date"] is not None
 
     async def test_patch_profile_duplicate_name(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Renaming to another of the user's profile names is rejected (409)."""
         user = UserFactory()
@@ -364,14 +354,14 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Work")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"name": "Personal"}
         )
         assert response.status_code == 409
 
-    async def test_patch_profile_toggles(self, client, db_session, setup_factories):
+    async def test_patch_profile_toggles(self, client, db_session, login_as):
         """Feature toggles can be flipped."""
         user = UserFactory()
         await db_session.commit()
@@ -379,7 +369,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}",
@@ -396,7 +386,7 @@ class TestPatchProfile:
         assert data["publish_to_azure"] is True
 
     async def test_patch_profile_week_start_monday(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """week_start_monday can be flipped off and persists on read."""
         user = UserFactory()
@@ -405,7 +395,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"week_start_monday": False}
@@ -419,7 +409,7 @@ class TestPatchProfile:
         assert response.json()["week_start_monday"] is False
 
     async def test_patch_profile_use_habit_color_accent(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """use_habit_color_accent can be opted into and persists on read."""
         user = UserFactory()
@@ -428,7 +418,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"use_habit_color_accent": True}
@@ -442,7 +432,7 @@ class TestPatchProfile:
         assert response.json()["use_habit_color_accent"] is True
 
     async def test_patch_profile_null_preference_flag(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An explicit null for a non-nullable preference flag is rejected (422)."""
         user = UserFactory()
@@ -451,7 +441,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"week_start_monday": None}
@@ -464,7 +454,7 @@ class TestPatchProfile:
         assert response.status_code == 422
 
     async def test_patch_profile_invalid_default_landing(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Invalid default_landing on patch is rejected (422)."""
         user = UserFactory()
@@ -473,14 +463,14 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(
             f"/profiles/{profile.id}", json={"default_landing": "nope"}
         )
         assert response.status_code == 422
 
-    async def test_patch_profile_null_name(self, client, db_session, setup_factories):
+    async def test_patch_profile_null_name(self, client, db_session, login_as):
         """An explicit null for the non-nullable name is rejected (422)."""
         user = UserFactory()
         await db_session.commit()
@@ -488,12 +478,12 @@ class TestPatchProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/profiles/{profile.id}", json={"name": None})
         assert response.status_code == 422
 
-    async def test_patch_other_user_profile(self, client, db_session, setup_factories):
+    async def test_patch_other_user_profile(self, client, db_session, login_as):
         """User cannot patch another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -502,7 +492,7 @@ class TestPatchProfile:
         profile = ProfileFactory(user=other_user, name="Other")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.patch(f"/profiles/{profile.id}", json={"name": "Hax"})
         assert response.status_code == 403
@@ -511,7 +501,7 @@ class TestPatchProfile:
 class TestDeleteProfile:
     """Tests for DELETE /profiles/{profile_id} endpoint."""
 
-    async def test_delete_profile_cascades(self, client, db_session, setup_factories):
+    async def test_delete_profile_cascades(self, client, db_session, login_as):
         """Deleting a profile cascades to its habits, projects, and tasks."""
         user = UserFactory()
         await db_session.commit()
@@ -529,7 +519,7 @@ class TestDeleteProfile:
         surviving_task = TaskFactory(profile=keep)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/profiles/{doomed.id}")
         assert response.status_code == 200
@@ -557,7 +547,7 @@ class TestDeleteProfile:
         )
         assert result.scalar_one_or_none() is not None
 
-    async def test_delete_last_profile(self, client, db_session, setup_factories):
+    async def test_delete_last_profile(self, client, db_session, login_as):
         """The user's last remaining profile cannot be deleted (400)."""
         user = UserFactory(default_profile=False)
         await db_session.commit()
@@ -565,7 +555,7 @@ class TestDeleteProfile:
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/profiles/{profile.id}")
         assert response.status_code == 400
@@ -575,7 +565,7 @@ class TestDeleteProfile:
         )
         assert result.scalar_one_or_none() is not None
 
-    async def test_delete_other_user_profile(self, client, db_session, setup_factories):
+    async def test_delete_other_user_profile(self, client, db_session, login_as):
         """User cannot delete another user's profile (403)."""
         user = UserFactory()
         other_user = UserFactory()
@@ -585,7 +575,7 @@ class TestDeleteProfile:
         profile = ProfileFactory(user=other_user, name="Other B")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.delete(f"/profiles/{profile.id}")
         assert response.status_code == 403
@@ -595,7 +585,7 @@ class TestRegisterCreatesDefaultProfile:
     """Tests for the default profile created by POST /auth/register."""
 
     async def test_register_creates_personal_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session
     ):
         """Registering creates exactly one 'Personal' profile for the user."""
         response = await client.post(
@@ -635,7 +625,7 @@ class TestHabitProfileIntegration:
     }
 
     async def test_create_habit_defaults_to_oldest_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Habit created without profile_id lands in the user's oldest profile."""
         user = UserFactory(default_profile=False)
@@ -647,14 +637,14 @@ class TestHabitProfileIntegration:
         ProfileFactory(user=user, name="Newer", created_date=datetime.now())
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post("/habits/", json=self.HABIT_PAYLOAD)
         assert response.status_code == 201
         assert response.json()["profile_id"] == oldest.id
 
     async def test_create_habit_with_explicit_profile_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """An explicit valid profile_id is honored."""
         user = UserFactory()
@@ -666,7 +656,7 @@ class TestHabitProfileIntegration:
         newer = ProfileFactory(user=user, name="Newer", created_date=datetime.now())
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/habits/", json={**self.HABIT_PAYLOAD, "profile_id": newer.id}
@@ -675,7 +665,7 @@ class TestHabitProfileIntegration:
         assert response.json()["profile_id"] == newer.id
 
     async def test_create_habit_with_foreign_profile_id(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A profile belonging to another user is rejected (400)."""
         user = UserFactory()
@@ -686,7 +676,7 @@ class TestHabitProfileIntegration:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.post(
             "/habits/", json={**self.HABIT_PAYLOAD, "profile_id": foreign.id}
@@ -694,7 +684,7 @@ class TestHabitProfileIntegration:
         assert response.status_code == 400
 
     async def test_list_user_habits_profile_filter(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """GET /users/{id}/habits?profile_id only returns that profile's habits."""
         user = UserFactory()
@@ -709,7 +699,7 @@ class TestHabitProfileIntegration:
         HabitFactory(user=user, profile=profile2)
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             f"/users/{user.id}/habits", params={"profile_id": profile1.id}
@@ -721,7 +711,7 @@ class TestHabitProfileIntegration:
         assert ids == {habit1.id, habit2.id}
 
     async def test_admin_patch_habit_with_owner_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """Admin can move a user's habit between that user's own profiles."""
         admin = AdminUserFactory()
@@ -735,7 +725,7 @@ class TestHabitProfileIntegration:
         habit = HabitFactory(user=user, profile=profile1)
         await db_session.commit()
 
-        await login_as(client, admin)
+        await login_as(admin)
 
         response = await client.patch(
             f"/habits/{habit.id}", json={"profile_id": profile2.id}
@@ -744,7 +734,7 @@ class TestHabitProfileIntegration:
         assert response.json()["profile_id"] == profile2.id
 
     async def test_admin_cannot_attach_own_profile_to_others_habit(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A profile that does not belong to the habit owner is rejected."""
         admin = AdminUserFactory()
@@ -755,7 +745,7 @@ class TestHabitProfileIntegration:
         habit = HabitFactory(user=user)
         await db_session.commit()
 
-        await login_as(client, admin)
+        await login_as(admin)
 
         response = await client.patch(
             f"/habits/{habit.id}", json={"profile_id": admin_profile.id}
@@ -763,7 +753,7 @@ class TestHabitProfileIntegration:
         assert response.status_code == 400
 
     async def test_list_user_habits_wrong_owner_profile(
-        self, client, db_session, setup_factories
+        self, client, db_session, login_as
     ):
         """A profile_id that belongs to a different user returns 404."""
         user = UserFactory()
@@ -774,7 +764,7 @@ class TestHabitProfileIntegration:
         foreign = ProfileFactory(user=other_user, name="Theirs")
         await db_session.commit()
 
-        await login_as(client, user)
+        await login_as(user)
 
         response = await client.get(
             f"/users/{user.id}/habits", params={"profile_id": foreign.id}

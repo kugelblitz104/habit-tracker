@@ -75,6 +75,17 @@ def is_auto_skipped(
     return completions >= frequency
 
 
+def auto_skip_lookback_start(start_date: date, range_: int) -> date:
+    """Earliest date whose completions can affect auto-skip within a range
+    starting at ``start_date``.
+
+    ``is_auto_skipped`` looks back over ``[day - range + 1, day)`` for a given
+    day, so the oldest day in a rendered range needs completions from up to
+    ``range - 1`` days before ``start_date``.
+    """
+    return start_date - timedelta(days=range_ - 1)
+
+
 def calculate_streaks(
     trackers: Iterable[Tracker],
     frequency: int,

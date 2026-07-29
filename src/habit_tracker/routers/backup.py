@@ -11,7 +11,6 @@ merges into or overwrites existing data.
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -20,20 +19,11 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
 )
 from habit_tracker.models.backup import ImportSummary, ProfileBackup
-from habit_tracker.schemas.db_models import (
-    CalendarConnection,
-    Countdown,
-    Habit,
-    IntegrationConnection,
-    Project,
-    Task,
-    TimeEntry,
-    Tracker,
-    User,
-)
+from habit_tracker.schemas.db_models import User
 from habit_tracker.services.profile_backup import (
     BackupError,
     build_profile_backup,
+    load_profile_rows,
     restore_profile_backup,
 )
 
@@ -62,90 +52,8 @@ async def export_profile_backup(
     re-entered after import.
     """
     profile = await get_owned_profile(db, profile_id, current_user, "profile")
-
-    projects = (
-        (await db.execute(
-            select(Project)
-            .where(Project.profile_id == profile_id)
-            .order_by(Project.id)
-        ))
-        .scalars()
-        .all()
-    )
-    tasks = (
-        (await db.execute(
-            select(Task).where(Task.profile_id == profile_id).order_by(Task.id)
-        ))
-        .scalars()
-        .all()
-    )
-    countdowns = (
-        (await db.execute(
-            select(Countdown)
-            .where(Countdown.profile_id == profile_id)
-            .order_by(Countdown.id)
-        ))
-        .scalars()
-        .all()
-    )
-    time_entries = (
-        (await db.execute(
-            select(TimeEntry)
-            .where(TimeEntry.profile_id == profile_id)
-            .order_by(TimeEntry.id)
-        ))
-        .scalars()
-        .all()
-    )
-    habits = (
-        (await db.execute(
-            select(Habit)
-            .where(Habit.profile_id == profile_id)
-            .order_by(Habit.id)
-        ))
-        .scalars()
-        .all()
-    )
-    trackers = (
-        (await db.execute(
-            select(Tracker)
-            .join(Habit, Tracker.habit_id == Habit.id)
-            .where(Habit.profile_id == profile_id)
-            .order_by(Tracker.id)
-        ))
-        .scalars()
-        .all()
-    )
-    calendar_connections = (
-        (await db.execute(
-            select(CalendarConnection)
-            .where(CalendarConnection.profile_id == profile_id)
-            .order_by(CalendarConnection.id)
-        ))
-        .scalars()
-        .all()
-    )
-    integration_connections = (
-        (await db.execute(
-            select(IntegrationConnection)
-            .where(IntegrationConnection.profile_id == profile_id)
-            .order_by(IntegrationConnection.id)
-        ))
-        .scalars()
-        .all()
-    )
-
-    return build_profile_backup(
-        profile=profile,
-        projects=projects,
-        tasks=tasks,
-        countdowns=countdowns,
-        time_entries=time_entries,
-        habits=habits,
-        trackers=trackers,
-        calendar_connections=calendar_connections,
-        integration_connections=integration_connections,
-    )
+    rows = await load_profile_rows(db, profile_id)
+    return build_profile_backup(profile=profile, **rows)
 
 
 @router.post(
