@@ -561,6 +561,162 @@ class TestListTasks:
         assert data["total"] == 1
         assert data["tasks"][0]["id"] == in_project.id
 
+    async def test_list_tasks_parent_filter(self, client, db_session, login_as):
+        """parent_id filter returns only that parent's subtasks."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Parent")
+        other_parent = TaskFactory(profile=profile, title="Other parent")
+        await db_session.commit()
+
+        subtask = TaskFactory(profile=profile, parent=parent, title="Mine")
+        TaskFactory(profile=profile, parent=other_parent, title="Not mine")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/tasks/", params={"profile_id": profile.id, "parent_id": parent.id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert [t["id"] for t in data["tasks"]] == [subtask.id]
+        # Subtasks nest exactly one level deep, so a filtered row never has
+        # children of its own - the counts stay 0/0 without the aggregate.
+        assert data["tasks"][0]["subtask_count"] == 0
+        assert data["tasks"][0]["subtask_done_count"] == 0
+
+    async def test_list_tasks_parent_filter_include_closed(
+        self, client, db_session, login_as
+    ):
+        """parent_id composes with include_closed like any other filter."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        parent = TaskFactory(profile=profile, title="Parent")
+        await db_session.commit()
+
+        open_sub = TaskFactory(profile=profile, parent=parent)
+        done_sub = DoneTaskFactory(profile=profile, parent=parent)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/tasks/", params={"profile_id": profile.id, "parent_id": parent.id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert [t["id"] for t in data["tasks"]] == [open_sub.id]
+
+        response = await client.get(
+            "/tasks/",
+            params={
+                "profile_id": profile.id,
+                "parent_id": parent.id,
+                "include_closed": True,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert {t["id"] for t in data["tasks"]} == {open_sub.id, done_sub.id}
+
+    async def test_list_tasks_parent_filter_reaches_past_the_page_cap(
+        self, client, db_session, login_as
+    ):
+        """Subtasks stay reachable once the profile outgrows a single page.
+
+        The bug this filter exists for: subtasks are priority 0 with no due
+        date, so the default ordering puts them last. Once a profile holds more
+        than `limit` tasks they fall off page one entirely, and a client that
+        filtered the list by parent_id itself saw a task's subtasks disappear
+        while its subtask_count still said it had some.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        # 99 high-priority tasks plus the parent fill page one exactly, leaving
+        # the two subtasks as the only rows past the cap
+        for _ in range(99):
+            TaskFactory(profile=profile, priority=3)
+        parent = TaskFactory(profile=profile, priority=3, title="Parent")
+        await db_session.commit()
+
+        subtasks = [TaskFactory(profile=profile, parent=parent) for _ in range(2)]
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get("/tasks/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 102
+        assert len(data["tasks"]) == 100
+        page_one_ids = {t["id"] for t in data["tasks"]}
+        # Neither subtask made page one, but the parent still reports them
+        assert page_one_ids.isdisjoint({s.id for s in subtasks})
+        parent_row = next(t for t in data["tasks"] if t["id"] == parent.id)
+        assert parent_row["subtask_count"] == 2
+
+        response = await client.get(
+            "/tasks/", params={"profile_id": profile.id, "parent_id": parent.id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert {t["id"] for t in data["tasks"]} == {s.id for s in subtasks}
+
+    async def test_list_tasks_parent_filter_unknown_or_foreign_parent(
+        self, client, db_session, login_as
+    ):
+        """parent_id is a filter, not a fetch: no match means an empty list.
+
+        A parent in another profile can't leak rows either - the profile filter
+        still applies, so the two conditions simply never overlap.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        other_profile = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        foreign_parent = TaskFactory(profile=other_profile, title="Their parent")
+        await db_session.commit()
+
+        TaskFactory(profile=other_profile, parent=foreign_parent)
+        TaskFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/tasks/",
+            params={"profile_id": profile.id, "parent_id": foreign_parent.id},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["tasks"] == []
+
+        response = await client.get(
+            "/tasks/", params={"profile_id": profile.id, "parent_id": 99999}
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 0
+
     async def test_list_tasks_foreign_or_missing_profile(
         self, client, db_session, login_as
     ):

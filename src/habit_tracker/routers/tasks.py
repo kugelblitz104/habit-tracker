@@ -157,6 +157,9 @@ async def list_tasks(
         description="Maximum number of tasks to return (1-100)",
     ),
     offset: int = Query(default=0, ge=0, description="Number of tasks to skip"),
+    parent_id: int | None = Query(
+        default=None, description="Only subtasks of this parent task"
+    ),
 ) -> TaskList:
     """
     Get a paginated list of tasks belonging to a profile. Each task carries
@@ -172,6 +175,9 @@ async def list_tasks(
       that view is ordered by closed date (most recent first)
     - **limit**: Maximum number of tasks to return (default: 100, max: 100)
     - **offset**: Number of tasks to skip (default: 0)
+    - **parent_id**: Optional. Only subtasks of this parent task. A plain
+      filter like `project_id`, not a fetch: a parent that is missing or in
+      another profile matches nothing rather than 404-ing
 
     Active tasks are ordered by priority (desc), due date (asc, no due date
     last), then creation date (asc).
@@ -206,6 +212,8 @@ async def list_tasks(
     query = select(Task).filter(Task.profile_id == profile_id)
     if project_id is not None:
         query = query.filter(Task.project_id == project_id)
+    if parent_id is not None:
+        query = query.filter(Task.parent_id == parent_id)
     if task_status is not None:
         query = query.filter(Task.status == task_status)
     elif not include_closed:
@@ -226,8 +234,15 @@ async def list_tasks(
     result = await db.execute(query)
     db_tasks = result.scalars().all()
 
-    # One aggregate query for the whole profile's subtask counts (no N+1)
-    subtask_counts = await _get_subtask_counts(db, profile_id=profile_id)
+    # One aggregate query for the whole profile's subtask counts (no N+1).
+    # Skipped entirely for a parent_id-filtered list: every row is then a
+    # subtask, and subtasks nest exactly one level deep, so their counts are
+    # always the TaskRead defaults (0/0) - same JSON, one query less.
+    subtask_counts = (
+        None
+        if parent_id is not None
+        else await _get_subtask_counts(db, profile_id=profile_id)
+    )
 
     # Bands are date-relative and never stored, so band filtering happens in
     # Python after fetching; limit/offset apply to the band-filtered list
