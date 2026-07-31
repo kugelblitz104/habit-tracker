@@ -34,6 +34,7 @@ class TestCreateHabit:
                 "color": "#00FF00",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -61,6 +62,7 @@ class TestCreateHabit:
                 "notes": "Morning workout routine",
                 "archived": False,
                 "sort_order": 10,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -87,13 +89,14 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
         habit_id = response.json()["id"]
 
         habit = await db_session.get(Habit, habit_id)
-        assert habit.user_id == user.id
+        assert habit.profile_id == user.profiles[0].id
 
     async def test_create_habit_invalid_color(self, client, db_session, login_as):
         """Reject invalid color format (422)."""
@@ -110,6 +113,7 @@ class TestCreateHabit:
                 "color": "blue",  # Invalid - not hex
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -129,6 +133,7 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": -1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -148,6 +153,7 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": 1,
                 "range": -1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -167,6 +173,7 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": 0,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -186,6 +193,7 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": 1,
                 "range": 0,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -207,6 +215,7 @@ class TestCreateHabit:
                 "color": "#000000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -227,6 +236,7 @@ class TestCreateHabit:
                 "frequency": 1,
                 "range": 1,
                 "sort_order": 99,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -248,6 +258,7 @@ class TestCreateHabit:
                 "frequency": 1,
                 "range": 1,
                 "archived": True,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -1065,6 +1076,124 @@ class TestSortHabits:
         assert response.status_code == 401
 
 
+class TestSortHabitsProfileScoping:
+    """sort_habits computes archived gaps per profile, not per user."""
+
+    async def test_archived_gap_ignores_other_profiles(
+        self, client, db_session, login_as
+    ):
+        """An archived habit in ANOTHER profile does not shift sort_order.
+
+        Before profile scoping, the archived habit's sort_order was treated as
+        a taken slot for every one of the user's habits. Now only the sorted
+        profile's archived habits reserve slots.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        other_profile = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        HabitFactory(
+            user=user,
+            name="Archived Elsewhere",
+            profile=other_profile,
+            archived=True,
+            sort_order=0,
+        )
+        first = HabitFactory(user=user, name="First", sort_order=5)
+        second = HabitFactory(user=user, name="Second", sort_order=6)
+        await db_session.commit()
+        # Capture ids before expire_all() below - expire_all() expires the
+        # instances' id attribute too, so accessing first.id/second.id after
+        # it would trigger a synchronous lazy-reload outside async context.
+        first_id, second_id = first.id, second.id
+
+        await login_as(user)
+
+        response = await client.put("/habits/sort", json=[first_id, second_id])
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        assert (await db_session.get(Habit, first_id)).sort_order == 0
+        assert (await db_session.get(Habit, second_id)).sort_order == 1
+
+    async def test_archived_gap_respected_within_profile(
+        self, client, db_session, login_as
+    ):
+        """An archived habit in the SAME profile still reserves its slot."""
+        user = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user, name="Archived Here", archived=True, sort_order=0)
+        first = HabitFactory(user=user, name="First", sort_order=5)
+        second = HabitFactory(user=user, name="Second", sort_order=6)
+        await db_session.commit()
+        # Capture ids before expire_all() below - see comment in
+        # test_archived_gap_ignores_other_profiles.
+        first_id, second_id = first.id, second.id
+
+        await login_as(user)
+
+        response = await client.put("/habits/sort", json=[first_id, second_id])
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        assert (await db_session.get(Habit, first_id)).sort_order == 1
+        assert (await db_session.get(Habit, second_id)).sort_order == 2
+
+    async def test_sort_foreign_habit_forbidden(self, client, db_session, login_as):
+        """A habit in someone else's profile is a 403, not a silent reorder."""
+        user = UserFactory()
+        other = UserFactory()
+        await db_session.commit()
+
+        mine = HabitFactory(user=user)
+        theirs = HabitFactory(user=other)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.put("/habits/sort", json=[mine.id, theirs.id])
+        assert response.status_code == 403
+
+    async def test_sort_unknown_habit_not_found(self, client, db_session, login_as):
+        """An id that does not exist at all is a 404."""
+        user = UserFactory()
+        await db_session.commit()
+        mine = HabitFactory(user=user)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.put("/habits/sort", json=[mine.id, 999999])
+        assert response.status_code == 404
+
+    async def test_sort_mixed_errors_reports_not_found_first(
+        self, client, db_session, login_as
+    ):
+        """A nonexistent id wins over a foreign one: 404, not 403.
+
+        Missing rows are rejected before any profile is authorized, so a batch
+        containing both an unknown id and another user's habit reports the
+        unknown id. This deliberately differs from the pre-profile-scoping
+        behaviour, which returned 403 whenever any unrecognised id existed
+        somewhere; it matches sort_tasks and reveals less to the caller.
+        """
+        user = UserFactory()
+        other = UserFactory()
+        await db_session.commit()
+
+        mine = HabitFactory(user=user)
+        theirs = HabitFactory(user=other)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.put("/habits/sort", json=[mine.id, theirs.id, 999999])
+        assert response.status_code == 404
+
+
 class TestDeleteAllHabits:
     """Tests for DELETE /habits/ (bulk delete, profile-scoped)."""
 
@@ -1100,3 +1229,223 @@ class TestDeleteAllHabits:
         # check re-reads from the DB rather than the session identity map).
         db_session.expire_all()
         assert await db_session.get(Tracker, tracker_id) is None
+
+
+class TestListHabits:
+    """Tests for GET /habits/ (profile-scoped habit listing)."""
+
+    async def test_list_habits_in_own_profile(self, client, db_session, login_as):
+        """Owner can list the habits in their profile."""
+        user = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user, name="Habit 1")
+        HabitFactory(user=user, name="Habit 2")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        assert len(data["habits"]) == 2
+
+    async def test_list_habits_requires_profile_id(self, client, db_session, login_as):
+        """profile_id is required (422 when omitted)."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/habits/")
+        assert response.status_code == 422
+
+    async def test_list_habits_foreign_profile_forbidden(
+        self, client, db_session, login_as
+    ):
+        """Regular user cannot list another user's profile (403)."""
+        user1 = UserFactory()
+        user2 = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user2)
+        await db_session.commit()
+
+        await login_as(user1)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user2.profiles[0].id}
+        )
+        assert response.status_code == 403
+
+    async def test_list_habits_unknown_profile(self, client, db_session, login_as):
+        """Unknown profile_id is a 404."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/habits/", params={"profile_id": 999999})
+        assert response.status_code == 404
+
+    async def test_list_habits_as_admin(self, client, db_session, login_as):
+        """Admin can list any profile's habits."""
+        admin = AdminUserFactory()
+        user = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user, name="User Habit")
+        await db_session.commit()
+
+        await login_as(admin)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+
+    async def test_list_habits_only_that_profile(self, client, db_session, login_as):
+        """Habits from the user's other profiles are excluded."""
+        user = UserFactory()
+        await db_session.commit()
+
+        other_profile = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        HabitFactory(user=user, name="Personal Habit")
+        mine = HabitFactory(user=user, name="Work Habit", profile=other_profile)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get("/habits/", params={"profile_id": other_profile.id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert [h["id"] for h in data["habits"]] == [mine.id]
+
+    async def test_list_habits_pagination(self, client, db_session, login_as):
+        """limit caps the page; total reports the full count; results are the
+        first `limit` habits by sort_order."""
+        user = UserFactory()
+        await db_session.commit()
+
+        # Descending sort_order so heap/insertion order disagrees with the
+        # expected (ascending sort_order) order - this would fail if the
+        # order_by were removed.
+        habits = [
+            HabitFactory(user=user, name=f"Habit {i}", sort_order=9 - i)
+            for i in range(10)
+        ]
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id, "limit": 3}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["habits"]) == 3
+        assert data["total"] == 10
+        assert data["limit"] == 3
+        expected_ids = [h.id for h in sorted(habits, key=lambda h: h.sort_order)[:3]]
+        assert [h["id"] for h in data["habits"]] == expected_ids
+
+    async def test_list_habits_includes_today_status(
+        self, client, db_session, login_as
+    ):
+        """completed_today and skipped_today reflect today's tracker."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit1 = HabitFactory(user=user, name="Completed Habit")
+        habit2 = HabitFactory(user=user, name="Skipped Habit")
+        HabitFactory(user=user, name="No Tracker Habit")
+        await db_session.commit()
+
+        TrackerFactory(habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED)
+        TrackerFactory(habit=habit2, dated=date.today(), status=TrackerStatus.SKIPPED)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
+        assert response.status_code == 200
+        habits_by_name = {h["name"]: h for h in response.json()["habits"]}
+
+        assert habits_by_name["Completed Habit"]["completed_today"] is True
+        assert habits_by_name["Completed Habit"]["skipped_today"] is False
+        assert habits_by_name["Skipped Habit"]["completed_today"] is False
+        assert habits_by_name["Skipped Habit"]["skipped_today"] is True
+        assert habits_by_name["No Tracker Habit"]["completed_today"] is False
+        assert habits_by_name["No Tracker Habit"]["skipped_today"] is False
+
+    async def test_list_habits_today_status_honors_tz(
+        self, client, db_session, login_as
+    ):
+        """completed_today is computed against "today" in the requested zone.
+
+        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
+        their calendar dates always differ. A tracker dated "today" in one
+        zone is therefore completed_today only for that zone, regardless of
+        when the test runs.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, name="TZ Habit")
+        await db_session.commit()
+
+        tz_name, other_tz_name = "Etc/GMT+12", "Etc/GMT-14"
+        expected_today = datetime.now(ZoneInfo(tz_name)).date()
+        TrackerFactory(
+            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
+        )
+        await db_session.commit()
+
+        await login_as(user)
+        profile_id = user.profiles[0].id
+
+        response = await client.get(
+            "/habits/", params={"profile_id": profile_id, "tz": tz_name}
+        )
+        assert response.status_code == 200
+        assert response.json()["habits"][0]["completed_today"] is True
+
+        response = await client.get(
+            "/habits/", params={"profile_id": profile_id, "tz": other_tz_name}
+        )
+        assert response.status_code == 200
+        assert response.json()["habits"][0]["completed_today"] is False
+
+    async def test_list_habits_invalid_tz(self, client, db_session, login_as):
+        """Invalid tz name is rejected with 422, not a server error."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/",
+            params={"profile_id": user.profiles[0].id, "tz": "Not/AZone"},
+        )
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
+
+    async def test_list_habits_empty(self, client, db_session, login_as):
+        """A profile with no habits returns an empty list."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["habits"] == []

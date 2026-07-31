@@ -70,6 +70,9 @@ class TestUserOnboardingFlow:
         token = login_response.json()["access_token"]
         shared_client.headers.update({"Authorization": f"Bearer {token}"})
 
+        profiles_response = await shared_client.get("/profiles/")
+        profile_id = profiles_response.json()["profiles"][0]["id"]
+
         # Create first habit
         habit_response = await shared_client.post(
             "/habits/",
@@ -79,6 +82,7 @@ class TestUserOnboardingFlow:
                 "color": "#00FF00",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": profile_id,
             },
         )
         assert habit_response.status_code == 201
@@ -108,6 +112,9 @@ class TestUserOnboardingFlow:
         token = login_response.json()["access_token"]
         shared_client.headers.update({"Authorization": f"Bearer {token}"})
 
+        profiles_response = await shared_client.get("/profiles/")
+        profile_id = profiles_response.json()["profiles"][0]["id"]
+
         # Create habit
         habit_response = await shared_client.post(
             "/habits/",
@@ -117,6 +124,7 @@ class TestUserOnboardingFlow:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": profile_id,
             },
         )
         habit_id = habit_response.json()["id"]
@@ -152,6 +160,7 @@ class TestHabitTrackingFlow:
                 "color": "#0000FF",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         habit_id = habit_response.json()["id"]

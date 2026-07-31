@@ -5,23 +5,19 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
     get_db,
-    resolve_today,
 )
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
-    HabitList,
-    HabitRead,
     UserCreate,
     UserList,
     UserRead,
     UserUpdate,
 )
-from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
+from habit_tracker.schemas.db_models import User
 
 router = APIRouter(
     prefix="/users", tags=["users"], responses={404: {"description": "Not found"}}
@@ -98,97 +94,6 @@ async def read_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
     return UserRead.model_validate(user)
-
-
-@router.get("/{user_id}/habits", summary="List all habits for a user")
-async def list_user_habits(
-    user_id: int,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
-    limit: int = Query(
-        default=5,
-        ge=1,
-        le=100,
-        description="Maximum number of habits to return (1-100)",
-    ),
-    profile_id: int | None = Query(
-        default=None,
-        description="Only habits belonging to this profile",
-    ),
-    tz: str | None = Query(
-        default=None,
-        description=(
-            "IANA timezone name (e.g. 'America/New_York'). When provided, "
-            "'today' for completed_today/skipped_today is today in this "
-            "zone; when omitted, the server's local date is used."
-        ),
-    ),
-) -> HabitList:
-    """
-    Get a paginated list of all habits belonging to a specific user.
-
-    - **user_id**: The unique identifier of the user
-    - **limit**: Maximum number of habits to return (default: 5, max: 100)
-    - **profile_id**: Optional. Only habits belonging to this profile (must
-      belong to the user)
-    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
-    """
-    authorize_resource_access(current_user, user_id, "user")
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
-
-    query = select(Habit).filter(Habit.user_id == user_id)
-    count_query = select(func.count()).filter(Habit.user_id == user_id)
-    if profile_id is not None:
-        profile = await db.get(Profile, profile_id)
-        if not profile or profile.user_id != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found"
-            )
-        query = query.filter(Habit.profile_id == profile_id)
-        count_query = count_query.filter(Habit.profile_id == profile_id)
-
-    result = await db.execute(query.limit(limit))
-    db_habits = result.scalars().all()
-
-    count_result = await db.execute(count_query)
-    total = count_result.scalar() or 0
-
-    today = resolve_today(tz)
-    habit_ids = [h.id for h in db_habits]
-
-    today_trackers = {}
-    if habit_ids:
-        tracker_result = await db.execute(
-            select(Tracker).filter(
-                Tracker.habit_id.in_(habit_ids), Tracker.dated == today
-            )
-        )
-        for tracker in tracker_result.scalars().all():
-            today_trackers[tracker.habit_id] = tracker
-
-    # Build HabitRead objects with today's status
-    habits_read = []
-    for habit in db_habits:
-        habit_read = HabitRead.model_validate(habit)
-        tracker = today_trackers.get(habit.id)
-        habit_read.completed_today = (
-            tracker.status == TrackerStatus.COMPLETED if tracker else False
-        )
-        habit_read.skipped_today = (
-            tracker.status == TrackerStatus.SKIPPED if tracker else False
-        )
-        habits_read.append(habit_read)
-
-    return HabitList(
-        habits=habits_read,
-        total=total,
-        limit=limit,
-        offset=0,
-    )
 
 
 @router.put("/{user_id}", summary="Replace a user (full update)")

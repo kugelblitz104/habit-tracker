@@ -38,9 +38,6 @@ class User(Base):
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    habits: Mapped[list["Habit"]] = relationship(
-        "Habit", back_populates="user", cascade="all, delete-orphan", lazy="select"
-    )
     profiles: Mapped[list["Profile"]] = relationship(
         "Profile", back_populates="user", cascade="all, delete-orphan", lazy="select"
     )
@@ -145,9 +142,6 @@ class Habit(Base):
     __tablename__ = "habit"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("user.id", ondelete="CASCADE"), nullable=False
-    )
     profile_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("profile.id", ondelete="CASCADE"),
@@ -172,7 +166,6 @@ class Habit(Base):
     )
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="habits", lazy="select")
     profile: Mapped["Profile"] = relationship(
         "Profile", back_populates="habits", lazy="select"
     )

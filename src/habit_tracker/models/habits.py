@@ -33,8 +33,9 @@ class HabitBase(BaseModel):
     archived: bool = False
     sort_order: int = 0
     category: str | None = None
-    # Optional for back-compat - routers resolve the user's default profile
-    profile_id: int | None = None
+    # Required: a habit's profile is always explicit. HabitUpdate declares its
+    # own optional profile_id (omitted = keep the habit's current profile).
+    profile_id: int
 
     @field_validator("color")
     @classmethod

@@ -3,14 +3,16 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
+    authorize_parent_profile,
     get_current_user,
     get_db,
     get_owned_habit,
+    get_owned_profile,
     resolve_habit_profile_id,
     resolve_timezone,
     resolve_today,
@@ -19,6 +21,7 @@ from habit_tracker.core.http import bulk_delete_in_profile, validate_sort_ids
 from habit_tracker.models import (
     HabitCreate,
     HabitKPIs,
+    HabitList,
     HabitRead,
     HabitStreak,
     HabitUpdate,
@@ -27,7 +30,7 @@ from habit_tracker.models import (
     TrackerLiteList,
     TrackerRead,
 )
-from habit_tracker.schemas.db_models import Habit, Tracker, User
+from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
 from habit_tracker.services.habit_stats import (
     auto_skip_lookback_start,
     calculate_kpis,
@@ -49,7 +52,6 @@ async def create_habit(
     """
     Create a new habit with the following information:
 
-    - **user_id**: The ID of the user who owns this habit
     - **name**: Name of the habit
     - **question**: The daily question to prompt for this habit
     - **color**: Color code for visual representation
@@ -60,14 +62,13 @@ async def create_habit(
     - **archived**: Whether the habit is archived
     - **sort_order**: The order in which the habit appears in lists (ascending)
     - **category**: Optional free-text group label (e.g. "Hygiene")
-    - **profile_id**: Optional profile for this habit. Must belong to the
-      current user; defaults to the user's oldest profile if omitted
+    - **profile_id**: The profile this habit belongs to. Must belong to the
+      current user
     """
     profile_id = await resolve_habit_profile_id(db, current_user.id, habit.profile_id)
     db_habit = Habit(
         **habit.model_dump(exclude={"profile_id"}),
         profile_id=profile_id,
-        user_id=current_user.id,
     )
     db.add(db_habit)
     await db.commit()
@@ -84,54 +85,134 @@ async def sort_habits(
     """
     Reorder habits by providing their IDs in the desired display order.
 
-    - **habit_ids**: List of habit IDs in the order you want them displayed
+    - **habit_ids**: List of habit IDs in the order you want them displayed,
+      naming only habits the caller owns
 
     The first ID gets the lowest sort_order, last ID gets the highest.
-    Habits are displayed in ascending sort_order.
+    Habits are displayed in ascending sort_order. sort_order gaps are
+    preserved for archived habits within the affected profiles.
+
+    Any unknown id is reported as 404 before ownership of the touched
+    profiles is checked, so a batch mixing an unknown id with a foreign
+    habit reports the unknown id rather than a 403.
     """
     validate_sort_ids(habit_ids, noun="habit")
 
-    # Fetch ALL user's habits
-    all_habits_result = await db.execute(
-        select(Habit).filter(Habit.user_id == current_user.id)
-    )
-    all_habits = {h.id: h for h in all_habits_result.scalars().all()}
+    requested_result = await db.execute(select(Habit).filter(Habit.id.in_(habit_ids)))
+    requested = {h.id: h for h in requested_result.scalars().all()}
 
-    # Check if all requested habits exist and belong to user
-    missing_habits = set(habit_ids) - set(all_habits.keys())
+    missing_habits = set(habit_ids) - set(requested.keys())
     if missing_habits:
-        # Check if they exist at all (404) or just don't belong to user (403)
-        exists_check = await db.execute(
-            select(Habit.id).filter(Habit.id.in_(missing_habits))
-        )
-        if exists_check.scalars().first():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to sort one or more of these habits",
-            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="One or more habits not found"
         )
 
-    # Collect sort_order values of archived habits not being sorted
+    # Authorize every distinct owning profile (403 if the caller owns none of
+    # a given habit's profile). One lookup per profile, not per habit.
+    profile_ids = {h.profile_id for h in requested.values()}
+    for profile_id in profile_ids:
+        await authorize_parent_profile(db, profile_id, current_user, "habit")
+
+    # Archived habits in the touched profiles keep their sort_order slots, so
+    # reordering the visible habits never renumbers over an archived one.
+    siblings_result = await db.execute(
+        select(Habit).filter(Habit.profile_id.in_(profile_ids))
+    )
     archived_sort_orders = {
         h.sort_order
-        for h in all_habits.values()
+        for h in siblings_result.scalars().all()
         if h.archived and h.id not in habit_ids
     }
 
     # Assign sort_order (first item gets lowest value)
     current_sort_order = 0
     for habit_id in habit_ids:
-        if not all_habits[habit_id].archived:
+        if not requested[habit_id].archived:
             # Skip any sort_order values taken by archived habits
             while current_sort_order in archived_sort_orders:
                 current_sort_order += 1
-            all_habits[habit_id].sort_order = current_sort_order
+            requested[habit_id].sort_order = current_sort_order
             current_sort_order += 1
 
     await db.commit()
     return JSONResponse(content={"detail": "Habits sorted successfully"})
+
+
+@router.get("/", summary="List habits for a profile")
+async def list_habits(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose habits to list"),
+    limit: int = Query(
+        default=5,
+        ge=1,
+        le=100,
+        description="Maximum number of habits to return (1-100)",
+    ),
+    tz: str | None = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "'today' for completed_today/skipped_today is today in this "
+            "zone; when omitted, the server's local date is used."
+        ),
+    ),
+) -> HabitList:
+    """
+    Get a paginated list of habits belonging to a profile.
+
+    - **profile_id**: The profile whose habits to list (required)
+    - **limit**: Maximum number of habits to return (default: 5, max: 100)
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
+    """
+    await get_owned_profile(db, profile_id, current_user, "habit")
+
+    # sort_order is the UI's display order; id breaks ties among habits that
+    # have never been reordered (sort_order defaults to 0 for all of them).
+    result = await db.execute(
+        select(Habit)
+        .filter(Habit.profile_id == profile_id)
+        .order_by(Habit.sort_order, Habit.id)
+        .limit(limit)
+    )
+    db_habits = result.scalars().all()
+
+    count_result = await db.execute(
+        select(func.count()).filter(Habit.profile_id == profile_id)
+    )
+    total = count_result.scalar() or 0
+
+    today = resolve_today(tz)
+    habit_ids = [h.id for h in db_habits]
+
+    today_trackers = {}
+    if habit_ids:
+        tracker_result = await db.execute(
+            select(Tracker).filter(
+                Tracker.habit_id.in_(habit_ids), Tracker.dated == today
+            )
+        )
+        for tracker in tracker_result.scalars().all():
+            today_trackers[tracker.habit_id] = tracker
+
+    habits_read = []
+    for habit in db_habits:
+        habit_read = HabitRead.model_validate(habit)
+        tracker = today_trackers.get(habit.id)
+        habit_read.completed_today = (
+            tracker.status == TrackerStatus.COMPLETED if tracker else False
+        )
+        habit_read.skipped_today = (
+            tracker.status == TrackerStatus.SKIPPED if tracker else False
+        )
+        habits_read.append(habit_read)
+
+    return HabitList(
+        habits=habits_read,
+        total=total,
+        limit=limit,
+        offset=0,
+    )
 
 
 @router.get("/{habit_id}", summary="Get a habit by ID")
@@ -154,7 +235,7 @@ async def read_habit(
     - **habit_id**: The unique identifier of the habit to retrieve
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await get_owned_habit(db, habit_id, current_user)
+    habit, _ = await get_owned_habit(db, habit_id, current_user)
     habit_read: HabitRead = HabitRead.model_validate(habit)
     today = resolve_today(tz)
     today_tracker = (
@@ -258,7 +339,7 @@ async def list_habit_trackers_lite(
     - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
     - **tz**: Optional IANA timezone for the default end_date (invalid name -> 422)
     """
-    habit = await get_owned_habit(db, habit_id, current_user)
+    habit, _ = await get_owned_habit(db, habit_id, current_user)
 
     # Validate tz even when end_date is explicit so a typo never passes
     # silently
@@ -359,7 +440,7 @@ async def read_habit_kpis(
     - **habit_id**: The unique identifier of the habit
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await get_owned_habit(db, habit_id, current_user)
+    habit, _ = await get_owned_habit(db, habit_id, current_user)
 
     result = await db.execute(select(Tracker).filter(Tracker.habit_id == habit_id))
     trackers = result.scalars().all()
@@ -393,7 +474,7 @@ async def read_habit_streaks(
     - **habit_id**: The unique identifier of the habit
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
-    habit = await get_owned_habit(db, habit_id, current_user)
+    habit, _ = await get_owned_habit(db, habit_id, current_user)
 
     result = await db.execute(select(Tracker).filter(Tracker.habit_id == habit_id))
     trackers = result.scalars().all()
@@ -405,21 +486,21 @@ async def read_habit_streaks(
 
 
 async def _apply_habit_update(
-    db: AsyncSession, db_habit: Habit, habit_data: dict
+    db: AsyncSession, db_habit: Habit, profile: Profile, habit_data: dict
 ) -> None:
     """Apply an update dict to a habit - shared by PUT (full model_dump) and
     PATCH (model_dump(exclude_unset=True)).
 
-    profile_id is resolved against the habit's owner, not the caller: an
-    admin editing another user's habit may only use that user's profiles.
-    A None/omitted profile_id keeps the habit's current profile - profile_id
-    is never nulled.
+    profile_id is resolved against the habit's current owner (taken from the
+    habit's owning profile), not the caller: an admin editing another user's
+    habit may only use that user's profiles. A None/omitted profile_id keeps
+    the habit's current profile - profile_id is never nulled.
     """
     if habit_data.get("profile_id") is None:
         habit_data.pop("profile_id", None)
     else:
         habit_data["profile_id"] = await resolve_habit_profile_id(
-            db, db_habit.user_id, habit_data["profile_id"]
+            db, profile.user_id, habit_data["profile_id"]
         )
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
@@ -441,8 +522,8 @@ async def update_habit(
 
     - **habit_id**: The unique identifier of the habit to update
     """
-    db_habit = await get_owned_habit(db, habit_id, current_user)
-    await _apply_habit_update(db, db_habit, habit_update.model_dump())
+    db_habit, profile = await get_owned_habit(db, habit_id, current_user)
+    await _apply_habit_update(db, db_habit, profile, habit_update.model_dump())
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
@@ -478,8 +559,10 @@ async def patch_habit(
       habit's owner)
 
     """
-    db_habit = await get_owned_habit(db, habit_id, current_user)
-    await _apply_habit_update(db, db_habit, habit_update.model_dump(exclude_unset=True))
+    db_habit, profile = await get_owned_habit(db, habit_id, current_user)
+    await _apply_habit_update(
+        db, db_habit, profile, habit_update.model_dump(exclude_unset=True)
+    )
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)
@@ -522,7 +605,7 @@ async def delete_habit(
 
     This action cannot be undone. All associated tracker entries will also be deleted.
     """
-    db_habit = await get_owned_habit(db, habit_id, current_user)
+    db_habit, _ = await get_owned_habit(db, habit_id, current_user)
     await db.delete(db_habit)
     await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

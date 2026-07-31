@@ -607,25 +607,6 @@ class TestHabitProfileIntegration:
         "range": 1,
     }
 
-    async def test_create_habit_defaults_to_oldest_profile(
-        self, client, db_session, login_as
-    ):
-        """Habit created without profile_id lands in the user's oldest profile."""
-        user = UserFactory(default_profile=False)
-        await db_session.commit()
-
-        oldest = ProfileFactory(
-            user=user, name="Oldest", created_date=datetime.now() - timedelta(days=2)
-        )
-        ProfileFactory(user=user, name="Newer", created_date=datetime.now())
-        await db_session.commit()
-
-        await login_as(user)
-
-        response = await client.post("/habits/", json=self.HABIT_PAYLOAD)
-        assert response.status_code == 201
-        assert response.json()["profile_id"] == oldest.id
-
     async def test_create_habit_with_explicit_profile_id(
         self, client, db_session, login_as
     ):
@@ -666,8 +647,8 @@ class TestHabitProfileIntegration:
         )
         assert response.status_code == 400
 
-    async def test_list_user_habits_profile_filter(self, client, db_session, login_as):
-        """GET /users/{id}/habits?profile_id only returns that profile's habits."""
+    async def test_list_habits_profile_filter(self, client, db_session, login_as):
+        """GET /habits/?profile_id only returns that profile's habits."""
         user = UserFactory()
         await db_session.commit()
 
@@ -682,9 +663,7 @@ class TestHabitProfileIntegration:
 
         await login_as(user)
 
-        response = await client.get(
-            f"/users/{user.id}/habits", params={"profile_id": profile1.id}
-        )
+        response = await client.get("/habits/", params={"profile_id": profile1.id})
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 2
@@ -733,10 +712,8 @@ class TestHabitProfileIntegration:
         )
         assert response.status_code == 400
 
-    async def test_list_user_habits_wrong_owner_profile(
-        self, client, db_session, login_as
-    ):
-        """A profile_id that belongs to a different user returns 404."""
+    async def test_list_habits_wrong_owner_profile(self, client, db_session, login_as):
+        """A profile_id belonging to another user is refused (403), not 404."""
         user = UserFactory()
         other_user = UserFactory()
         await db_session.commit()
@@ -747,7 +724,5 @@ class TestHabitProfileIntegration:
 
         await login_as(user)
 
-        response = await client.get(
-            f"/users/{user.id}/habits", params={"profile_id": foreign.id}
-        )
-        assert response.status_code == 404
+        response = await client.get("/habits/", params={"profile_id": foreign.id})
+        assert response.status_code == 403

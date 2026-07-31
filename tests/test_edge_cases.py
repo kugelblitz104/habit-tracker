@@ -98,7 +98,9 @@ class TestManyRecords:
 
         await login_as(user)
 
-        response = await client.get(f"/users/{user.id}/habits")
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
         assert response.status_code == 200
 
     async def test_habit_with_many_trackers(self, client, db_session, login_as):
@@ -132,7 +134,9 @@ class TestEmptyResults:
 
         await login_as(user)
 
-        response = await client.get(f"/users/{user.id}/habits")
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id}
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["habits"] == []

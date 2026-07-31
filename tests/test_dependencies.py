@@ -6,13 +6,15 @@ authorization *behavior* here; that belongs in test_authorization.py.
 """
 
 import pytest
+from fastapi import HTTPException
 
 from habit_tracker.core.dependencies import (
     authorize_resource_access,
+    get_owned_habit,
     is_admin_or_owner,
     require_admin,
 )
-from tests.factories import AdminUserFactory, UserFactory
+from tests.factories import AdminUserFactory, HabitFactory, UserFactory
 
 
 class TestDatabaseDependency:
@@ -45,6 +47,7 @@ class TestDatabaseDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user1.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -70,6 +73,7 @@ class TestDatabaseDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -83,6 +87,7 @@ class TestDatabaseDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -207,3 +212,52 @@ class TestAuthorizationHelperFunctions:
         with pytest.raises(HTTPException) as exc_info:
             require_admin(user)
         assert exc_info.value.status_code == 403
+
+
+class TestGetOwnedHabit:
+    """get_owned_habit authorizes through the habit's owning profile."""
+
+    async def test_returns_habit_and_owning_profile(self, db_session):
+        user = UserFactory()
+        await db_session.commit()
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        result_habit, result_profile = await get_owned_habit(db_session, habit.id, user)
+
+        assert result_habit.id == habit.id
+        assert result_profile.id == habit.profile_id
+        assert result_profile.user_id == user.id
+
+    async def test_forbidden_for_non_owner(self, db_session):
+        owner = UserFactory()
+        other = UserFactory()
+        await db_session.commit()
+        habit = HabitFactory(user=owner)
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_owned_habit(db_session, habit.id, other)
+        assert exc_info.value.status_code == 403
+
+    async def test_not_found_detail(self, db_session):
+        user = UserFactory()
+        await db_session.commit()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_owned_habit(db_session, 999999, user)
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Habit not found"
+
+    async def test_admin_may_access_another_users_habit(self, db_session):
+        admin = AdminUserFactory()
+        owner = UserFactory()
+        await db_session.commit()
+        habit = HabitFactory(user=owner)
+        await db_session.commit()
+
+        result_habit, result_profile = await get_owned_habit(
+            db_session, habit.id, admin
+        )
+        assert result_habit.id == habit.id
+        assert result_profile.user_id == owner.id

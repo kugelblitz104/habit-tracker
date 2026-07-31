@@ -89,6 +89,7 @@ class TestColorValidation:
                 "color": "#ff00ff",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -108,6 +109,7 @@ class TestColorValidation:
                 "color": "#FF00FF",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -127,6 +129,7 @@ class TestColorValidation:
                 "color": "FF00FF",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -146,6 +149,7 @@ class TestColorValidation:
                 "color": "#FFF",  # Too short
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -165,6 +169,7 @@ class TestColorValidation:
                 "color": "#GGHHII",  # Invalid hex
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -188,6 +193,7 @@ class TestNumericValidation:
                 "color": "#FF0000",
                 "frequency": -1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -207,6 +213,7 @@ class TestNumericValidation:
                 "color": "#FF0000",
                 "frequency": 0,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -226,6 +233,7 @@ class TestNumericValidation:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": -1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -245,6 +253,7 @@ class TestNumericValidation:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 0,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -279,6 +288,7 @@ class TestNumericBoundaries:
                 "color": "#FF0000",
                 "frequency": 999999,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code in [201, 422]
@@ -298,6 +308,7 @@ class TestNumericBoundaries:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 999999,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code in [201, 422]
@@ -321,6 +332,7 @@ class TestStringLengthValidation:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -354,6 +366,7 @@ class TestStringLengthValidation:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code in [201, 422]  # Depends on whitespace handling
@@ -378,6 +391,7 @@ class TestStringBoundaries:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         # Should either succeed or return 422 for max length
@@ -399,6 +413,7 @@ class TestStringBoundaries:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code in [201, 422]
@@ -418,6 +433,7 @@ class TestStringBoundaries:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -438,6 +454,7 @@ class TestStringBoundaries:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 201
@@ -458,6 +475,25 @@ class TestRequiredFieldValidation:
             json={
                 "question": "Test?",
                 "color": "#FF0000",
+                "frequency": 1,
+                "range": 1,
+                "profile_id": user.profiles[0].id,
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_create_habit_requires_profile_id(self, client, db_session, login_as):
+        """profile_id is required on create - no implicit default profile."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/habits/",
+            json={
+                "name": "Test Habit",
+                "question": "Test?",
+                "color": "#000000",
                 "frequency": 1,
                 "range": 1,
             },
@@ -527,6 +563,7 @@ class TestTypeValidation:
                 "color": "#FF0000",
                 "frequency": "one",  # Should be int
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         assert response.status_code == 422
@@ -546,6 +583,7 @@ class TestTypeValidation:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         # May be converted to string or rejected

@@ -1,11 +1,7 @@
 """Tests for user management endpoints."""
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 from sqlalchemy import select
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, UserFactory
 
@@ -577,196 +573,13 @@ class TestDeleteUser:
         assert result.scalar_one_or_none() is None
 
 
-class TestListUserHabits:
-    """Tests for GET /users/{user_id}/habits endpoint."""
+class TestRetiredUserHabitsRoute:
+    """The user-scoped habit list was replaced by GET /habits/?profile_id=."""
 
-    async def test_list_own_habits(self, client, db_session, login_as):
-        """User can list their own habits."""
+    async def test_user_habits_route_is_gone(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
-
-        HabitFactory(user=user, name="Habit 1")
-        HabitFactory(user=user, name="Habit 2")
-        await db_session.commit()
-
-        # Login
         await login_as(user)
 
         response = await client.get(f"/users/{user.id}/habits")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 2
-        assert len(data["habits"]) == 2
-
-    async def test_list_other_user_habits_as_regular(
-        self, client, db_session, login_as
-    ):
-        """Regular user cannot list others' habits (403)."""
-        user1 = UserFactory()
-        user2 = UserFactory()
-        await db_session.commit()
-
-        HabitFactory(user=user2)
-        await db_session.commit()
-
-        # Login as user1
-        await login_as(user1)
-
-        # Try to list user2's habits
-        response = await client.get(f"/users/{user2.id}/habits")
-        assert response.status_code == 403
-
-    async def test_list_user_habits_as_admin(self, client, db_session, login_as):
-        """Admin can list any user's habits."""
-        admin = AdminUserFactory()
-        user = UserFactory()
-        await db_session.commit()
-
-        HabitFactory(user=user, name="User Habit")
-        await db_session.commit()
-
-        # Login as admin
-        await login_as(admin)
-
-        response = await client.get(f"/users/{user.id}/habits")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 1
-
-    async def test_list_user_habits_pagination(self, client, db_session, login_as):
-        """Verify pagination with limit parameter."""
-        user = UserFactory()
-        await db_session.commit()
-
-        for i in range(10):
-            HabitFactory(user=user, name=f"Habit {i}")
-        await db_session.commit()
-
-        # Login
-        await login_as(user)
-
-        response = await client.get(f"/users/{user.id}/habits?limit=3")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["habits"]) == 3
-        assert data["total"] == 10
-        assert data["limit"] == 3
-
-    async def test_list_user_habits_includes_today_status(
-        self, client, db_session, login_as
-    ):
-        """Verify completed_today and skipped_today fields."""
-        from datetime import date
-
-        user = UserFactory()
-        await db_session.commit()
-
-        habit1 = HabitFactory(user=user, name="Completed Habit")
-        habit2 = HabitFactory(user=user, name="Skipped Habit")
-        HabitFactory(user=user, name="No Tracker Habit")
-        await db_session.commit()
-
-        # Create trackers for today
-        TrackerFactory(habit=habit1, dated=date.today(), status=TrackerStatus.COMPLETED)
-        TrackerFactory(habit=habit2, dated=date.today(), status=TrackerStatus.SKIPPED)
-        await db_session.commit()
-
-        # Login
-        await login_as(user)
-
-        response = await client.get(f"/users/{user.id}/habits")
-        assert response.status_code == 200
-        data = response.json()
-
-        habits_by_name = {h["name"]: h for h in data["habits"]}
-
-        assert habits_by_name["Completed Habit"]["completed_today"] is True
-        assert habits_by_name["Completed Habit"]["skipped_today"] is False
-
-        assert habits_by_name["Skipped Habit"]["completed_today"] is False
-        assert habits_by_name["Skipped Habit"]["skipped_today"] is True
-
-        assert habits_by_name["No Tracker Habit"]["completed_today"] is False
-        assert habits_by_name["No Tracker Habit"]["skipped_today"] is False
-
-    async def test_list_user_habits_today_status_honors_tz(
-        self, client, db_session, login_as
-    ):
-        """completed_today is computed against "today" in the requested zone.
-
-        Etc/GMT+12 (UTC-12) and Etc/GMT-14 (UTC+14) are 26 hours apart, so
-        their calendar dates always differ. A tracker dated "today" in one
-        zone is therefore completed_today only for that zone, regardless of
-        when the test runs.
-        """
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user, name="TZ Habit")
-        await db_session.commit()
-
-        tz_name, other_tz_name = "Etc/GMT+12", "Etc/GMT-14"
-        expected_today = datetime.now(ZoneInfo(tz_name)).date()
-        TrackerFactory(
-            habit=habit, dated=expected_today, status=TrackerStatus.COMPLETED
-        )
-        await db_session.commit()
-
-        await login_as(user)
-
-        response = await client.get(f"/users/{user.id}/habits", params={"tz": tz_name})
-        assert response.status_code == 200
-        assert response.json()["habits"][0]["completed_today"] is True
-
-        response = await client.get(
-            f"/users/{user.id}/habits", params={"tz": other_tz_name}
-        )
-        assert response.status_code == 200
-        assert response.json()["habits"][0]["completed_today"] is False
-
-    async def test_list_user_habits_invalid_tz(self, client, db_session, login_as):
-        """Invalid tz name is rejected with 422, not a server error."""
-        user = UserFactory()
-        await db_session.commit()
-
-        await login_as(user)
-
-        response = await client.get(
-            f"/users/{user.id}/habits", params={"tz": "Not/AZone"}
-        )
-        assert response.status_code == 422
-        assert "Invalid timezone" in response.json()["detail"]
-
-    async def test_list_user_habits_returns_total_count(
-        self, client, db_session, login_as
-    ):
-        """Verify total count in response."""
-        user = UserFactory()
-        await db_session.commit()
-
-        for i in range(8):
-            HabitFactory(user=user)
-        await db_session.commit()
-
-        # Login
-        await login_as(user)
-
-        response = await client.get(f"/users/{user.id}/habits?limit=3")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 8
-        assert len(data["habits"]) == 3
-
-    async def test_list_user_habits_empty(self, client, db_session, login_as):
-        """Return empty list for user with no habits."""
-        user = UserFactory()
-        await db_session.commit()
-
-        # Login
-        await login_as(user)
-
-        response = await client.get(f"/users/{user.id}/habits")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["total"] == 0
-        assert len(data["habits"]) == 0
+        assert response.status_code == 404

@@ -152,7 +152,6 @@ class TestImportFromLoopHabitTracker:
         assert data["trackers_imported"] == 1
 
         habit = await db_session.get(Habit, data["details"][0]["new_habit_id"])
-        assert habit.user_id == user.id
         assert habit.profile_id == user.profiles[0].id
 
     async def test_import_into_explicit_profile(self, client, db_session):

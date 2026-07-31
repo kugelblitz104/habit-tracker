@@ -130,6 +130,11 @@ class HabitFactory(BaseFactory):
 
     class Meta:
         model = Habit
+        # `user` is a factory-only param - Habit has no user_id column. It
+        # means "a habit in this user's default profile", which is what the
+        # ~181 HabitFactory(user=...) call sites want. If both `user=` and
+        # `profile=` are passed, `profile=` wins.
+        exclude = ("user",)
 
     name = Faker("text", max_nb_chars=50)
     question = Faker("sentence", nb_words=5, variable_nb_words=True)
@@ -142,9 +147,8 @@ class HabitFactory(BaseFactory):
     sort_order = 0
     category = None
     user = SubFactory(UserFactory)
-    # A habit's profile must belong to the same user as the habit itself.
-    # Reuse the user's existing (default) profile so a user's habits share
-    # one profile; only create a profile if the user somehow has none.
+    # Reuse the user's existing (default) profile so a user's habits share one
+    # profile; only create a profile if the user somehow has none.
     profile = LazyAttribute(
         lambda habit: (
             habit.user.profiles[0]

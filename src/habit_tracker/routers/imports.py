@@ -30,7 +30,7 @@ from habit_tracker.models.imports import (
     ImportedHabitSummary,
     ImportResult,
 )
-from habit_tracker.schemas.db_models import Habit, Tracker, User
+from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
 from habit_tracker.services.loop_format import map_color, reverse_map_color
 
 router = APIRouter(
@@ -171,7 +171,6 @@ async def import_from_loop_habit_tracker(
         # habits append after the profile's existing list
         max_sort_order_result = await db.execute(
             select(func.coalesce(func.max(Habit.sort_order), -1)).where(
-                Habit.user_id == current_user.id,
                 Habit.profile_id == resolved_profile_id,
             )
         )
@@ -208,7 +207,6 @@ async def import_from_loop_habit_tracker(
                 # Create new habit
                 current_max_sort_order += 1
                 new_habit = Habit(
-                    user_id=current_user.id,
                     profile_id=resolved_profile_id,
                     name=name,
                     question=question,
@@ -430,7 +428,11 @@ async def export_to_loop_habit_tracker(
         """)
 
         # Fetch user's habits
-        query = select(Habit).where(Habit.user_id == current_user.id)
+        query = (
+            select(Habit)
+            .join(Profile, Habit.profile_id == Profile.id)
+            .where(Profile.user_id == current_user.id)
+        )
         if profile_id is not None:
             query = query.where(Habit.profile_id == profile_id)
         if not include_archived:

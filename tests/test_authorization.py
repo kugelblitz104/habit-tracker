@@ -246,6 +246,7 @@ class TestOwnerDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         habit_id = create_response.json()["id"]
@@ -271,6 +272,7 @@ class TestOwnerDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user1.profiles[0].id,
             },
         )
         habit_id = create_response.json()["id"]
@@ -298,6 +300,7 @@ class TestOwnerDependency:
                 "color": "#FF0000",
                 "frequency": 1,
                 "range": 1,
+                "profile_id": user.profiles[0].id,
             },
         )
         habit_id = create_response.json()["id"]

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from habit_tracker.constants import TrackerStatus
-from habit_tracker.schemas.db_models import Habit, Tracker, User
+from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
@@ -49,20 +49,6 @@ class TestUserModel:
         fetched_user = result.scalar_one()
         assert fetched_user.is_admin is True
 
-    async def test_user_has_habits_relationship(self, db_session):
-        """User has habits relationship."""
-        user = UserFactory()
-        await db_session.commit()
-
-        HabitFactory(user=user)
-        HabitFactory(user=user)
-        await db_session.commit()
-
-        result = await db_session.execute(select(User).where(User.id == user.id))
-        fetched_user = result.scalar_one()
-        await db_session.refresh(fetched_user, ["habits"])
-        assert len(fetched_user.habits) == 2
-
     async def test_user_timestamps(self, db_session):
         """User has timestamp fields."""
         user = UserFactory()
@@ -90,19 +76,7 @@ class TestHabitModel:
         fetched_habit = result.scalar_one()
         assert fetched_habit is not None
         assert fetched_habit.name is not None
-        assert fetched_habit.user_id == user.id
-
-    async def test_habit_belongs_to_user(self, db_session):
-        """Habit belongs to user via user_id."""
-        user = UserFactory()
-        await db_session.commit()
-
-        habit = HabitFactory(user=user)
-        await db_session.commit()
-
-        result = await db_session.execute(select(Habit).where(Habit.id == habit.id))
-        fetched_habit = result.scalar_one()
-        assert fetched_habit.user_id == user.id
+        assert fetched_habit.profile_id == user.profiles[0].id
 
     async def test_habit_has_trackers_relationship(self, db_session):
         """Habit has trackers relationship."""
@@ -144,6 +118,23 @@ class TestHabitModel:
         result = await db_session.execute(select(Habit).where(Habit.id == habit.id))
         fetched_habit = result.scalar_one()
         assert fetched_habit.sort_order == 1
+
+    async def test_habit_has_no_user_id_column(self):
+        """Habit reaches its owner through Profile, not a user_id column."""
+        assert "user_id" not in Habit.__table__.columns
+        assert not hasattr(Habit, "user")
+
+    async def test_habit_owner_resolved_through_profile(self, db_session):
+        """The habit's owner is profile.user_id."""
+        user = UserFactory()
+        await db_session.commit()
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        result = await db_session.execute(select(Habit).where(Habit.id == habit.id))
+        fetched_habit = result.scalar_one()
+        profile = await db_session.get(Profile, fetched_habit.profile_id)
+        assert profile.user_id == user.id
 
 
 class TestTrackerModel:
@@ -278,8 +269,8 @@ class TestModelRelationships:
         )
         assert result.scalar_one_or_none() is None
 
-    async def test_multiple_habits_per_user(self, db_session):
-        """User can have multiple habits."""
+    async def test_multiple_habits_per_profile(self, db_session):
+        """Profile can have multiple habits."""
         user = UserFactory()
         await db_session.commit()
 
@@ -287,7 +278,9 @@ class TestModelRelationships:
             HabitFactory(user=user, name=f"Habit {i}")
         await db_session.commit()
 
-        result = await db_session.execute(select(Habit).where(Habit.user_id == user.id))
+        result = await db_session.execute(
+            select(Habit).where(Habit.profile_id == user.profiles[0].id)
+        )
         habits = result.scalars().all()
         assert len(habits) == 5
 
@@ -331,8 +324,8 @@ class TestModelConstraints:
             UserFactory(email="unique@example.com")
             await db_session.commit()
 
-    async def test_habit_requires_user(self, db_session):
-        """Habit must have a user."""
+    async def test_habit_requires_profile(self, db_session):
+        """Habit must reference an existing profile."""
         # This should fail due to foreign key constraint
         habit = Habit(
             name="Test",
@@ -340,7 +333,7 @@ class TestModelConstraints:
             color="#FF0000",
             frequency=1,
             range=1,
-            user_id=99999,  # Non-existent user
+            profile_id=99999,  # Non-existent profile
         )
         db_session.add(habit)
         with pytest.raises(IntegrityError):

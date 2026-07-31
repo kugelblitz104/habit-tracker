@@ -279,9 +279,9 @@ async def resolve_habit_profile_id(
 
     owner_user_id is the id of the user who owns (or will own) the habit. If
     profile_id is given, it must exist and belong to that owner (400
-    otherwise) - this keeps the habit's user_id/profile_id invariant intact
-    even when an admin edits another user's habit. If omitted, the owner's
-    oldest profile is used for back-compat.
+    otherwise) - this is what stops an admin editing someone else's habit
+    from moving it into a profile that user doesn't own. If omitted, the
+    owner's oldest profile is used for back-compat.
 
     Shared by the habits CRUD and the Loop Habit Tracker import.
     """
@@ -309,12 +309,14 @@ async def resolve_habit_profile_id(
     return default_profile.id
 
 
-async def get_owned_habit(db: AsyncSession, habit_id: int, current_user: User) -> Habit:
+async def get_owned_habit(
+    db: AsyncSession, habit_id: int, current_user: User
+) -> tuple[Habit, Profile]:
     """
-    Fetch a habit by ID and authorize the caller against its owner.
+    Fetch a habit by ID and authorize the caller against its owning profile.
 
-    Habits carry their owner's user_id directly (unlike the profile-scoped
-    resources), so no profile lookup is needed.
+    A thin wrapper over get_owned_child, kept as a named helper because the
+    habits and trackers routers both need the same 404 detail.
 
     Args:
         db: The database session
@@ -322,19 +324,21 @@ async def get_owned_habit(db: AsyncSession, habit_id: int, current_user: User) -
         current_user: The authenticated user
 
     Returns:
-        The habit
+        (habit, profile) tuple - callers that only need the habit discard
+        profile
 
     Raises:
         HTTPException: 404 if the habit does not exist, 403 if the caller is
-        neither the habit's owner nor an admin
+        neither the owning profile's owner nor an admin
     """
-    habit = await db.get(Habit, habit_id)
-    if not habit:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
-        )
-    authorize_resource_access(current_user, habit.user_id, "habit")
-    return habit
+    return await get_owned_child(
+        db,
+        Habit,
+        habit_id,
+        current_user,
+        not_found_detail="Habit not found",
+        resource_name="habit",
+    )
 
 
 def resolve_timezone(tz: str | None) -> ZoneInfo | None:

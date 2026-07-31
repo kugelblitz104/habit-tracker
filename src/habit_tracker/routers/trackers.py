@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
-    authorize_resource_access,
+    authorize_parent_profile,
     get_current_user,
     get_db,
     get_owned_habit,
@@ -30,10 +30,10 @@ async def _get_owned_tracker(
     db: AsyncSession, tracker_id: int, current_user: User
 ) -> Tracker:
     """Fetch a tracker by ID (404 if missing) and verify its habit exists
-    (404) and belongs to the caller (403).
+    (404) and its owning profile belongs to the caller (403).
 
-    Deliberately NOT folded into get_owned_child: a tracker authorizes via
-    its habit's user_id, not a profile_id, and raises a second 404
+    Deliberately NOT folded into get_owned_child: a tracker reaches its
+    profile indirectly through its habit, and raises a second 404
     ("Habit not found") that no other child-resource helper does.
     """
     tracker = await db.get(Tracker, tracker_id)
@@ -46,7 +46,7 @@ async def _get_owned_tracker(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
         )
-    authorize_resource_access(current_user, habit.user_id, "tracker")
+    await authorize_parent_profile(db, habit.profile_id, current_user, "tracker")
     return tracker
 
 

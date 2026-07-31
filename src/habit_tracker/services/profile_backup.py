@@ -317,7 +317,6 @@ async def restore_profile_backup(
     habit_map: dict[int, int] = {}
     for item in backup.habits:
         row = Habit(
-            user_id=user.id,
             profile_id=profile.id,
             **item.model_dump(exclude={"id"}, exclude_none=True),
         )
