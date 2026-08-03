@@ -138,6 +138,8 @@ class HabitFactory(BaseFactory):
         exclude = ("user",)
 
     name = Faker("text", max_nb_chars=50)
+    # Derived from the name, like TaskFactory.slug - see the note there.
+    slug = LazyAttribute(lambda o: slugify(o.name))
     question = Faker("sentence", nb_words=5, variable_nb_words=True)
     color = Faker("color")
     frequency = LazyFunction(lambda: random.randint(1, 7))
@@ -167,6 +169,8 @@ class ProjectFactory(BaseFactory):
         model = Project
 
     name = Faker("text", max_nb_chars=50)
+    # Derived from the name, like TaskFactory.slug - see the note there.
+    slug = LazyAttribute(lambda o: slugify(o.name))
     color = Faker("color")
     notes = Faker("paragraph", nb_sentences=3, variable_nb_sentences=True)
     archived = False

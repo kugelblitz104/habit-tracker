@@ -18,6 +18,7 @@ from habit_tracker.core.dependencies import (
     resolve_today,
 )
 from habit_tracker.core.http import bulk_delete_in_profile, validate_sort_ids
+from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import (
     HabitCreate,
     HabitKPIs,
@@ -64,11 +65,19 @@ async def create_habit(
     - **category**: Optional free-text group label (e.g. "Hygiene")
     - **profile_id**: The profile this habit belongs to. Must belong to the
       current user
+
+    The response carries a server-assigned **slug** derived from the name and
+    unique within the profile ("Stretch" twice gives `stretch` then
+    `stretch-2`), for use as a readable detail URL - see
+    `GET /habits/by-slug/{slug}`. It cannot be set by the client.
     """
     profile_id = await resolve_habit_profile_id(db, current_user.id, habit.profile_id)
     db_habit = Habit(
         **habit.model_dump(exclude={"profile_id"}),
         profile_id=profile_id,
+    )
+    db_habit.slug = await allocate_slug(
+        db, Habit, profile_id=profile_id, source=habit.name
     )
     db.add(db_habit)
     await db.commit()
@@ -215,6 +224,72 @@ async def list_habits(
     )
 
 
+async def _habit_to_read(db: AsyncSession, habit: Habit, tz: str | None) -> HabitRead:
+    """A HabitRead with today's completed/skipped flags resolved in `tz`.
+
+    Shared by the by-id and by-slug reads so the two cannot drift; the list
+    endpoint computes the same flags in bulk for a whole page instead.
+    """
+    habit_read: HabitRead = HabitRead.model_validate(habit)
+    today = resolve_today(tz)
+    today_tracker = (
+        await db.execute(
+            select(Tracker)
+            .filter(Tracker.habit_id == habit.id, Tracker.dated == today)
+            .limit(1)
+        )
+    ).scalar()
+
+    habit_read.completed_today = (
+        today_tracker.status == TrackerStatus.COMPLETED if today_tracker else False
+    )
+    habit_read.skipped_today = (
+        today_tracker.status == TrackerStatus.SKIPPED if today_tracker else False
+    )
+    return habit_read
+
+
+# NOTE: must stay declared before GET /{habit_id}, per this router's
+# static-paths-first convention.
+@router.get("/by-slug/{slug}", summary="Get a habit by its URL slug")
+async def read_habit_by_slug(
+    slug: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile the slug belongs to"),
+    tz: str | None = Query(
+        default=None,
+        description=(
+            "IANA timezone name (e.g. 'America/New_York'). When provided, "
+            "'today' for completed_today/skipped_today is today in this "
+            "zone; when omitted, the server's local date is used."
+        ),
+    ),
+) -> HabitRead:
+    """
+    Retrieve a habit by its URL **slug** instead of its numeric id, so a habit
+    URL can read as the habit it opens (`/habits/daily-stretch`). The response
+    is identical to `GET /habits/{habit_id}`.
+
+    - **slug**: The habit's slug, as returned in **slug** on any habit read
+    - **profile_id**: The profile the slug belongs to (required)
+    - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
+
+    Slugs are unique per profile and are re-derived when a habit's name changes,
+    so a slug that resolved before a rename returns 404 afterwards - the numeric
+    route is the stable one.
+    """
+    await get_owned_profile(db, profile_id, current_user, "habit")
+
+    habit = await get_by_slug(db, Habit, profile_id=profile_id, slug=slug)
+    if habit is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found"
+        )
+
+    return await _habit_to_read(db, habit, tz)
+
+
 @router.get("/{habit_id}", summary="Get a habit by ID")
 async def read_habit(
     habit_id: int,
@@ -236,24 +311,7 @@ async def read_habit(
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
     """
     habit, _ = await get_owned_habit(db, habit_id, current_user)
-    habit_read: HabitRead = HabitRead.model_validate(habit)
-    today = resolve_today(tz)
-    today_tracker = (
-        await db.execute(
-            select(Tracker)
-            .filter(Tracker.habit_id == habit_id, Tracker.dated == today)
-            .limit(1)
-        )
-    ).scalar()
-
-    habit_read.completed_today = (
-        today_tracker.status == TrackerStatus.COMPLETED if today_tracker else False
-    )
-    habit_read.skipped_today = (
-        today_tracker.status == TrackerStatus.SKIPPED if today_tracker else False
-    )
-
-    return habit_read
+    return await _habit_to_read(db, habit, tz)
 
 
 @router.get("/{habit_id}/trackers", summary="List all trackers for a habit")
@@ -502,8 +560,26 @@ async def _apply_habit_update(
         habit_data["profile_id"] = await resolve_habit_profile_id(
             db, profile.user_id, habit_data["profile_id"]
         )
+    previous_name = db_habit.name
+    previous_profile_id = db_habit.profile_id
+
     for key, value in habit_data.items():
         setattr(db_habit, key, value)
+
+    # Re-slug when the name changes (the slug tracks the name, so renaming a
+    # habit changes its URL and the old one stops resolving - the numeric URL
+    # always keeps working). Also re-slug on a profile move, since slugs are
+    # unique per profile and the clean slug may already be taken in the new one.
+    # Here rather than in the two routes so PUT and PATCH cannot drift.
+    if db_habit.name != previous_name or db_habit.profile_id != previous_profile_id:
+        db_habit.slug = await allocate_slug(
+            db,
+            Habit,
+            profile_id=db_habit.profile_id,
+            source=db_habit.name,
+            exclude_id=db_habit.id,
+        )
+
     db_habit.updated_date = datetime.now()  # server-stamped, never client-set
 
 
@@ -558,6 +634,10 @@ async def patch_habit(
     - **profile_id**: Move the habit to another profile (must belong to the
       habit's owner)
 
+    Changing the **name** re-derives the read-only **slug**, so the habit's
+    `/habits/by-slug/{slug}` URL changes and the previous one stops resolving;
+    the numeric id URL is unaffected. Moving the habit to another profile also
+    re-derives it, since slugs are unique per profile.
     """
     db_habit, profile = await get_owned_habit(db, habit_id, current_user)
     await _apply_habit_update(

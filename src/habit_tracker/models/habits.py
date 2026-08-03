@@ -60,6 +60,11 @@ class HabitCreate(HabitBase):
 class HabitRead(_StampedRead, HabitBase):
     completed_today: bool = False
     skipped_today: bool = False
+    # Server-assigned URL slug derived from `name` (see core/slugs.py). Read-only
+    # by design: absent from HabitCreate/HabitUpdate so a client can never set or
+    # clear it. Declared last so adding it appends to the OpenAPI properties
+    # rather than reordering them.
+    slug: str
 
 
 class HabitUpdate(BaseModel):

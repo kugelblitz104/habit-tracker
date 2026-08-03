@@ -34,6 +34,11 @@ class ProjectCreate(ProjectBase):
 class ProjectRead(_StampedRead, ProjectBase):
     open_count: int = 0
     done_count: int = 0
+    # Server-assigned URL slug derived from `name` (see core/slugs.py). Read-only
+    # by design: absent from ProjectCreate/ProjectUpdate so a client can never
+    # set or clear it. Declared last so adding it appends to the OpenAPI
+    # properties rather than reordering them.
+    slug: str
 
 
 class ProjectUpdate(BaseModel):

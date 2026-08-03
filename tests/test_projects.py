@@ -275,6 +275,225 @@ class TestGetProject:
         assert response.status_code == 403
 
 
+class TestProjectSlugs:
+    """Tests for server-assigned slugs and GET /projects/by-slug/{slug}.
+
+    The slugify/numbering rules themselves are pinned DB-free in test_slugs.py
+    and exercised through tasks in test_tasks.py::TestTaskSlugs; this class
+    covers the projects router's own wiring.
+    """
+
+    async def test_create_assigns_slug_from_name(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/projects/",
+            json={
+                "profile_id": profile.id,
+                "name": "Alpha Project",
+                "color": "#336699",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["slug"] == "alpha-project"
+
+    async def test_duplicate_names_number_off_each_other(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        slugs = []
+        for _ in range(2):
+            response = await client.post(
+                "/projects/",
+                json={"profile_id": profile.id, "name": "Alpha", "color": "#336699"},
+            )
+            assert response.status_code == 201
+            slugs.append(response.json()["slug"])
+
+        assert slugs == ["alpha", "alpha-2"]
+
+    async def test_get_by_slug_matches_the_by_id_response(
+        self, client, db_session, login_as
+    ):
+        """Including the task counts, which the by-slug route computes too."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={
+                "profile_id": profile.id,
+                "name": "Alpha Project",
+                "color": "#336699",
+            },
+        )
+        project_id = created.json()["id"]
+
+        TaskFactory(profile=profile, project_id=project_id)
+        DoneTaskFactory(profile=profile, project_id=project_id)
+        await db_session.commit()
+
+        by_slug = await client.get(
+            "/projects/by-slug/alpha-project", params={"profile_id": profile.id}
+        )
+        assert by_slug.status_code == 200
+        assert by_slug.json()["open_count"] == 1
+        assert by_slug.json()["done_count"] == 1
+
+        by_id = await client.get(f"/projects/{project_id}")
+        assert by_id.json() == by_slug.json()
+
+    async def test_get_by_slug_unknown_slug_404(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/projects/by-slug/nothing-here", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_does_not_cross_profiles(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        personal = ProfileFactory(user=user, name="Personal")
+        work = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={"profile_id": personal.id, "name": "Alpha", "color": "#336699"},
+        )
+        assert created.status_code == 201
+
+        response = await client.get(
+            "/projects/by-slug/alpha", params={"profile_id": work.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_other_users_profile_403(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
+        foreign_profile = ProfileFactory(user=other_user, name="Theirs")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/projects/by-slug/anything", params={"profile_id": foreign_profile.id}
+        )
+        assert response.status_code == 403
+
+    async def test_rename_reslugs_and_old_slug_stops_resolving(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={"profile_id": profile.id, "name": "Alpha", "color": "#336699"},
+        )
+        project_id = created.json()["id"]
+
+        patched = await client.patch(f"/projects/{project_id}", json={"name": "Beta"})
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "beta"
+
+        stale = await client.get(
+            "/projects/by-slug/alpha", params={"profile_id": profile.id}
+        )
+        assert stale.status_code == 404
+        assert (await client.get(f"/projects/{project_id}")).status_code == 200
+
+    async def test_rename_to_same_slug_does_not_bump_itself(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={"profile_id": profile.id, "name": "Alpha", "color": "#336699"},
+        )
+        patched = await client.patch(
+            f"/projects/{created.json()['id']}", json={"name": "  Alpha!  "}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "alpha"
+
+    async def test_patch_without_name_keeps_the_slug(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={"profile_id": profile.id, "name": "Alpha", "color": "#336699"},
+        )
+        patched = await client.patch(
+            f"/projects/{created.json()['id']}", json={"color": "#112233"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "alpha"
+
+    async def test_slug_is_read_only(self, client, db_session, login_as):
+        """`slug` is absent from ProjectCreate/ProjectUpdate, so a client cannot
+        set it - the derived slug wins."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/projects/",
+            json={
+                "profile_id": profile.id,
+                "name": "Alpha",
+                "color": "#336699",
+                "slug": "hand-picked",
+            },
+        )
+        assert created.status_code == 201
+        assert created.json()["slug"] == "alpha"
+
+        patched = await client.patch(
+            f"/projects/{created.json()['id']}", json={"slug": "hand-picked"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "alpha"
+
+
 class TestPatchProject:
     """Tests for PATCH /projects/{project_id} endpoint."""
 

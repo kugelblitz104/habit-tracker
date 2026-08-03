@@ -25,6 +25,7 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
     resolve_habit_profile_id,
 )
+from habit_tracker.core.slugs import allocate_slug
 from habit_tracker.models.imports import (
     ExportResult,
     ImportedHabitSummary,
@@ -209,6 +210,9 @@ async def import_from_loop_habit_tracker(
                 new_habit = Habit(
                     profile_id=resolved_profile_id,
                     name=name,
+                    slug=await allocate_slug(
+                        db, Habit, profile_id=resolved_profile_id, source=name
+                    ),
                     question=question,
                     color=color,
                     frequency=frequency,

@@ -149,6 +149,8 @@ class Habit(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # URL slug derived from `name` - see Task.slug and core/slugs.py.
+    slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
     question: Mapped[str] = mapped_column(String, nullable=False)
     category: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
     color: Mapped[str] = mapped_column(String, nullable=False)
@@ -185,6 +187,8 @@ class Project(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # URL slug derived from `name` - see Task.slug and core/slugs.py.
+    slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
     color: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -323,7 +327,7 @@ class Task(Base):
     # title changes. NOT NULL like `title` itself, since it is a function of it -
     # core/slugs.slugify always yields a slug, falling back to "task" for a title
     # whose own characters can't produce one.
-    # Indexed but NOT unique - see core/slugs.allocate_task_slug for why.
+    # Indexed but NOT unique - see core/slugs.allocate_slug for why.
     slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.core.slugs import allocate_task_slug
+from habit_tracker.core.slugs import allocate_slug
 from habit_tracker.models.backup import (
     BACKUP_FORMAT,
     BACKUP_VERSION,
@@ -253,6 +253,9 @@ async def restore_profile_backup(
     for item in backup.projects:
         row = Project(
             profile_id=profile.id,
+            slug=await allocate_slug(
+                db, Project, profile_id=profile.id, source=item.name
+            ),
             **item.model_dump(exclude={"id"}, exclude_none=True),
         )
         db.add(row)
@@ -279,7 +282,9 @@ async def restore_profile_backup(
             # profile than the export came from. Each row is flushed before the
             # next is allocated, so titles repeated within one backup number
             # off each other.
-            slug=await allocate_task_slug(db, profile_id=profile.id, title=item.title),
+            slug=await allocate_slug(
+                db, Task, profile_id=profile.id, source=item.title
+            ),
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),
@@ -311,7 +316,9 @@ async def restore_profile_backup(
                 else None
             ),
             parent_id=parent_new_id,
-            slug=await allocate_task_slug(db, profile_id=profile.id, title=item.title),
+            slug=await allocate_slug(
+                db, Task, profile_id=profile.id, source=item.title
+            ),
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),
@@ -326,6 +333,9 @@ async def restore_profile_backup(
     for item in backup.habits:
         row = Habit(
             profile_id=profile.id,
+            slug=await allocate_slug(
+                db, Habit, profile_id=profile.id, source=item.name
+            ),
             **item.model_dump(exclude={"id"}, exclude_none=True),
         )
         db.add(row)

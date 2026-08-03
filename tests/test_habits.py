@@ -1,6 +1,7 @@
 """Tests for habit management endpoints."""
 
 from datetime import date, datetime
+from typing import ClassVar
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -424,6 +425,249 @@ class TestGetHabit:
         response = await client.get(f"/habits/{habit.id}", params={"tz": "Not/AZone"})
         assert response.status_code == 422
         assert "Invalid timezone" in response.json()["detail"]
+
+
+class TestHabitSlugs:
+    """Tests for server-assigned slugs and GET /habits/by-slug/{slug}.
+
+    The slugify/numbering rules themselves are pinned DB-free in test_slugs.py;
+    this class covers the habits router's own wiring - including that PUT and
+    PATCH both re-slug, since they share `_apply_habit_update`.
+    """
+
+    # A COMPLETE body: PUT is a full replace, so an omitted optional field is
+    # sent as null and trips the NOT NULL columns.
+    HABIT_BODY: ClassVar[dict] = {
+        "name": "Daily Stretch",
+        "question": "Did you stretch today?",
+        "color": "#336699",
+        "frequency": 1,
+        "range": 1,
+        "reminder": False,
+        "notes": None,
+        "archived": False,
+        "sort_order": 0,
+    }
+
+    def _body(self, profile_id, **overrides):
+        return {**self.HABIT_BODY, "profile_id": profile_id, **overrides}
+
+    async def test_create_assigns_slug_from_name(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post("/habits/", json=self._body(profile.id))
+        assert response.status_code == 201
+        assert response.json()["slug"] == "daily-stretch"
+
+    async def test_duplicate_names_number_off_each_other(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        slugs = []
+        for _ in range(2):
+            response = await client.post("/habits/", json=self._body(profile.id))
+            assert response.status_code == 201
+            slugs.append(response.json()["slug"])
+
+        assert slugs == ["daily-stretch", "daily-stretch-2"]
+
+    async def test_get_by_slug_matches_the_by_id_response(
+        self, client, db_session, login_as
+    ):
+        """Including today's completed/skipped flags - both routes go through
+        the same `_habit_to_read`."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        habit = HabitFactory(profile=profile, name="Daily Stretch")
+        await db_session.commit()
+        TrackerFactory(habit=habit, dated=date.today(), status=TrackerStatus.COMPLETED)
+        await db_session.commit()
+        habit_id = habit.id
+
+        by_slug = await client.get(
+            "/habits/by-slug/daily-stretch", params={"profile_id": profile.id}
+        )
+        assert by_slug.status_code == 200
+        assert by_slug.json()["completed_today"] is True
+
+        by_id = await client.get(f"/habits/{habit_id}")
+        assert by_id.json() == by_slug.json()
+
+    async def test_get_by_slug_honours_tz(self, client, db_session, login_as):
+        """The tz param reaches the shared read helper, same as the by-id route."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        tz = "Pacific/Kiritimati"
+        today_there = datetime.now(ZoneInfo(tz)).date()
+        habit = HabitFactory(profile=profile, name="Daily Stretch")
+        await db_session.commit()
+        TrackerFactory(habit=habit, dated=today_there, status=TrackerStatus.COMPLETED)
+        await db_session.commit()
+
+        response = await client.get(
+            "/habits/by-slug/daily-stretch",
+            params={"profile_id": profile.id, "tz": tz},
+        )
+        assert response.status_code == 200
+        assert response.json()["completed_today"] is True
+
+    async def test_get_by_slug_unknown_slug_404(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/by-slug/nothing-here", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_does_not_cross_profiles(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        personal = ProfileFactory(user=user, name="Personal")
+        work = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+        await login_as(user)
+
+        assert (
+            await client.post("/habits/", json=self._body(personal.id))
+        ).status_code == 201
+
+        response = await client.get(
+            "/habits/by-slug/daily-stretch", params={"profile_id": work.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_other_users_profile_403(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
+        foreign_profile = ProfileFactory(user=other_user, name="Theirs")
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/by-slug/anything", params={"profile_id": foreign_profile.id}
+        )
+        assert response.status_code == 403
+
+    async def test_patch_rename_reslugs_and_old_slug_stops_resolving(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post("/habits/", json=self._body(profile.id))
+        habit_id = created.json()["id"]
+
+        patched = await client.patch(
+            f"/habits/{habit_id}", json={"name": "Evening Walk"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "evening-walk"
+
+        stale = await client.get(
+            "/habits/by-slug/daily-stretch", params={"profile_id": profile.id}
+        )
+        assert stale.status_code == 404
+        assert (await client.get(f"/habits/{habit_id}")).status_code == 200
+
+    async def test_put_rename_also_reslugs(self, client, db_session, login_as):
+        """PUT goes through the same shared helper, so it must re-slug too."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post("/habits/", json=self._body(profile.id))
+        habit_id = created.json()["id"]
+
+        replaced = await client.put(
+            f"/habits/{habit_id}",
+            json=self._body(profile.id, name="Evening Walk"),
+        )
+        assert replaced.status_code == 200
+        assert replaced.json()["slug"] == "evening-walk"
+
+    async def test_rename_to_same_slug_does_not_bump_itself(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post("/habits/", json=self._body(profile.id))
+        patched = await client.patch(
+            f"/habits/{created.json()['id']}", json={"name": "  Daily   stretch!  "}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "daily-stretch"
+
+    async def test_patch_without_name_keeps_the_slug(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post("/habits/", json=self._body(profile.id))
+        patched = await client.patch(
+            f"/habits/{created.json()['id']}", json={"color": "#112233"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "daily-stretch"
+
+    async def test_slug_is_read_only(self, client, db_session, login_as):
+        """`slug` is absent from HabitCreate/HabitUpdate, so a client cannot set
+        it - the derived slug wins."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/habits/", json=self._body(profile.id, slug="hand-picked")
+        )
+        assert created.status_code == 201
+        assert created.json()["slug"] == "daily-stretch"
+
+        patched = await client.patch(
+            f"/habits/{created.json()['id']}", json={"slug": "hand-picked"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "daily-stretch"
 
 
 class TestUpdateHabitPut:

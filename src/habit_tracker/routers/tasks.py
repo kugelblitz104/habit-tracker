@@ -20,7 +20,7 @@ from habit_tracker.core.http import (
     integrity_conflict,
     validate_sort_ids,
 )
-from habit_tracker.core.slugs import allocate_task_slug
+from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import (
     TaskCreate,
     TaskList,
@@ -320,8 +320,8 @@ async def create_task(
         )
 
     db_task = Task(**task.model_dump())
-    db_task.slug = await allocate_task_slug(
-        db, profile_id=task.profile_id, title=task.title
+    db_task.slug = await allocate_slug(
+        db, Task, profile_id=task.profile_id, source=task.title
     )
     if db_task.status in CLOSED_STATUSES:
         db_task.closed_date = datetime.now()
@@ -447,16 +447,7 @@ async def read_task_by_slug(
     """
     await get_owned_profile(db, profile_id, current_user, "task")
 
-    # Lowest id wins: slugs are allocated to be unique per profile but the
-    # allocation is not constraint-enforced, so a duplicate is possible and has
-    # to resolve deterministically rather than arbitrarily.
-    result = await db.execute(
-        select(Task)
-        .filter(Task.profile_id == profile_id, Task.slug == slug)
-        .order_by(Task.id.asc())
-        .limit(1)
-    )
-    task = result.scalar_one_or_none()
+    task = await get_by_slug(db, Task, profile_id=profile_id, slug=slug)
     if task is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
@@ -638,10 +629,11 @@ async def patch_task(
     # always keeps working). Also re-slug on a profile move, since slugs are
     # unique per profile and the clean slug may already be taken in the new one.
     if db_task.title != previous_title or db_task.profile_id != previous_profile_id:
-        db_task.slug = await allocate_task_slug(
+        db_task.slug = await allocate_slug(
             db,
+            Task,
             profile_id=db_task.profile_id,
-            title=db_task.title,
+            source=db_task.title,
             exclude_id=task_id,
         )
 

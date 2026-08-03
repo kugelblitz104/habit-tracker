@@ -16,6 +16,7 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
 )
 from habit_tracker.core.http import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import (
     ProjectCreate,
     ProjectList,
@@ -156,14 +157,56 @@ async def create_project(
     - **color**: Hex color code for visual representation
     - **notes**: Optional markdown notes about the project
     - **archived**: Whether the project is archived
+
+    The response carries a server-assigned **slug** derived from the name and
+    unique within the profile ("Alpha" twice gives `alpha` then `alpha-2`), for
+    use as a readable detail URL - see `GET /projects/by-slug/{slug}`. It cannot
+    be set by the client.
     """
     await get_owned_profile(db, project.profile_id, current_user, "project")
 
     db_project = Project(**project.model_dump())
+    db_project.slug = await allocate_slug(
+        db, Project, profile_id=project.profile_id, source=project.name
+    )
     db.add(db_project)
     await db.commit()
     await db.refresh(db_project)
     return _project_to_read(db_project, {})
+
+
+# NOTE: must stay declared before GET /{project_id}, per this router's
+# static-paths-first convention.
+@router.get("/by-slug/{slug}", summary="Get a project by its URL slug")
+async def read_project_by_slug(
+    slug: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile the slug belongs to"),
+) -> ProjectRead:
+    """
+    Retrieve a project by its URL **slug** instead of its numeric id, so a
+    project URL can read as the project it opens (`/projects/alpha-project`).
+    The response is identical to `GET /projects/{project_id}`, task counts
+    included.
+
+    - **slug**: The project's slug, as returned in **slug** on any project read
+    - **profile_id**: The profile the slug belongs to (required)
+
+    Slugs are unique per profile and are re-derived when a project's name
+    changes, so a slug that resolved before a rename returns 404 afterwards -
+    the numeric route is the stable one.
+    """
+    await get_owned_profile(db, profile_id, current_user, "project")
+
+    project = await get_by_slug(db, Project, profile_id=profile_id, slug=slug)
+    if project is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+        )
+
+    counts = await _get_task_counts(db, [project.id])
+    return _project_to_read(project, counts)
 
 
 @router.get("/{project_id}", summary="Get a project by ID")
@@ -203,6 +246,11 @@ async def patch_project(
     - **color**: Hex color code for visual representation
     - **notes**: Optional markdown notes about the project
     - **archived**: Whether the project is archived
+
+    Changing the **name** re-derives the read-only **slug**, so the project's
+    `/projects/by-slug/{slug}` URL changes and the previous one stops resolving;
+    the numeric id URL is unaffected. Moving the project to another profile also
+    re-derives it, since slugs are unique per profile.
     """
     db_project, profile = await _get_project_and_profile(db, project_id, current_user)
 
@@ -224,8 +272,25 @@ async def patch_project(
             .values(profile_id=new_profile_id)
         )
 
+    previous_name = db_project.name
+    previous_profile_id = db_project.profile_id
+
     for key, value in project_data.items():
         setattr(db_project, key, value)
+
+    # Re-slug when the name changes (the slug tracks the name, so renaming a
+    # project changes its URL and the old one stops resolving - the numeric URL
+    # always keeps working). Also re-slug on a profile move, since slugs are
+    # unique per profile and the clean slug may already be taken in the new one.
+    if db_project.name != previous_name or db_project.profile_id != previous_profile_id:
+        db_project.slug = await allocate_slug(
+            db,
+            Project,
+            profile_id=db_project.profile_id,
+            source=db_project.name,
+            exclude_id=project_id,
+        )
+
     db_project.updated_date = datetime.now()  # server-stamped, never client-set
     try:
         await db.commit()
