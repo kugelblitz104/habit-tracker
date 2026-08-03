@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.slugs import allocate_task_slug
 from habit_tracker.models.backup import (
     BACKUP_FORMAT,
     BACKUP_VERSION,
@@ -273,6 +274,12 @@ async def restore_profile_backup(
                 else None
             ),
             parent_id=None,
+            # Slugs are allocated fresh rather than carried in the backup: they
+            # are unique per profile, and an import always lands in a different
+            # profile than the export came from. Each row is flushed before the
+            # next is allocated, so titles repeated within one backup number
+            # off each other.
+            slug=await allocate_task_slug(db, profile_id=profile.id, title=item.title),
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),
@@ -304,6 +311,7 @@ async def restore_profile_backup(
                 else None
             ),
             parent_id=parent_new_id,
+            slug=await allocate_task_slug(db, profile_id=profile.id, title=item.title),
             **item.model_dump(
                 exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),

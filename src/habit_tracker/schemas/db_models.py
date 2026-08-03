@@ -319,6 +319,12 @@ class Task(Base):
         index=True,
     )
     title: Mapped[str] = mapped_column(String, nullable=False)
+    # URL slug derived from `title`, unique per profile, re-derived whenever the
+    # title changes. NOT NULL like `title` itself, since it is a function of it -
+    # core/slugs.slugify always yields a slug, falling back to "task" for a title
+    # whose own characters can't produce one.
+    # Indexed but NOT unique - see core/slugs.allocate_task_slug for why.
+    slug: Mapped[str] = mapped_column(String, nullable=False, index=True)
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)

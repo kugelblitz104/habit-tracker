@@ -804,6 +804,379 @@ class TestGetTask:
         assert response.status_code == 404
 
 
+class TestTaskSlugs:
+    """Tests for server-assigned slugs and GET /tasks/by-slug/{slug}.
+
+    The pure slugify/numbering rules are pinned DB-free in test_slugs.py; this
+    class covers allocation against real rows (uniqueness scope, re-slug on
+    rename) and the lookup endpoint.
+    """
+
+    async def test_create_assigns_slug_from_title(self, client, db_session, login_as):
+        """A created task comes back with a slug derived from its title."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "Setup Utilities"}
+        )
+        assert response.status_code == 201
+        assert response.json()["slug"] == "setup-utilities"
+
+    async def test_duplicate_titles_number_off_each_other(
+        self, client, db_session, login_as
+    ):
+        """The first task keeps the clean slug; the next gets -2, then -3."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        slugs = []
+        for _ in range(3):
+            response = await client.post(
+                "/tasks/", json={"profile_id": profile.id, "title": "Follow up"}
+            )
+            assert response.status_code == 201
+            slugs.append(response.json()["slug"])
+
+        assert slugs == ["follow-up", "follow-up-2", "follow-up-3"]
+
+    async def test_slug_uniqueness_is_per_profile(self, client, db_session, login_as):
+        """The same title in two profiles keeps the clean slug in both."""
+        user = UserFactory()
+        await db_session.commit()
+
+        first = ProfileFactory(user=user, name="Personal")
+        second = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        await login_as(user)
+
+        for profile in (first, second):
+            response = await client.post(
+                "/tasks/", json={"profile_id": profile.id, "title": "Follow up"}
+            )
+            assert response.status_code == 201
+            assert response.json()["slug"] == "follow-up"
+
+    async def test_unslugifiable_title_still_gets_a_slug(
+        self, client, db_session, login_as
+    ):
+        """An all-digit title would collide with the numeric id route, so it
+        takes the fallback prefix. Every task has a slug — the column is NOT
+        NULL, like the title it derives from."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "2841"}
+        )
+        assert response.status_code == 201
+        assert response.json()["slug"] == "task-2841"
+
+        # And it resolves, rather than being reachable only by id.
+        found = await client.get(
+            "/tasks/by-slug/task-2841", params={"profile_id": profile.id}
+        )
+        assert found.status_code == 200
+        assert found.json()["id"] == response.json()["id"]
+
+    async def test_titles_that_share_a_fallback_slug_are_numbered(
+        self, client, db_session, login_as
+    ):
+        """Two titles that each yield nothing on their own don't collide."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        slugs = []
+        for title in ("???", "日本語"):
+            response = await client.post(
+                "/tasks/", json={"profile_id": profile.id, "title": title}
+            )
+            assert response.status_code == 201
+            slugs.append(response.json()["slug"])
+
+        assert slugs == ["task", "task-2"]
+
+    async def test_get_by_slug_returns_the_task(self, client, db_session, login_as):
+        """The by-slug response matches the by-id one, band and counts included."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/",
+            json={"profile_id": profile.id, "title": "Setup Utilities", "priority": 3},
+        )
+        task_id = created.json()["id"]
+
+        response = await client.get(
+            "/tasks/by-slug/setup-utilities", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == task_id
+        assert data["slug"] == "setup-utilities"
+        assert data["band"] == "now"
+
+        by_id = await client.get(f"/tasks/{task_id}")
+        assert by_id.json() == data
+
+    async def test_get_by_slug_includes_subtask_counts(
+        self, client, db_session, login_as
+    ):
+        """Subtask counts are aggregated for the by-slug response too."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        parent = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "Parent task"}
+        )
+        parent_id = parent.json()["id"]
+
+        for title, task_status in (("Sub one", TaskStatus.DONE), ("Sub two", None)):
+            payload = {
+                "profile_id": profile.id,
+                "title": title,
+                "parent_id": parent_id,
+            }
+            if task_status is not None:
+                payload["status"] = task_status
+            assert (await client.post("/tasks/", json=payload)).status_code == 201
+
+        response = await client.get(
+            "/tasks/by-slug/parent-task", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 200
+        assert response.json()["subtask_count"] == 2
+        assert response.json()["subtask_done_count"] == 1
+
+    async def test_get_by_slug_unknown_slug_404(self, client, db_session, login_as):
+        """An unknown slug is a 404, not an empty 200."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/tasks/by-slug/nothing-here", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_does_not_cross_profiles(
+        self, client, db_session, login_as
+    ):
+        """A slug is only looked up inside the profile it was asked for, even
+        when the caller owns both profiles."""
+        user = UserFactory()
+        await db_session.commit()
+
+        personal = ProfileFactory(user=user, name="Personal")
+        work = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/", json={"profile_id": personal.id, "title": "Setup Utilities"}
+        )
+        assert created.status_code == 201
+
+        response = await client.get(
+            "/tasks/by-slug/setup-utilities", params={"profile_id": work.id}
+        )
+        assert response.status_code == 404
+
+    async def test_get_by_slug_other_users_profile_403(
+        self, client, db_session, login_as
+    ):
+        """Ownership is checked on the profile before any lookup happens."""
+        user = UserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
+
+        foreign_profile = ProfileFactory(user=other_user, name="Theirs")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/tasks/by-slug/anything", params={"profile_id": foreign_profile.id}
+        )
+        assert response.status_code == 403
+
+    async def test_rename_reslugs_and_old_slug_stops_resolving(
+        self, client, db_session, login_as
+    ):
+        """The slug tracks the title: after a rename the new slug resolves, the
+        old one 404s, and the numeric URL keeps working throughout."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "Setup Utilities"}
+        )
+        task_id = created.json()["id"]
+
+        patched = await client.patch(
+            f"/tasks/{task_id}", json={"title": "Configure Utilities"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "configure-utilities"
+
+        stale = await client.get(
+            "/tasks/by-slug/setup-utilities", params={"profile_id": profile.id}
+        )
+        assert stale.status_code == 404
+
+        fresh = await client.get(
+            "/tasks/by-slug/configure-utilities", params={"profile_id": profile.id}
+        )
+        assert fresh.status_code == 200
+        assert fresh.json()["id"] == task_id
+
+        assert (await client.get(f"/tasks/{task_id}")).status_code == 200
+
+    async def test_rename_to_same_slug_does_not_bump_itself(
+        self, client, db_session, login_as
+    ):
+        """Re-slugging excludes the task's own row, so a title edit that yields
+        the same slug keeps it instead of colliding with itself and taking -2."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "Setup Utilities"}
+        )
+        task_id = created.json()["id"]
+        assert created.json()["slug"] == "setup-utilities"
+
+        patched = await client.patch(
+            f"/tasks/{task_id}", json={"title": "Setup   utilities!"}
+        )
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "setup-utilities"
+
+    async def test_patch_without_title_keeps_the_slug(
+        self, client, db_session, login_as
+    ):
+        """Editing anything else leaves the slug alone."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/", json={"profile_id": profile.id, "title": "Setup Utilities"}
+        )
+        task_id = created.json()["id"]
+
+        patched = await client.patch(f"/tasks/{task_id}", json={"priority": 2})
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "setup-utilities"
+
+    async def test_slug_is_read_only(self, client, db_session, login_as):
+        """`slug` is absent from TaskCreate/TaskUpdate, so a client cannot set
+        it — an attempt is ignored and the derived slug wins."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        created = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": profile.id,
+                "title": "Setup Utilities",
+                "slug": "hand-picked",
+            },
+        )
+        assert created.status_code == 201
+        assert created.json()["slug"] == "setup-utilities"
+
+        task_id = created.json()["id"]
+        patched = await client.patch(f"/tasks/{task_id}", json={"slug": "hand-picked"})
+        assert patched.status_code == 200
+        assert patched.json()["slug"] == "setup-utilities"
+
+    async def test_profile_move_reslugs_against_the_new_profile(
+        self, client, db_session, login_as
+    ):
+        """Slugs are unique per profile, so moving a task into a profile that
+        already uses its slug numbers the moved task off the existing one."""
+        user = UserFactory()
+        await db_session.commit()
+
+        personal = ProfileFactory(user=user, name="Personal")
+        work = ProfileFactory(user=user, name="Work")
+        await db_session.commit()
+
+        await login_as(user)
+
+        incumbent = await client.post(
+            "/tasks/", json={"profile_id": work.id, "title": "Follow up"}
+        )
+        assert incumbent.json()["slug"] == "follow-up"
+
+        mover = await client.post(
+            "/tasks/", json={"profile_id": personal.id, "title": "Follow up"}
+        )
+        assert mover.json()["slug"] == "follow-up"
+
+        moved = await client.patch(
+            f"/tasks/{mover.json()['id']}", json={"profile_id": work.id}
+        )
+        assert moved.status_code == 200
+        assert moved.json()["slug"] == "follow-up-2"
+
+
 class TestPatchTask:
     """Tests for PATCH /tasks/{task_id} endpoint."""
 

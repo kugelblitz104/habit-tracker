@@ -88,6 +88,12 @@ class TaskRead(TaskBase, _FromORM):
     # of them are DONE (cancelled subtasks count toward subtask_count only)
     subtask_count: int = 0
     subtask_done_count: int = 0
+    # Server-assigned URL slug (see core/slugs.py). Read-only by design: absent
+    # from TaskCreate/TaskUpdate so a client can never set or clear it. Always
+    # present, like the title it derives from.
+    # Declared last so adding it appends to the OpenAPI properties rather than
+    # reordering them.
+    slug: str
 
 
 class TaskUpdate(BaseModel):

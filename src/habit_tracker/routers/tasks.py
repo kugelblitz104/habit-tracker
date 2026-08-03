@@ -20,6 +20,7 @@ from habit_tracker.core.http import (
     integrity_conflict,
     validate_sort_ids,
 )
+from habit_tracker.core.slugs import allocate_task_slug
 from habit_tracker.models import (
     TaskCreate,
     TaskList,
@@ -292,6 +293,13 @@ async def create_task(
     Scheduled data only lives on SCHEDULED tasks: if the created status is
     anything other than SCHEDULED, scheduled_date/scheduled_time are forced to
     null even when supplied (prevents orphaned scheduled data).
+
+    The response carries a server-assigned **slug** derived from the title and
+    unique within the profile ("Follow up" twice gives `follow-up` then
+    `follow-up-2`), for use as a readable detail URL - see
+    `GET /tasks/by-slug/{slug}`. It cannot be set by the client, and is always
+    present: a title whose own characters yield no slug (all digits, or a
+    non-Latin script) falls back to "task", numbered as usual.
     """
     await get_owned_profile(db, task.profile_id, current_user, "task")
 
@@ -312,6 +320,9 @@ async def create_task(
         )
 
     db_task = Task(**task.model_dump())
+    db_task.slug = await allocate_task_slug(
+        db, profile_id=task.profile_id, title=task.title
+    )
     if db_task.status in CLOSED_STATUSES:
         db_task.closed_date = datetime.now()
     # Scheduled data only lives on SCHEDULED tasks; any other status forces the
@@ -409,6 +420,52 @@ async def sort_tasks(
     return JSONResponse(content={"detail": "Tasks sorted successfully"})
 
 
+# NOTE: must stay declared before GET /{task_id}. The paths differ in segment
+# count so FastAPI would not actually confuse them, but the router's convention
+# is static paths first and keeping to it means the next static route added here
+# is in the safe place by default.
+@router.get("/by-slug/{slug}", summary="Get a task by its URL slug")
+async def read_task_by_slug(
+    slug: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile the slug belongs to"),
+) -> TaskRead:
+    """
+    Retrieve a task by its URL **slug** instead of its numeric id, so a task
+    detail URL can read as the task it opens (`/tasks/setup-utilities`). The
+    response is identical to `GET /tasks/{task_id}`, band and subtask counts
+    included.
+
+    - **slug**: The task's slug, as returned in **slug** on any task read
+    - **profile_id**: The profile the slug belongs to (required)
+
+    Slugs are unique per profile and are re-derived when a task's title
+    changes, so a slug that resolved before a rename returns 404 afterwards -
+    the numeric route is the stable one. Every task has a slug, so every task
+    is reachable this way.
+    """
+    await get_owned_profile(db, profile_id, current_user, "task")
+
+    # Lowest id wins: slugs are allocated to be unique per profile but the
+    # allocation is not constraint-enforced, so a duplicate is possible and has
+    # to resolve deterministically rather than arbitrarily.
+    result = await db.execute(
+        select(Task)
+        .filter(Task.profile_id == profile_id, Task.slug == slug)
+        .order_by(Task.id.asc())
+        .limit(1)
+    )
+    task = result.scalar_one_or_none()
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
+        )
+
+    subtask_counts = await _get_subtask_counts(db, parent_id=task.id)
+    return _task_to_read(task, subtask_counts=subtask_counts)
+
+
 @router.get("/{task_id}", summary="Get a task by ID")
 async def read_task(
     task_id: int,
@@ -471,6 +528,11 @@ async def patch_task(
     SCHEDULED, scheduled_date/scheduled_time are forced to null - even when the
     scheduled fields themselves were not part of this update (prevents orphaned
     scheduled data).
+
+    Changing the **title** re-derives the read-only **slug**, so the task's
+    `/tasks/by-slug/{slug}` URL changes and the previous one stops resolving;
+    the numeric id URL is unaffected. Moving the task to another profile also
+    re-derives it, since slugs are unique per profile.
     """
     db_task, profile = await _get_task_and_profile(db, task_id, current_user)
 
@@ -565,8 +627,23 @@ async def patch_task(
         elif db_task.status in CLOSED_STATUSES:
             db_task.closed_date = None
 
+    previous_title = db_task.title
+    previous_profile_id = db_task.profile_id
+
     for key, value in task_data.items():
         setattr(db_task, key, value)
+
+    # Re-slug when the title changes (the slug tracks the title, so renaming a
+    # task changes its URL and the old one stops resolving - the numeric URL
+    # always keeps working). Also re-slug on a profile move, since slugs are
+    # unique per profile and the clean slug may already be taken in the new one.
+    if db_task.title != previous_title or db_task.profile_id != previous_profile_id:
+        db_task.slug = await allocate_task_slug(
+            db,
+            profile_id=db_task.profile_id,
+            title=db_task.title,
+            exclude_id=task_id,
+        )
 
     # Scheduled data only lives on SCHEDULED tasks; any other resulting status
     # forces the scheduled fields null (prevents orphaned scheduled data). This

@@ -16,6 +16,7 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
 )
 from habit_tracker.core.http import integrity_conflict
+from habit_tracker.core.slugs import allocate_task_slug
 from habit_tracker.models import (
     IntegrationConnectionCreate,
     IntegrationConnectionList,
@@ -210,6 +211,14 @@ async def sync_integration_connection(
                 skipped += 1
                 continue
 
+            # Allocated outside the savepoint below so that block stays wrapped
+            # around the insert alone. Each iteration sees the previous ones'
+            # rows (the query autoflushes), so two synced items sharing a title
+            # get `x` and `x-2` rather than colliding.
+            slug = await allocate_task_slug(
+                db, profile_id=connection.profile_id, title=item.title
+            )
+
             # Nested savepoint isolates a per-item failure (e.g. a concurrent
             # sync racing on the unique constraint) without discarding the
             # items already imported in this transaction.
@@ -218,6 +227,7 @@ async def sync_integration_connection(
                     Task(
                         profile_id=connection.profile_id,
                         title=item.title,
+                        slug=slug,
                         notes=item.description,
                         status=TaskStatus.OPEN,
                         source=connection.provider,
