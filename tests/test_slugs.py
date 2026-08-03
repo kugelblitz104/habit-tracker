@@ -2,7 +2,7 @@
 
 Deliberately DB-free, like test_habit_stats.py: `slugify` and `next_free_slug`
 are pure functions and the numbering rule is easier to pin here than through
-the API. The database-backed allocator (`allocate_task_slug`) and the
+the API. The database-backed allocator (`allocate_slug`) and the
 `/tasks/by-slug/{slug}` endpoint are covered in test_tasks.py::TestTaskSlugs.
 """
 
@@ -42,12 +42,12 @@ class TestSlugify:
         so the fallback prefix breaks the ambiguity while keeping the digits."""
         assert slugify("2841") == "task-2841"
         assert slugify("  2841  ") == "task-2841"
-        # Already prefixed by the title itself — no double prefix.
+        # Already prefixed by the title itself, so no double prefix.
         assert slugify("Task #2841") == "task-2841"
 
     def test_digits_split_by_a_hyphen_are_a_valid_slug(self):
         """ "28-41" is not all-digits, so it is kept as-is. Consumers must
-        therefore recognise the numeric-id form with a strict all-digits test —
+        therefore recognise the numeric-id form with a strict all-digits test:
         parsing the segment as an integer would read "28-41" as task 28."""
         assert slugify("28 41") == "28-41"
 
@@ -116,7 +116,7 @@ class TestSlugify:
 
 
 class TestNextFreeSlug:
-    """Tests for next_free_slug() — the numbered-suffix rule."""
+    """Tests for next_free_slug(): the numbered-suffix rule."""
 
     def test_base_when_free(self):
         assert next_free_slug("follow-up", set()) == "follow-up"
@@ -131,7 +131,7 @@ class TestNextFreeSlug:
 
     def test_fills_a_gap_left_by_a_deleted_task(self):
         """Slugs are stored, not renumbered, so deleting `follow-up-2` leaves a
-        gap — the next allocation reuses it rather than jumping to -4."""
+        gap, and the next allocation reuses it rather than jumping to -4."""
         assert (
             next_free_slug("follow-up", {"follow-up", "follow-up-3"}) == "follow-up-2"
         )

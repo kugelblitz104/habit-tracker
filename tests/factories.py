@@ -244,7 +244,7 @@ class TaskFactory(BaseFactory):
     title = Faker("sentence", nb_words=4, variable_nb_words=True)
     # Derived from the title the same way the API derives it, because `slug` is
     # NOT NULL. Deliberately NOT collision-aware: the numbered-suffix rule lives
-    # in `allocate_task_slug`, and duplicating it here would mean a second
+    # in `allocate_slug`, and duplicating it here would mean a second
     # implementation to keep in step. Two factory tasks with the same title in
     # one profile therefore share a slug, which the schema allows (the column is
     # indexed, not unique) - tests that care about numbering create tasks through

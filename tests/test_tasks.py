@@ -872,7 +872,7 @@ class TestTaskSlugs:
         self, client, db_session, login_as
     ):
         """An all-digit title would collide with the numeric id route, so it
-        takes the fallback prefix. Every task has a slug — the column is NOT
+        takes the fallback prefix. Every task has a slug: the column is NOT
         NULL, like the title it derives from."""
         user = UserFactory()
         await db_session.commit()
@@ -1121,7 +1121,7 @@ class TestTaskSlugs:
 
     async def test_slug_is_read_only(self, client, db_session, login_as):
         """`slug` is absent from TaskCreate/TaskUpdate, so a client cannot set
-        it — an attempt is ignored and the derived slug wins."""
+        it, so an attempt is ignored and the derived slug wins."""
         user = UserFactory()
         await db_session.commit()
 
