@@ -1,11 +1,12 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from habit_tracker.constants import TimeEntryKind
 from habit_tracker.core.dependencies import (
@@ -33,6 +34,28 @@ router = APIRouter(
 )
 
 
+_ParentTask = aliased(Task, name="parent_task")
+
+# An entry's effective project: its task's project, else its parent task's (so a
+# subtask's tracked time rolls up to the project the parent belongs to), else its
+# own project_id for adhoc work. Subtasks are one level deep only, so a single
+# parent hop is exhaustive. This is the ONE definition - the list filter, the
+# list projection, the /summary rollup and the single-entry reads all use it.
+_resolved_project = func.coalesce(
+    Task.project_id, _ParentTask.project_id, TimeEntry.project_id
+)
+
+
+def _join_task_parent(stmt: Select[Any]) -> Select[Any]:
+    """Outer-join a TimeEntry statement to its task and that task's parent, so
+    _resolved_project can be selected, filtered or grouped on. Both joins are on
+    a primary key, so neither fans a row out.
+    """
+    return stmt.outerjoin(Task, TimeEntry.task_id == Task.id).outerjoin(
+        _ParentTask, Task.parent_id == _ParentTask.id
+    )
+
+
 def _naive(dt: datetime | None) -> datetime | None:
     """Coerce a datetime to naive server-local time.
 
@@ -46,11 +69,34 @@ def _naive(dt: datetime | None) -> datetime | None:
     return dt
 
 
-def _to_read(entry: TimeEntry) -> TimeEntryRead:
-    """Build a TimeEntryRead, computing is_running from ended_at."""
+def _to_read(entry: TimeEntry, resolved_project_id: int | None) -> TimeEntryRead:
+    """Build a TimeEntryRead, computing is_running from ended_at.
+
+    ``resolved_project_id`` is passed in rather than derived here because
+    resolving it needs the database - see _resolved_project.
+    """
     read = TimeEntryRead.model_validate(entry)
     read.is_running = entry.ended_at is None
+    read.resolved_project_id = resolved_project_id
     return read
+
+
+async def _resolve_entry_project(db: AsyncSession, entry: TimeEntry) -> int | None:
+    """The project a single entry counts toward - see _resolved_project.
+
+    An entry with no task short-circuits to its own project_id with no query at
+    all; a task-attached one costs a single query of three primary-key lookups.
+    Re-selects through _resolved_project rather than recomputing the rule in
+    Python, so there is only ever one implementation of it.
+    """
+    if entry.task_id is None:
+        return entry.project_id
+    result = await db.execute(
+        _join_task_parent(select(_resolved_project).select_from(TimeEntry)).where(
+            TimeEntry.id == entry.id
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 async def _validate_task(db: AsyncSession, task_id: int, profile_id: int) -> None:
@@ -139,7 +185,8 @@ async def list_time_entries(
         default=None,
         description=(
             "Only entries for this project: task-attached entries whose task "
-            "belongs to the project, plus adhoc entries attached to it directly"
+            "(or that task's parent) belongs to the project, plus adhoc entries "
+            "attached to it directly"
         ),
     ),
     kind: int | None = Query(
@@ -163,8 +210,9 @@ async def list_time_entries(
 
     - **profile_id**: The profile whose time entries to list (required)
     - **task_id**: Optional. Only entries attached to this task
-    - **project_id**: Optional. Entries for this project — task-attached entries
-      whose task is in the project plus adhoc entries attached to it directly
+    - **project_id**: Optional. Entries for this project - task-attached entries
+      whose task or that task's parent is in the project, plus adhoc entries
+      attached to it directly
     - **kind**: Optional. 0 = stopwatch, 1 = pomodoro
     - **running**: Optional. true = only running entries, false = only completed
     - **limit**: Maximum number of entries to return (default: 100, max: 100)
@@ -195,19 +243,14 @@ async def list_time_entries(
         else:
             filters.append(TimeEntry.ended_at.is_not(None))
     if project_id is not None:
-        # An entry counts toward a project via its task's project (task-attached)
-        # or its own project_id (adhoc); left-join the task for the former.
-        filters.append(
-            func.coalesce(Task.project_id, TimeEntry.project_id) == project_id
-        )
+        # An entry counts toward a project via its task's project, its parent
+        # task's project (subtasks carry none of their own), or its own
+        # project_id (adhoc); the joins resolve all three.
+        filters.append(_resolved_project == project_id)
 
     def scoped(stmt):
-        # Only join the task table when resolving a project filter.
-        return (
-            stmt.outerjoin(Task, TimeEntry.task_id == Task.id)
-            if project_id is not None
-            else stmt
-        )
+        # Only join task/parent when a project filter needs resolving.
+        return _join_task_parent(stmt) if project_id is not None else stmt
 
     count_result = await db.execute(
         scoped(select(func.count(TimeEntry.id)).select_from(TimeEntry)).filter(*filters)
@@ -215,16 +258,16 @@ async def list_time_entries(
     total = count_result.scalar() or 0
 
     result = await db.execute(
-        scoped(select(TimeEntry))
+        _join_task_parent(select(TimeEntry, _resolved_project))
         .filter(*filters)
         .order_by(TimeEntry.started_at.desc(), TimeEntry.id.desc())
         .limit(limit)
         .offset(offset)
     )
-    entries = result.scalars().all()
+    rows = result.all()
 
     return TimeEntryList(
-        time_entries=[_to_read(e) for e in entries],
+        time_entries=[_to_read(entry, resolved) for entry, resolved in rows],
         total=total,
         limit=limit,
         offset=offset,
@@ -298,7 +341,7 @@ async def create_time_entry(
     db.add(db_entry)
     await db.commit()
     await db.refresh(db_entry)
-    return _to_read(db_entry)
+    return _to_read(db_entry, await _resolve_entry_project(db, db_entry))
 
 
 # NOTE: static routes declared BEFORE the dynamic /{entry_id} routes so
@@ -318,7 +361,9 @@ async def read_active_time_entry(
     """
     await get_owned_profile(db, profile_id, current_user, "time entry")
     entry = await _running_entry(db, profile_id)
-    return _to_read(entry) if entry else None
+    if entry is None:
+        return None
+    return _to_read(entry, await _resolve_entry_project(db, entry))
 
 
 @router.get("/summary", summary="Aggregate tracked time per task for a profile")
@@ -336,8 +381,9 @@ async def time_entry_summary(
 
     Returns **per_task** (null task_id = the task-less/adhoc bucket),
     **per_project** (each entry's project resolves to its task's project when
-    task-attached, else its direct project_id; null = neither), and the grand
-    **total_seconds**.
+    task-attached, or that task's parent's project when the task is a subtask
+    with none of its own, else its direct project_id; null = neither), and the
+    grand **total_seconds**.
     """
     await get_owned_profile(db, profile_id, current_user, "time entry")
 
@@ -364,20 +410,17 @@ async def time_entry_summary(
     ]
     total = sum(item.total_seconds for item in per_task)
 
-    # A task-attached entry counts toward its task's project; an adhoc entry
-    # counts toward its own project_id.
-    resolved_project = func.coalesce(Task.project_id, TimeEntry.project_id)
     project_rows = (
         await db.execute(
-            select(
-                resolved_project,
-                func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
-                func.count(TimeEntry.id),
+            _join_task_parent(
+                select(
+                    _resolved_project,
+                    func.coalesce(func.sum(TimeEntry.duration_seconds), 0),
+                    func.count(TimeEntry.id),
+                ).select_from(TimeEntry)
             )
-            .select_from(TimeEntry)
-            .outerjoin(Task, TimeEntry.task_id == Task.id)
             .filter(*completed)
-            .group_by(resolved_project)
+            .group_by(_resolved_project)
         )
     ).all()
 
@@ -421,7 +464,7 @@ async def stop_time_entry(
     entry.updated_date = now
     await db.commit()
     await db.refresh(entry)
-    return _to_read(entry)
+    return _to_read(entry, await _resolve_entry_project(db, entry))
 
 
 @router.get("/{entry_id}", summary="Get a time entry by ID")
@@ -436,7 +479,7 @@ async def read_time_entry(
     - **entry_id**: The unique identifier of the entry to retrieve
     """
     entry = await _get_entry_and_authorize(db, entry_id, current_user)
-    return _to_read(entry)
+    return _to_read(entry, await _resolve_entry_project(db, entry))
 
 
 @router.patch("/{entry_id}", summary="Update a time entry (partial update)")
@@ -524,7 +567,7 @@ async def patch_time_entry(
         await db.rollback()
         raise integrity_conflict("Time entry change violates a database constraint")
     await db.refresh(entry)
-    return _to_read(entry)
+    return _to_read(entry, await _resolve_entry_project(db, entry))
 
 
 @router.delete("/", summary="Delete all time entries in a profile")

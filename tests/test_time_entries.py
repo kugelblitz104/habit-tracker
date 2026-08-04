@@ -164,6 +164,38 @@ class TestListTimeEntries:
         )
         assert response.status_code == 422
 
+    async def test_filter_by_project_includes_subtask_entries(
+        self, client, db_session, login_as
+    ):
+        """A subtask carries no project of its own, so its time reaches the
+        project only through its parent."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        other_project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        other_parent = TaskFactory(profile=profile, project=other_project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent)
+        other_subtask = TaskFactory(profile=profile, parent=other_parent)
+        await db_session.flush()
+        on_parent = TimeEntryFactory(profile=profile, task=parent)
+        on_subtask = TimeEntryFactory(profile=profile, task=subtask)
+        # excluded: a subtask under a parent in a different project
+        TimeEntryFactory(profile=profile, task=other_subtask)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/",
+            params={"profile_id": profile.id, "project_id": project.id},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 2
+        ids = {e["id"] for e in body["time_entries"]}
+        assert ids == {on_parent.id, on_subtask.id}
+
 
 class TestCreateTimeEntry:
     """Tests for POST /time-entries/ endpoint."""
@@ -526,6 +558,32 @@ class TestPatchTimeEntry:
         assert detach.status_code == 200
         assert detach.json()["task_id"] is None
 
+    async def test_reattach_to_subtask_updates_resolved_project(
+        self, client, db_session, login_as
+    ):
+        """PATCH is the only path where an entry's resolved project changes as
+        a result of the operation: moving it from a top-level task in one
+        project to a subtask whose parent belongs to a different project."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        project_a = ProjectFactory(profile=profile)
+        project_b = ProjectFactory(profile=profile)
+        task_in_a = TaskFactory(profile=profile, project=project_a)
+        parent_in_b = TaskFactory(profile=profile, project=project_b)
+        await db_session.flush()
+        subtask_of_b = TaskFactory(profile=profile, parent=parent_in_b)
+        entry = TimeEntryFactory(profile=profile, task=task_in_a)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.patch(
+            f"/time-entries/{entry.id}", json={"task_id": subtask_of_b.id}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["task_id"] == subtask_of_b.id
+        assert body["resolved_project_id"] == project_b.id
+
     async def test_task_in_other_profile(self, client, db_session, login_as):
         user = UserFactory()
         profile = user.profiles[0]
@@ -847,6 +905,62 @@ class TestTimeEntrySummaryPerProject:
         }
         assert per_project[None]["total_seconds"] == 30
 
+    async def test_per_project_includes_subtask_time(
+        self, client, db_session, login_as
+    ):
+        """Time on a subtask rolls up to the parent's project alongside the
+        parent's own time."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent)
+        await db_session.flush()
+        TimeEntryFactory(profile=profile, task=parent, duration_seconds=100)
+        TimeEntryFactory(profile=profile, task=subtask, duration_seconds=25)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/summary", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        per_project = {item["project_id"]: item for item in body["per_project"]}
+        assert per_project[project.id]["total_seconds"] == 125
+        assert per_project[project.id]["entry_count"] == 2
+        # nothing left over in the no-project bucket
+        assert None not in per_project
+        # the per-project buckets must sum to the summary's grand total; a join
+        # fan-out would inflate this without necessarily showing up per-bucket
+        assert body["total_seconds"] == 125
+
+    async def test_per_project_subtask_own_project_wins(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        parent_project = ProjectFactory(profile=profile)
+        own_project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=parent_project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent, project=own_project)
+        await db_session.flush()
+        TimeEntryFactory(profile=profile, task=subtask, duration_seconds=40)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/summary", params={"profile_id": profile.id}
+        )
+        assert response.status_code == 200
+        per_project = {
+            item["project_id"]: item for item in response.json()["per_project"]
+        }
+        assert per_project[own_project.id]["total_seconds"] == 40
+        assert parent_project.id not in per_project
+
 
 class TestTaskEstimatedEffort:
     """Task gains an estimated_effort field (minutes)."""
@@ -1017,3 +1131,140 @@ class TestDeleteAllTimeEntries:
 
         remaining = (await db_session.execute(select(TimeEntry))).scalars().all()
         assert [e.id for e in remaining] == [keep.id]
+
+
+class TestResolvedProjectId:
+    """resolved_project_id on a single read: an entry's effective project is its
+    task's, else its parent task's (subtask rollup), else its own."""
+
+    async def test_subtask_entry_resolves_to_parents_project(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent)
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=subtask)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/time-entries/{entry.id}")
+        assert response.status_code == 200
+        body = response.json()
+        # The stored column stays null - only the resolved value rolls up.
+        assert body["project_id"] is None
+        assert body["resolved_project_id"] == project.id
+
+    async def test_parent_task_entry_resolves_to_its_own_task_project(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        task = TaskFactory(profile=profile, project=project)
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=task)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/time-entries/{entry.id}")
+        assert response.status_code == 200
+        assert response.json()["resolved_project_id"] == project.id
+
+    async def test_subtask_own_project_beats_parents(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        parent_project = ProjectFactory(profile=profile)
+        own_project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=parent_project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent, project=own_project)
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=subtask)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/time-entries/{entry.id}")
+        assert response.status_code == 200
+        assert response.json()["resolved_project_id"] == own_project.id
+
+    async def test_adhoc_entry_resolves_to_its_own_project(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=None, project_id=project.id)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/time-entries/{entry.id}")
+        assert response.status_code == 200
+        assert response.json()["resolved_project_id"] == project.id
+
+    async def test_untethered_entry_resolves_to_null(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=None)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/time-entries/{entry.id}")
+        assert response.status_code == 200
+        assert response.json()["resolved_project_id"] is None
+
+    async def test_list_rows_carry_resolved_project_id(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent)
+        await db_session.flush()
+        entry = TimeEntryFactory(profile=profile, task=subtask)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/time-entries/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        body = response.json()
+        # The joins are both PK lookups, so the page must not fan out.
+        assert body["total"] == 1
+        assert len(body["time_entries"]) == 1
+        assert body["time_entries"][0]["id"] == entry.id
+        assert body["time_entries"][0]["resolved_project_id"] == project.id
+
+    async def test_create_returns_resolved_project_id(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        await db_session.flush()
+        subtask = TaskFactory(profile=profile, parent=parent)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/time-entries/",
+            json={
+                "profile_id": profile.id,
+                "task_id": subtask.id,
+                "started_at": (datetime.now() - timedelta(minutes=5)).isoformat(),
+                "ended_at": datetime.now().isoformat(),
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["resolved_project_id"] == project.id

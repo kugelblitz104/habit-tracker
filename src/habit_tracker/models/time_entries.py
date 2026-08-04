@@ -64,6 +64,10 @@ class TimeEntryRead(TimeEntryBase, _FromORM):
     updated_date: datetime | None = None
     # Computed, never stored: an entry with no ended_at is still running.
     is_running: bool = False
+    # Read-only rollup: the project this entry counts toward - its task's
+    # project, else its parent task's (so a subtask's time reaches the parent's
+    # project), else its own project_id. Never stored, never client-settable.
+    resolved_project_id: int | None = None
 
 
 class TimeEntryUpdate(BaseModel):
@@ -109,9 +113,10 @@ class TaskTimeSummary(BaseModel):
 
 
 class ProjectTimeSummary(BaseModel):
-    # A project's total resolves each entry's project as its task's project
-    # (task-attached) or its direct project_id (adhoc). project_id is null for
-    # the bucket of entries tied to neither.
+    # A project's total resolves each entry's project as its task's project, or
+    # that task's parent's project when the task is a subtask carrying none of
+    # its own, or its direct project_id (adhoc). project_id is null for the
+    # bucket of entries tied to nothing at all.
     project_id: int | None = None
     total_seconds: int
     entry_count: int
