@@ -62,10 +62,13 @@ class UserFactory(BaseFactory):
     class Meta:
         model = User
 
-    username = Faker("user_name")
+    # username and email are unique columns - a Sequence avoids the collisions
+    # Faker("user_name")/Faker("email") produced in tests that create several
+    # users at once. AdminUserFactory shares this counter, being a subclass.
+    username = Sequence(lambda n: f"user{n}")
     first_name = Faker("first_name")
     last_name = Faker("last_name")
-    email = Faker("email")
+    email = Sequence(lambda n: f"user{n}@example.com")
     # Use cached hash - avoids expensive bcrypt for every user creation
     password_hash = cached_password_hash
     is_admin = False

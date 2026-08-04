@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 
 import pytest
+from faker import Faker
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -30,6 +31,26 @@ class TestUserModel:
         assert fetched_user.username is not None
         assert fetched_user.email is not None
         assert fetched_user.password_hash is not None
+
+    async def test_factory_users_have_unique_usernames_and_emails(self, db_session):
+        """Many factory users commit together without tripping a unique column.
+
+        username and email are both unique, so a factory drawing them from
+        Faker collides at random and fails whichever test happened to create
+        the users. Faker seed 35 is a seed whose 11th draw repeats an earlier
+        email, so this pins the fix deterministically rather than relying on a
+        collision turning up by chance. AdminUserFactory shares UserFactory's
+        sequence counter, so mixing the two must not collide either.
+        """
+        Faker.seed(35)
+        try:
+            users = [AdminUserFactory()] + [UserFactory() for _ in range(10)]
+            await db_session.commit()
+        finally:
+            Faker.seed(None)
+
+        assert len({u.username for u in users}) == 11
+        assert len({u.email for u in users}) == 11
 
     async def test_user_admin_flag_default(self, db_session):
         """User is_admin defaults to False."""
