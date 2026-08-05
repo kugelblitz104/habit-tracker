@@ -4,8 +4,9 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 
-from habit_tracker.schemas.db_models import Countdown
+from habit_tracker.schemas.db_models import Countdown, CountdownCategory
 from tests.factories import (
+    CountdownCategoryFactory,
     CountdownFactory,
     ProfileFactory,
     TaskFactory,
@@ -553,6 +554,75 @@ class TestPatchCountdown:
         assert response.status_code == 200
         assert response.json()["profile_id"] == other_profile.id
 
+    async def test_patch_countdown_move_to_another_users_profile(
+        self, client, db_session, login_as
+    ):
+        """A move to a profile owned by a different user is rejected (400),
+        the countdown stays put, and nothing is written into the other user's
+        profile - a category resolved against the destination would otherwise
+        insert a named, coloured group there."""
+        user = UserFactory()
+        other_user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Mine")
+        foreign_profile = ProfileFactory(user=other_user, name="Theirs")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile, category="Bills")
+        await db_session.commit()
+        countdown_id = countdown.id
+        profile_id = profile.id
+        foreign_profile_id = foreign_profile.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"profile_id": foreign_profile_id}
+        )
+        assert response.status_code == 400
+        assert (
+            response.json()["detail"]
+            == "New profile not found or does not belong to the same user"
+        )
+
+        db_session.expire_all()
+        unchanged = await db_session.get(Countdown, countdown_id)
+        assert unchanged.profile_id == profile_id
+
+        foreign_categories = (
+            (
+                await db_session.execute(
+                    select(CountdownCategory).where(
+                        CountdownCategory.profile_id == foreign_profile_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert foreign_categories == []
+
+    async def test_patch_countdown_move_to_nonexistent_profile(
+        self, client, db_session, login_as
+    ):
+        """A move to a profile that does not exist is rejected (400)."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Mine")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown.id}", json={"profile_id": 99999}
+        )
+        assert response.status_code == 400
+
     async def test_patch_countdown_task_link_revalidated_on_profile_change(
         self, client, db_session, login_as
     ):
@@ -713,3 +783,525 @@ class TestDeleteAllCountdowns:
 
         remaining = (await db_session.execute(select(Countdown))).scalars().all()
         assert [c.title for c in remaining] == ["Keep"]
+
+
+class TestCountdownCategoryById:
+    """Tests for selecting a category by explicit `category_id` on create/patch."""
+
+    async def test_create_with_category_id_sets_the_mirror(
+        self, client, db_session, login_as
+    ):
+        """An explicit id fills `category` from the record's own name."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(
+            profile=profile, name="Bills", color="#0EA5E9"
+        )
+        await db_session.commit()
+        category_id = category.id
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category_id": category_id,
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["category"] == "Bills"
+        assert response.json()["category_id"] == category_id
+
+    async def test_category_id_wins_over_free_text(self, client, db_session, login_as):
+        """Sending both uses the id and overwrites the text from the record."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+        category_id = category.id
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Birthdays",
+                "category_id": category_id,
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["category"] == "Bills"
+        assert response.json()["category_id"] == category_id
+
+        # The losing free-text name must not have created a second group.
+        result = await db_session.execute(
+            select(CountdownCategory).where(CountdownCategory.profile_id == profile.id)
+        )
+        assert [c.name for c in result.scalars().all()] == ["Bills"]
+
+    async def test_create_with_another_profiles_category_is_400(
+        self, client, db_session, login_as
+    ):
+        """A category in a profile the countdown does not belong to is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        mine = ProfileFactory(user=user, name="Mine")
+        other = ProfileFactory(user=user, name="Other")
+        await db_session.commit()
+
+        foreign = CountdownCategoryFactory(profile=other, name="Bills")
+        await db_session.commit()
+        foreign_id = foreign.id
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": mine.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category_id": foreign_id,
+            },
+        )
+        assert response.status_code == 400
+
+    async def test_create_with_a_missing_category_id_is_400(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category_id": 999999,
+            },
+        )
+        assert response.status_code == 400
+
+    async def test_patch_relinks_by_category_id(self, client, db_session, login_as):
+        """Selecting a different group by id moves the countdown and the mirror."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, title="Julianna", category="Birthdays"
+        )
+        birthday = CountdownCategoryFactory(
+            profile=profile, name="Birthday", color="#0EEC63"
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+        birthday_id = birthday.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"category_id": birthday_id}
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] == "Birthday"
+        assert response.json()["category_id"] == birthday_id
+
+    async def test_patch_category_id_to_null_clears_both(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, title="Rent", category="Bills", category_id=category.id
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"category_id": None}
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] is None
+        assert response.json()["category_id"] is None
+
+
+class TestCountdownCategoryLink:
+    """Tests for resolving `category` to `category_id` on create/patch."""
+
+    async def test_create_with_a_category_creates_the_record(
+        self, client, db_session, login_as
+    ):
+        """A new category name on create resolves and creates a category row."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Bills",
+            },
+        )
+        assert response.status_code == 201
+
+        db_session.expire_all()
+        countdown = await db_session.get(Countdown, response.json()["id"])
+        assert countdown is not None
+        assert countdown.category == "Bills"
+        assert countdown.category_id is not None
+
+    async def test_create_seeds_the_category_color_from_the_countdown(
+        self, client, db_session, login_as
+    ):
+        """The first countdown in a new group seeds the group's colour."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Bills",
+                "color": "#0EA5E9",
+            },
+        )
+        assert response.status_code == 201
+
+        db_session.expire_all()
+        countdown = await db_session.get(Countdown, response.json()["id"])
+        category = await db_session.get(CountdownCategory, countdown.category_id)
+        assert category is not None
+        assert category.color == "#0EA5E9"
+
+    async def test_second_countdown_does_not_repaint_the_group(
+        self, client, db_session, login_as
+    ):
+        """A second countdown joining an existing group keeps the group's
+        colour as-is, while its own colour override is unaffected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        first = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Bills",
+                "color": "#0EA5E9",
+            },
+        )
+        assert first.status_code == 201
+
+        second = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Electric",
+                "target_date": "2026-09-05",
+                "category": "Bills",
+                "color": "#FF0000",
+            },
+        )
+        assert second.status_code == 201
+        assert second.json()["color"] == "#FF0000"
+
+        categories = (
+            (await db_session.execute(select(CountdownCategory))).scalars().all()
+        )
+        assert len(categories) == 1
+        assert categories[0].color == "#0EA5E9"
+
+    async def test_create_trims_the_category_name(self, client, db_session, login_as):
+        """Leading/trailing whitespace in the category name is trimmed."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "  Bills  ",
+            },
+        )
+        assert response.status_code == 201
+
+        db_session.expire_all()
+        countdown = await db_session.get(Countdown, response.json()["id"])
+        assert countdown.category == "Bills"
+
+    async def test_patch_to_a_new_category_relinks(self, client, db_session, login_as):
+        """Patching to a different category name re-resolves category_id
+        against the new name."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, category="Bills", category_id=category.id
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+        old_category_id = category.id
+        profile_id = profile.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"category": "Birthdays"}
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] == "Birthdays"
+
+        db_session.expire_all()
+        updated = await db_session.get(Countdown, countdown_id)
+        assert updated.category == "Birthdays"
+        assert updated.category_id is not None
+        assert updated.category_id != old_category_id
+
+        birthdays = await db_session.get(CountdownCategory, updated.category_id)
+        assert birthdays.name == "Birthdays"
+        assert birthdays.profile_id == profile_id
+
+    async def test_patch_category_to_null_clears_both(
+        self, client, db_session, login_as
+    ):
+        """Patching category to null clears both category and category_id."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, category="Bills", category_id=category.id
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"category": None}
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] is None
+
+        db_session.expire_all()
+        updated = await db_session.get(Countdown, countdown_id)
+        assert updated.category is None
+        assert updated.category_id is None
+
+    async def test_profile_move_reresolves_the_category(
+        self, client, db_session, login_as
+    ):
+        """Moving a countdown to another profile re-resolves its category
+        against the destination profile: a category belongs to exactly one
+        profile, so keeping the old category_id would point the countdown at
+        a record in a profile it no longer belongs to."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        await db_session.commit()
+
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, category="Bills", category_id=category.id
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+        old_category_id = category.id
+        other_profile_id = other_profile.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"profile_id": other_profile_id}
+        )
+        assert response.status_code == 200
+        assert response.json()["category"] == "Bills"
+
+        db_session.expire_all()
+        updated = await db_session.get(Countdown, countdown_id)
+        assert updated.profile_id == other_profile_id
+        assert updated.category == "Bills"
+        assert updated.category_id is not None
+        assert updated.category_id != old_category_id
+
+        new_category = await db_session.get(CountdownCategory, updated.category_id)
+        assert new_category is not None
+        assert new_category.profile_id == other_profile_id
+        assert new_category.name == "Bills"
+
+    async def test_response_body_exposes_category_id(
+        self, client, db_session, login_as
+    ):
+        """category_id is returned on create, patch and read, so a client joins
+        countdowns to their categories by id rather than by the mutable name."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        create_response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Bills",
+            },
+        )
+        assert create_response.status_code == 201
+        countdown_id = create_response.json()["id"]
+
+        db_session.expire_all()
+        countdown = await db_session.get(Countdown, countdown_id)
+        bills_id = countdown.category_id
+        assert bills_id is not None
+        assert create_response.json()["category_id"] == bills_id
+
+        patch_response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"category": "Birthdays"}
+        )
+        assert patch_response.status_code == 200
+        birthdays_id = patch_response.json()["category_id"]
+        assert birthdays_id is not None
+        assert birthdays_id != bills_id
+
+        read_response = await client.get(f"/countdowns/{countdown_id}")
+        assert read_response.status_code == 200
+        assert read_response.json()["category_id"] == birthdays_id
+
+        birthdays = await db_session.get(CountdownCategory, birthdays_id)
+        assert birthdays.name == "Birthdays"
+
+    async def test_category_id_is_null_when_uncategorised(
+        self, client, db_session, login_as
+    ):
+        """A countdown with no category reports category_id as null."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/countdowns/",
+            json={
+                "profile_id": profile.id,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["category_id"] is None
+
+    async def test_patch_by_name_leaves_an_unsent_category_id_alone(
+        self, client, db_session, login_as
+    ):
+        """A patch that touches neither field keeps the existing link."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        bills = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+
+        countdown = CountdownFactory(
+            profile=profile, category="Bills", category_id=bills.id
+        )
+        await db_session.commit()
+        countdown_id = countdown.id
+        bills_id = bills.id
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown_id}", json={"title": "Rent due"}
+        )
+        assert response.status_code == 200
+        assert response.json()["category_id"] == bills_id
+
+        db_session.expire_all()
+        updated = await db_session.get(Countdown, countdown_id)
+        assert updated.category_id == bills_id
+        assert updated.category == "Bills"

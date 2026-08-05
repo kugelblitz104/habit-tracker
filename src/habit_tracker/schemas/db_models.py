@@ -5,6 +5,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -492,6 +493,12 @@ class Tracker(Base):
 
 class Countdown(Base):
     __tablename__ = "countdown"
+    __table_args__ = (
+        # Named explicitly: the default "ix_<table>_<column>" pattern would
+        # collide with countdown_category's own id index (both compute to
+        # ix_countdown_category_id).
+        Index("ix_countdown_category_id_fk", "category_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     profile_id: Mapped[int] = mapped_column(
@@ -519,6 +526,14 @@ class Countdown(Base):
     # accent — both drive the grouped/colored countdown views.
     category: Mapped[str | None] = mapped_column(String, nullable=True)
     color: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The category record that owns this group's colour. Server-managed: absent
+    # from every countdown request model, resolved from `category` on write.
+    # SET NULL so deleting a group keeps its countdowns.
+    category_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("countdown_category.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Recurrence: none/weekly/monthly/yearly. target_date is the anchor; the next
     # occurrence is derived from it (birthdays roll to next year, bills to next
     # month) — no server-side rollover job.
@@ -536,3 +551,30 @@ class Countdown(Base):
     # Relationships
     profile: Mapped["Profile"] = relationship("Profile", lazy="select")
     task: Mapped["Task | None"] = relationship("Task", lazy="select")
+
+
+class CountdownCategory(Base):
+    __tablename__ = "countdown_category"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id", "name", name="uix_countdown_category_profile_name"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    # Optional accent for the group; unset renders as the faint default.
+    color: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship("Profile", lazy="select")

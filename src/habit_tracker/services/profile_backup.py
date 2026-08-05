@@ -11,7 +11,8 @@ dedupe against data already there. Insert order follows the dependency graph so
 each foreign key resolves against rows created earlier in the same call:
 
     projects -> tasks (parents then subtasks) -> habits -> trackers
-    -> time entries -> countdowns -> calendar connections -> integrations
+    -> time entries -> countdown categories -> countdowns -> calendar
+    connections -> integrations
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.slugs import allocate_slug
@@ -28,6 +30,7 @@ from habit_tracker.models.backup import (
     BACKUP_VERSION,
     CalendarConnectionBackup,
     CountdownBackup,
+    CountdownCategoryBackup,
     HabitBackup,
     ImportSummary,
     IntegrationConnectionBackup,
@@ -41,6 +44,7 @@ from habit_tracker.models.backup import (
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
     Countdown,
+    CountdownCategory,
     Habit,
     IntegrationConnection,
     Profile,
@@ -50,6 +54,7 @@ from habit_tracker.schemas.db_models import (
     Tracker,
     User,
 )
+from habit_tracker.services.countdown_categories import resolve_for_countdown
 
 
 class BackupError(Exception):
@@ -79,6 +84,17 @@ async def load_profile_rows(db: AsyncSession, profile_id: int) -> dict:
         (
             await db.execute(
                 select(Task).where(Task.profile_id == profile_id).order_by(Task.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    countdown_categories = (
+        (
+            await db.execute(
+                select(CountdownCategory)
+                .where(CountdownCategory.profile_id == profile_id)
+                .order_by(CountdownCategory.id)
             )
         )
         .scalars()
@@ -153,6 +169,7 @@ async def load_profile_rows(db: AsyncSession, profile_id: int) -> dict:
     return {
         "projects": projects,
         "tasks": tasks,
+        "countdown_categories": countdown_categories,
         "countdowns": countdowns,
         "time_entries": time_entries,
         "habits": habits,
@@ -172,6 +189,7 @@ def build_profile_backup(
     trackers: Iterable[Tracker],
     calendar_connections: Iterable[CalendarConnection],
     integration_connections: Iterable[IntegrationConnection],
+    countdown_categories: Iterable[CountdownCategory],
     exported_at: datetime | None = None,
 ) -> ProfileBackup:
     """Assemble the portable backup document from loaded ORM rows (pure)."""
@@ -190,6 +208,9 @@ def build_profile_backup(
         integration_connections=[
             IntegrationConnectionBackup.model_validate(c)
             for c in integration_connections
+        ],
+        countdown_categories=[
+            CountdownCategoryBackup.model_validate(c) for c in countdown_categories
         ],
     )
 
@@ -375,12 +396,42 @@ async def restore_profile_backup(
         )
         db.add(row)
 
+    # Countdown categories: inserted before countdowns so each countdown can
+    # resolve its own `category` text against this profile's records.
+    # Restore always builds a new profile, so every row reached here was
+    # inserted by this call and counting distinct ids counts inserts.
+    category_ids: set[int] = set()
+    for item in backup.countdown_categories:
+        row = CountdownCategory(profile_id=profile.id, name=item.name, color=item.color)
+        db.add(row)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            raise BackupError(
+                f"Duplicate countdown category {item.name!r} in this document; "
+                f"category names must be unique within a profile."
+            ) from exc
+        category_ids.add(row.id)
+
     # Countdowns -------------------------------------------------------------
     for item in backup.countdowns:
+        # Routed through the resolver like every other write path, so the
+        # mirror is the record's name rather than the document's text and a
+        # category the document has no record for is recreated from that text.
+        category_id, category = await resolve_for_countdown(
+            db,
+            profile_id=profile.id,
+            name=item.category,
+            seed_color=item.color,
+        )
+        if category_id is not None:
+            category_ids.add(category_id)
         row = Countdown(
             profile_id=profile.id,
             task_id=(task_map.get(item.task_id) if item.task_id is not None else None),
-            **item.model_dump(exclude={"id", "task_id"}, exclude_none=True),
+            category_id=category_id,
+            category=category,
+            **item.model_dump(exclude={"id", "task_id", "category"}, exclude_none=True),
         )
         db.add(row)
 
@@ -429,4 +480,5 @@ async def restore_profile_backup(
         calendar_connections_imported=len(backup.calendar_connections),
         integration_connections_imported=integrations_imported,
         warnings=warnings,
+        countdown_categories_imported=len(category_ids),
     )

@@ -10,6 +10,7 @@ hand back the Pydantic `Task`-shaped model, never the ORM table.
 from habit_tracker.models.backup import (
     CalendarConnectionBackup,
     CountdownBackup,
+    CountdownCategoryBackup,
     HabitBackup,
     ImportSummary,
     IntegrationConnectionBackup,
@@ -28,6 +29,12 @@ from habit_tracker.models.calendar_connections import (
     CalendarEventList,
     CalendarEventRead,
     normalize_ics_url,
+)
+from habit_tracker.models.countdown_categories import (
+    CountdownCategoryCreate,
+    CountdownCategoryList,
+    CountdownCategoryRead,
+    CountdownCategoryUpdate,
 )
 from habit_tracker.models.countdowns import (
     CountdownCreate,
@@ -113,6 +120,11 @@ __all__ = [
     "CalendarEventList",
     "CalendarEventRead",
     "CountdownBackup",
+    "CountdownCategoryBackup",
+    "CountdownCategoryCreate",
+    "CountdownCategoryList",
+    "CountdownCategoryRead",
+    "CountdownCategoryUpdate",
     # Pydantic Schemas
     "CountdownCreate",
     "CountdownList",

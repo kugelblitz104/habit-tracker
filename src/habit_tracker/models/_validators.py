@@ -62,6 +62,23 @@ def non_blank_string(v: str | None, label: str) -> str | None:
     return v
 
 
+@overload
+def trimmed_string(v: str, label: str) -> str: ...
+@overload
+def trimmed_string(v: None, label: str) -> None: ...
+def trimmed_string(v: str | None, label: str) -> str | None:
+    """Reject a blank string like `non_blank_string`, then strip it.
+
+    Use where the stored value is matched against a trimmed name elsewhere, so
+    that " Bills " and "Bills" cannot become two records for one group.
+    """
+    if v is None:
+        return None
+    if not v.strip():
+        raise ValueError(f"{label} cannot be empty or whitespace")
+    return v.strip()
+
+
 def non_negative_int(v: int | None, label: str) -> int | None:
     if v is not None and v < 0:
         raise ValueError(f"{label} cannot be negative")

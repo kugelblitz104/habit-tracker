@@ -56,11 +56,19 @@ class CountdownBase(BaseModel):
 
 
 class CountdownCreate(CountdownBase):
-    pass
+    # Selects an existing group by id instead of by name. Wins over `category`
+    # when both are sent, and must reference a category in the same profile.
+    # Declared here rather than on CountdownBase so adding it appends to the
+    # OpenAPI properties rather than reordering them.
+    category_id: int | None = None
 
 
 class CountdownRead(_StampedRead, CountdownBase):
-    pass
+    # The category record `category` mirrors, so a client joins its countdowns to
+    # /countdown-categories/ by id rather than by a name it can rename. Declared
+    # last so adding it appends to the OpenAPI properties rather than reordering
+    # them.
+    category_id: int | None = None
 
 
 class CountdownUpdate(BaseModel):
@@ -73,6 +81,10 @@ class CountdownUpdate(BaseModel):
     color: str | None = None
     repeat: str | None = None
     show_occurrence: bool | None = None
+    # Selects an existing group by id. Wins over `category` when both are sent;
+    # an explicit null clears the group. Declared last so adding it appends to the
+    # OpenAPI properties rather than reordering them.
+    category_id: int | None = None
 
     @field_validator("profile_id", "title", "target_date", "repeat", "show_occurrence")
     @classmethod

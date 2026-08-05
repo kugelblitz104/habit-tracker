@@ -12,6 +12,7 @@ from habit_tracker.models.backup import (
 )
 from habit_tracker.schemas.db_models import (
     Countdown,
+    CountdownCategory,
     Habit,
     IntegrationConnection,
     Profile,
@@ -22,6 +23,7 @@ from habit_tracker.schemas.db_models import (
 from habit_tracker.services.profile_backup import build_profile_backup
 from tests.factories import (
     CalendarConnectionFactory,
+    CountdownCategoryFactory,
     CountdownFactory,
     HabitFactory,
     IntegrationConnectionFactory,
@@ -97,6 +99,7 @@ class TestBuildProfileBackup:
             trackers=[],
             calendar_connections=[],
             integration_connections=[integration],
+            countdown_categories=[],
             exported_at=datetime(2026, 7, 24, 12, 0),
         )
 
@@ -198,6 +201,32 @@ class TestExport:
         assert conn["has_token"] is True
         # ICS cache is not exported.
         assert "cached_ics" not in body["calendar_connections"][0]
+
+    async def test_export_includes_countdown_categories(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        category = CountdownCategoryFactory(
+            profile=profile, name="Bills", color="#0EA5E9"
+        )
+        await db_session.commit()
+        CountdownFactory(
+            profile=profile,
+            title="Rent",
+            category="Bills",
+            category_id=category.id,
+        )
+        await db_session.commit()
+
+        await login_as(user)
+        resp = await client.get(f"/backup/profiles/{profile.id}")
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert body["countdown_categories"] == [{"name": "Bills", "color": "#0EA5E9"}]
 
     async def test_export_unknown_profile_returns_404(
         self, client, db_session, login_as
@@ -366,6 +395,205 @@ class TestImportRoundTrip:
         assert summary["profile_name"] == "Work"
         new_profile = await db_session.get(Profile, summary["profile_id"])
         assert new_profile.user_id == other.id
+
+    async def test_import_restores_the_category_and_relinks_countdowns(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="WithCategories")
+        await db_session.commit()
+        category = CountdownCategoryFactory(
+            profile=profile, name="Bills", color="#0EA5E9"
+        )
+        await db_session.commit()
+        CountdownFactory(
+            profile=profile,
+            title="Rent",
+            category="Bills",
+            category_id=category.id,
+        )
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        new_profile_id = resp.json()["profile_id"]
+
+        new_category = (
+            (
+                await db_session.execute(
+                    select(CountdownCategory).where(
+                        CountdownCategory.profile_id == new_profile_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert new_category.name == "Bills"
+        assert new_category.color == "#0EA5E9"
+
+        new_countdown = (
+            (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert new_countdown.category_id == new_category.id
+
+    async def test_import_of_a_pre_change_document_still_works(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="PreChange")
+        await db_session.commit()
+        CountdownFactory(
+            profile=profile, title="Checkup", category="Health", color="#22C55E"
+        )
+        # A second countdown sharing the same free-text category: the
+        # fallback should recreate the group once and relink both, not
+        # create a duplicate. Its text is untrimmed, as a document written
+        # before the category record existed can be.
+        CountdownFactory(
+            profile=profile, title="Dentist", category="Health ", color="#22C55E"
+        )
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        assert export["countdown_categories"] == []
+        del export["countdown_categories"]
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        summary = resp.json()
+        new_profile_id = summary["profile_id"]
+        assert summary["countdown_categories_imported"] == 1
+
+        new_category = (
+            (
+                await db_session.execute(
+                    select(CountdownCategory).where(
+                        CountdownCategory.profile_id == new_profile_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert new_category.name == "Health"
+        assert new_category.color == "#22C55E"
+
+        new_countdowns = (
+            (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(new_countdowns) == 2
+        assert all(c.category_id == new_category.id for c in new_countdowns)
+        # The mirror comes from the record, not from the document's text.
+        assert all(c.category == "Health" for c in new_countdowns)
+
+    async def test_import_normalises_an_untrimmed_countdown_category(
+        self, client, db_session, login_as
+    ):
+        """A countdown whose category text does not match a record's name only
+        because of whitespace joins that record instead of forking a second one,
+        and the summary counts the row rather than the name it was reached by."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Untrimmed")
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        export["countdown_categories"] = [{"name": "Bills", "color": "#0EA5E9"}]
+        export["countdowns"] = [
+            {
+                "id": 1,
+                "title": "Rent",
+                "target_date": "2026-09-01",
+                "category": "Bills ",
+            }
+        ]
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        summary = resp.json()
+        assert summary["countdown_categories_imported"] == 1
+        new_profile_id = summary["profile_id"]
+
+        new_category = (
+            (
+                await db_session.execute(
+                    select(CountdownCategory).where(
+                        CountdownCategory.profile_id == new_profile_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert new_category.name == "Bills"
+
+        new_countdown = (
+            (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert new_countdown.category_id == new_category.id
+        assert new_countdown.category == "Bills"
+
+    async def test_import_summary_counts_categories(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="CountCategories")
+        await db_session.commit()
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+        CountdownFactory(profile=profile, category="Bills", category_id=category.id)
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        assert resp.json()["countdown_categories_imported"] == 1
+
+    async def test_import_rejects_duplicate_category_names_in_one_document(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="DupeCategories")
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        export["countdown_categories"] = [
+            {"name": "Bills", "color": "#0EA5E9"},
+            {"name": "Bills", "color": "#22C55E"},
+        ]
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 400
+        assert "Bills" in resp.json()["detail"]
 
     async def test_import_rejects_unknown_format(self, client, db_session, login_as):
         user = UserFactory()

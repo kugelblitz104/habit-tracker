@@ -104,6 +104,17 @@ class CountdownBackup(_FromORM):
     updated_date: datetime | None = None
 
 
+class CountdownCategoryBackup(_FromORM):
+    """A countdown group's name and colour.
+
+    The `id` is not carried: countdowns resolve their category by name on
+    restore, since `Countdown.category` mirrors it exactly.
+    """
+
+    name: str
+    color: str | None = None
+
+
 class TimeEntryBackup(_FromORM):
     id: int
     task_id: int | None = None
@@ -185,6 +196,10 @@ class ProfileBackup(BaseModel):
     trackers: list[TrackerBackup] = []
     calendar_connections: list[CalendarConnectionBackup] = []
     integration_connections: list[IntegrationConnectionBackup] = []
+    # Declared last so adding it appends to the OpenAPI properties rather than
+    # reordering them. Defaults to [] so documents exported before countdown
+    # categories existed still import, which is why BACKUP_VERSION is unchanged.
+    countdown_categories: list[CountdownCategoryBackup] = []
 
 
 class ImportSummary(BaseModel):
@@ -203,3 +218,6 @@ class ImportSummary(BaseModel):
     calendar_connections_imported: int = 0
     integration_connections_imported: int = 0
     warnings: list[str] = []
+    # After `warnings` rather than beside the other counts: appending is what
+    # keeps the old properties list a prefix of the new one.
+    countdown_categories_imported: int = 0

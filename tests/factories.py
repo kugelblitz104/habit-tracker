@@ -15,6 +15,7 @@ from habit_tracker.core.slugs import slugify
 from habit_tracker.schemas.db_models import (
     CalendarConnection,
     Countdown,
+    CountdownCategory,
     Habit,
     IntegrationConnection,
     Profile,
@@ -179,6 +180,19 @@ class ProjectFactory(BaseFactory):
     archived = False
     profile = SubFactory(ProfileFactory)
     created_date = LazyFunction(datetime.now)
+
+
+class CountdownCategoryFactory(BaseFactory):
+    """Factory for creating test countdown categories."""
+
+    class Meta:
+        model = CountdownCategory
+
+    name = Sequence(lambda n: f"Category {n}")
+    color = None
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
+    updated_date = None
 
 
 class CountdownFactory(BaseFactory):

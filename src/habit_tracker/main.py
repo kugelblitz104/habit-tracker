@@ -9,6 +9,7 @@ from habit_tracker.routers import (
     auth,
     backup,
     calendar_connections,
+    countdown_categories,
     countdowns,
     habits,
     imports,
@@ -58,5 +59,6 @@ app.include_router(auth.router)
 app.include_router(imports.router)
 app.include_router(calendar_connections.router)
 app.include_router(integrations.router)
+app.include_router(countdown_categories.router)
 app.include_router(countdowns.router)
 app.include_router(backup.router)

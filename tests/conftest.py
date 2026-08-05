@@ -20,6 +20,7 @@ from habit_tracker.schemas.db_models import Base
 from tests.factories import (
     AdminUserFactory,
     CalendarConnectionFactory,
+    CountdownCategoryFactory,
     CountdownFactory,
     DoneTaskFactory,
     HabitFactory,
@@ -120,6 +121,7 @@ def _bind_factories(session: AsyncSession) -> None:
     ProjectFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
     CalendarConnectionFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
     CountdownFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
+    CountdownCategoryFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
     IntegrationConnectionFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
     TaskFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
     DoneTaskFactory._meta.sqlalchemy_session = session  # type: ignore[attr-defined]
