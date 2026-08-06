@@ -130,9 +130,7 @@ async def patch_countdown_category(
 ) -> CountdownCategoryRead:
     """Update a countdown category. Only provided fields are updated.
 
-    Renaming updates every countdown currently in this category so their
-    **category** text keeps matching the record's new name. Setting **color**
-    to null clears it; setting **name** to null is rejected.
+    Setting **color** to null clears it; setting **name** to null is rejected.
 
     Fails with 409 if the new name is already used by another category in the
     same profile.
@@ -140,23 +138,11 @@ async def patch_countdown_category(
     db_category = await _get_category_and_authorize(db, category_id, current_user)
 
     data = category_update.model_dump(exclude_unset=True)
-    previous_name = db_category.name
     for key, value in data.items():
         setattr(db_category, key, value)
     db_category.updated_date = datetime.now()  # server-stamped, never client-set
 
     try:
-        # Keep Countdown.category in step with the record it mirrors. One
-        # UPDATE, not a row-at-a-time loop. This runs inside the try block
-        # because it triggers autoflush of the renamed db_category, so a
-        # duplicate name surfaces its IntegrityError here rather than at
-        # commit.
-        if db_category.name != previous_name:
-            await db.execute(
-                update(Countdown)
-                .where(Countdown.category_id == db_category.id)
-                .values(category=db_category.name)
-            )
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -188,13 +174,13 @@ async def delete_all_countdown_categories(
     # unauthorized caller must be rejected here first.
     await get_owned_profile(db, profile_id, current_user, "countdown category")
 
-    # Clearing the text mirror as well as the FK means the countdowns actually
-    # leave their groups instead of rendering under a name with no record.
+    # Clearing the FK means the countdowns actually leave their groups instead
+    # of pointing at a deleted record.
     await db.execute(
         update(Countdown)
         .where(Countdown.profile_id == profile_id)
         .where(Countdown.category_id.is_not(None))
-        .values(category=None, category_id=None)
+        .values(category_id=None)
     )
     return await bulk_delete_in_profile(
         db,
@@ -222,7 +208,7 @@ async def delete_countdown_category(
     await db.execute(
         update(Countdown)
         .where(Countdown.category_id == category_id)
-        .values(category=None, category_id=None)
+        .values(category_id=None)
     )
     await db.delete(db_category)
     await db.commit()

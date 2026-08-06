@@ -86,35 +86,6 @@ class TestFindOrCreate:
         )
         assert len(result.scalars().all()) == 1
 
-    async def test_seed_color_applies_on_insert(self, db_session):
-        user = UserFactory()
-        await db_session.commit()
-
-        profile = ProfileFactory(user=user)
-        await db_session.commit()
-
-        row = await find_or_create(
-            db_session, profile_id=profile.id, name="Bills", seed_color="#0EA5E9"
-        )
-
-        assert row.color == "#0EA5E9"
-
-    async def test_seed_color_never_repaints_an_existing_category(self, db_session):
-        user = UserFactory()
-        await db_session.commit()
-
-        profile = ProfileFactory(user=user)
-        await db_session.commit()
-
-        await find_or_create(
-            db_session, profile_id=profile.id, name="Bills", seed_color="#0EA5E9"
-        )
-        row = await find_or_create(
-            db_session, profile_id=profile.id, name="Bills", seed_color="#FF0000"
-        )
-
-        assert row.color == "#0EA5E9"
-
     async def test_name_is_trimmed(self, db_session):
         user = UserFactory()
         await db_session.commit()
@@ -154,29 +125,23 @@ class TestFindOrCreate:
 
 class TestResolveForCountdown:
     async def test_none_name_clears(self, db_session):
-        assert await resolve_for_countdown(db_session, profile_id=1, name=None) == (
-            None,
-            None,
-        )
+        assert await resolve_for_countdown(db_session, profile_id=1, name=None) is None
 
     async def test_blank_name_clears(self, db_session):
-        assert await resolve_for_countdown(db_session, profile_id=1, name="   ") == (
-            None,
-            None,
-        )
+        assert await resolve_for_countdown(db_session, profile_id=1, name="   ") is None
 
-    async def test_returns_id_and_trimmed_mirror(self, db_session):
+    async def test_returns_the_trimmed_categorys_id(self, db_session):
+        """The name is trimmed before matching/creating, same as `find_or_create`."""
         user = UserFactory()
         await db_session.commit()
 
         profile = ProfileFactory(user=user)
         await db_session.commit()
 
-        category_id, mirror = await resolve_for_countdown(
+        category_id = await resolve_for_countdown(
             db_session, profile_id=profile.id, name=" Bills "
         )
 
-        assert mirror == "Bills"
         row = await db_session.get(CountdownCategory, category_id)
         assert row is not None and row.name == "Bills"
 
@@ -207,8 +172,6 @@ class TestCountdownCategoryRouter:
         assert body["id"] is not None
 
     async def test_create_stores_the_trimmed_name(self, client, db_session, login_as):
-        """The stored name is trimmed, so a countdown filed under the trimmed
-        text resolves to this record instead of creating a second one."""
         user = UserFactory()
         await db_session.commit()
 
@@ -229,24 +192,8 @@ class TestCountdownCategoryRouter:
         stored = await db_session.get(CountdownCategory, response.json()["id"])
         assert stored.name == "Bills"
 
-        countdown_response = await client.post(
-            "/countdowns/",
-            json={
-                "profile_id": profile_id,
-                "title": "Rent",
-                "target_date": "2026-09-01",
-                "category": "Bills",
-            },
-        )
-        assert countdown_response.status_code == 201
-        assert countdown_response.json()["category_id"] == response.json()["id"]
-
-        categories = (
-            (await db_session.execute(select(CountdownCategory))).scalars().all()
-        )
-        assert len(categories) == 1
-
     async def test_patch_stores_the_trimmed_name(self, client, db_session, login_as):
+        """Renaming a category doesn't disturb its members' `category_id` link."""
         user = UserFactory()
         await db_session.commit()
 
@@ -257,9 +204,7 @@ class TestCountdownCategoryRouter:
         await db_session.commit()
         category_id = category.id
 
-        countdown = CountdownFactory(
-            profile=profile, category="Bills", category_id=category_id
-        )
+        countdown = CountdownFactory(profile=profile, category_id=category_id)
         await db_session.commit()
         countdown_id = countdown.id
 
@@ -275,7 +220,7 @@ class TestCountdownCategoryRouter:
         stored = await db_session.get(CountdownCategory, category_id)
         assert stored.name == "Utilities"
         member = await db_session.get(Countdown, countdown_id)
-        assert member.category == "Utilities"
+        assert member.category_id == category_id
 
     async def test_whitespace_only_name_is_rejected(self, client, db_session, login_as):
         """Trimming does not weaken the blank check on either write path."""
@@ -415,42 +360,6 @@ class TestCountdownCategoryRouter:
 
         assert response.status_code == 409
 
-    async def test_patch_rename_rewrites_member_countdowns_mirror(
-        self, client, db_session, login_as
-    ):
-        """Renaming a category updates Countdown.category on every member in
-        one statement, so the mirror stays in step with the record."""
-        user = UserFactory()
-        await db_session.commit()
-
-        profile = ProfileFactory(user=user)
-        await db_session.commit()
-
-        category = CountdownCategoryFactory(profile=profile, name="Bills")
-        await db_session.commit()
-
-        first = CountdownFactory(
-            profile=profile, category="Bills", category_id=category.id
-        )
-        second = CountdownFactory(
-            profile=profile, category="Bills", category_id=category.id
-        )
-        await db_session.commit()
-        first_id, second_id = first.id, second.id
-
-        await login_as(user)
-
-        response = await client.patch(
-            f"/countdown-categories/{category.id}", json={"name": "Household"}
-        )
-        assert response.status_code == 200
-
-        db_session.expire_all()
-        first_row = await db_session.get(Countdown, first_id)
-        second_row = await db_session.get(Countdown, second_id)
-        assert first_row.category == "Household"
-        assert second_row.category == "Household"
-
     async def test_read_missing_is_404(self, client, db_session, login_as):
         user = UserFactory()
         await db_session.commit()
@@ -479,12 +388,10 @@ class TestCountdownCategoryRouter:
 
         assert response.status_code == 403
 
-    async def test_delete_category_clears_mirror_on_member_countdowns(
+    async def test_delete_category_clears_link_on_member_countdowns(
         self, client, db_session, login_as
     ):
-        """Deleting a category clears both category_id (FK SET NULL) and the
-        Countdown.category text mirror, so members don't render under a name
-        with no record."""
+        """Deleting a category clears category_id (FK SET NULL) on its members."""
         user = UserFactory()
         await db_session.commit()
 
@@ -495,9 +402,7 @@ class TestCountdownCategoryRouter:
         await db_session.commit()
         category_id = category.id
 
-        countdown = CountdownFactory(
-            profile=profile, category="Bills", category_id=category_id
-        )
+        countdown = CountdownFactory(profile=profile, category_id=category_id)
         await db_session.commit()
         countdown_id = countdown.id
 
@@ -511,11 +416,10 @@ class TestCountdownCategoryRouter:
         # raises MissingGreenlet on an AsyncSession.
         db_session.expire_all()
         row = await db_session.get(Countdown, countdown_id)
-        assert row.category is None
         assert row.category_id is None
         assert await db_session.get(CountdownCategory, category_id) is None
 
-    async def test_delete_all_clears_mirror_across_profile(
+    async def test_delete_all_clears_link_across_profile(
         self, client, db_session, login_as
     ):
         user = UserFactory()
@@ -527,9 +431,7 @@ class TestCountdownCategoryRouter:
         category = CountdownCategoryFactory(profile=profile, name="Bills")
         await db_session.commit()
 
-        countdown = CountdownFactory(
-            profile=profile, category="Bills", category_id=category.id
-        )
+        countdown = CountdownFactory(profile=profile, category_id=category.id)
         await db_session.commit()
         countdown_id = countdown.id
 
@@ -546,13 +448,12 @@ class TestCountdownCategoryRouter:
         # raises MissingGreenlet on an AsyncSession.
         db_session.expire_all()
         row = await db_session.get(Countdown, countdown_id)
-        assert row.category is None
         assert row.category_id is None
 
     async def test_delete_all_unauthorized_leaves_target_profile_untouched(
         self, client, db_session, login_as
     ):
-        """A non-owner must be rejected with 403 before the mirror-clearing
+        """A non-owner must be rejected with 403 before the link-clearing
         UPDATE runs. This is the ordering the router has to get right: the
         pre-clear UPDATE happens before bulk_delete_in_profile's own
         ownership check, so it has to be preceded by an explicit
@@ -568,9 +469,7 @@ class TestCountdownCategoryRouter:
         await db_session.commit()
         category_id = category.id
 
-        countdown = CountdownFactory(
-            profile=foreign, category="Bills", category_id=category_id
-        )
+        countdown = CountdownFactory(profile=foreign, category_id=category_id)
         await db_session.commit()
         countdown_id = countdown.id
 
@@ -586,6 +485,5 @@ class TestCountdownCategoryRouter:
         # raises MissingGreenlet on an AsyncSession.
         db_session.expire_all()
         row = await db_session.get(Countdown, countdown_id)
-        assert row.category == "Bills"
         assert row.category_id == category_id
         assert await db_session.get(CountdownCategory, category_id) is not None

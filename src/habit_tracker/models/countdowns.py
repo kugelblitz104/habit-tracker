@@ -7,7 +7,6 @@ from habit_tracker.models._base import _StampedRead
 from habit_tracker.models._validators import (
     non_blank_string,
     reject_null,
-    validate_hex_color,
     validate_membership,
 )
 
@@ -31,9 +30,6 @@ class CountdownBase(BaseModel):
     target_time: time | None = None
     # Optional link to a task; a countdown can stand alone.
     task_id: int | None = None
-    # Free-text grouping label + optional hex accent for the grouped views.
-    category: str | None = None
-    color: str | None = None
     # Recurrence anchored on target_date; next occurrence is computed client-side.
     repeat: str = "none"
     # Opt-in Nth-occurrence display for recurring countdowns (e.g. 26th birthday).
@@ -44,11 +40,6 @@ class CountdownBase(BaseModel):
     def validate_title(cls, v: str) -> str:
         return non_blank_string(v, "Title")
 
-    @field_validator("color")
-    @classmethod
-    def validate_color(cls, v: str | None) -> str | None:
-        return validate_hex_color(v)
-
     @field_validator("repeat")
     @classmethod
     def validate_repeat(cls, v: str) -> str:
@@ -56,18 +47,16 @@ class CountdownBase(BaseModel):
 
 
 class CountdownCreate(CountdownBase):
-    # Selects an existing group by id instead of by name. Wins over `category`
-    # when both are sent, and must reference a category in the same profile.
-    # Declared here rather than on CountdownBase so adding it appends to the
-    # OpenAPI properties rather than reordering them.
+    # Selects an existing group by id; must reference a category in the same
+    # profile. Declared here rather than on CountdownBase so adding it appends
+    # to the OpenAPI properties rather than reordering them.
     category_id: int | None = None
 
 
 class CountdownRead(_StampedRead, CountdownBase):
-    # The category record `category` mirrors, so a client joins its countdowns to
-    # /countdown-categories/ by id rather than by a name it can rename. Declared
-    # last so adding it appends to the OpenAPI properties rather than reordering
-    # them.
+    # Lets a client join its countdowns to /countdown-categories/ by id.
+    # Declared last so adding it appends to the OpenAPI properties rather than
+    # reordering them.
     category_id: int | None = None
 
 
@@ -77,13 +66,11 @@ class CountdownUpdate(BaseModel):
     target_date: date | None = None
     target_time: time | None = None
     task_id: int | None = None
-    category: str | None = None
-    color: str | None = None
     repeat: str | None = None
     show_occurrence: bool | None = None
-    # Selects an existing group by id. Wins over `category` when both are sent;
-    # an explicit null clears the group. Declared last so adding it appends to the
-    # OpenAPI properties rather than reordering them.
+    # Selects an existing group by id; an explicit null clears the group.
+    # Declared last so adding it appends to the OpenAPI properties rather than
+    # reordering them.
     category_id: int | None = None
 
     @field_validator("profile_id", "title", "target_date", "repeat", "show_occurrence")
@@ -95,11 +82,6 @@ class CountdownUpdate(BaseModel):
     @classmethod
     def validate_title(cls, v: str | None) -> str | None:
         return non_blank_string(v, "Title")
-
-    @field_validator("color")
-    @classmethod
-    def validate_color(cls, v: str | None) -> str | None:
-        return validate_hex_color(v)
 
     @field_validator("repeat")
     @classmethod

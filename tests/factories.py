@@ -205,8 +205,7 @@ class CountdownFactory(BaseFactory):
     title = Sequence(lambda n: f"Countdown {n}")
     target_date = LazyFunction(date.today)
     target_time = None
-    category = None
-    color = None
+    category_id = None
     repeat = "none"
     show_occurrence = False
     profile = SubFactory(ProfileFactory)

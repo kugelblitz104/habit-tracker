@@ -1,8 +1,8 @@
-"""Resolve a countdown's category record from its free-text name.
+"""Resolve a countdown's category record from a name or an id.
 
-`Countdown.category` is the free-text name a client sets; `Countdown.category_id`
-points at the `CountdownCategory` row that owns the group's colour. This module
-is the only place that name is turned into, or matched against, a record.
+`Countdown.category_id` points at the `CountdownCategory` row that owns the
+group's colour. This module is the only place a name is turned into, or
+matched against, a record.
 """
 
 from sqlalchemy import select
@@ -16,15 +16,11 @@ async def find_or_create(
     *,
     profile_id: int,
     name: str,
-    seed_color: str | None = None,
 ) -> CountdownCategory:
     """Return the profile's category named `name`, inserting it if absent.
 
     `name` is trimmed; matching is case-sensitive, so "bills" and "Bills" are
-    two separate categories.
-
-    `seed_color` is applied only when inserting a new row. An existing
-    category's `color` is left untouched.
+    two separate categories. A new category is created with no colour.
 
     Reads then inserts rather than upserting: the unique constraint on
     `(profile_id, name)` is the real guard, and a concurrent duplicate insert
@@ -42,7 +38,7 @@ async def find_or_create(
     if existing is not None:
         return existing
 
-    row = CountdownCategory(profile_id=profile_id, name=clean, color=seed_color)
+    row = CountdownCategory(profile_id=profile_id, name=clean)
     db.add(row)
     await db.flush()
     return row
@@ -71,16 +67,14 @@ async def resolve_for_countdown(
     *,
     profile_id: int,
     name: str | None,
-    seed_color: str | None = None,
-) -> tuple[int | None, str | None]:
-    """Map a countdown's requested category name to `(category_id, name)`.
+) -> int | None:
+    """Map a category name to its record id, creating the record if new.
 
-    A `None` or blank name returns `(None, None)`: the countdown is
-    uncategorised and no record is created.
+    A `None` or blank name returns `None`: the countdown is uncategorised and no
+    record is created. Called only by the backup importer, which is the one path
+    that still files a countdown into a group by name.
     """
     if name is None or not name.strip():
-        return None, None
-    row = await find_or_create(
-        db, profile_id=profile_id, name=name, seed_color=seed_color
-    )
-    return row.id, row.name
+        return None
+    row = await find_or_create(db, profile_id=profile_id, name=name)
+    return row.id

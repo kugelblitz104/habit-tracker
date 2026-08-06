@@ -522,13 +522,9 @@ class Countdown(Base):
     # independent). Date is required; time is optional (date-only = end of day).
     target_date: Mapped[date] = mapped_column(Date, nullable=False)
     target_time: Mapped[time | None] = mapped_column(Time, nullable=True)
-    # Free-text grouping label (e.g. "Birthdays", "Bills") + an optional hex
-    # accent — both drive the grouped/colored countdown views.
-    category: Mapped[str | None] = mapped_column(String, nullable=True)
-    color: Mapped[str | None] = mapped_column(String, nullable=True)
-    # The category record that owns this group's colour. Server-managed: absent
-    # from every countdown request model, resolved from `category` on write.
-    # SET NULL so deleting a group keeps its countdowns.
+    # The category record this countdown belongs to. The client selects it by id
+    # on write; the server validates that id belongs to the countdown's own
+    # profile. SET NULL so deleting a group keeps its countdowns.
     category_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("countdown_category.id", ondelete="SET NULL"),

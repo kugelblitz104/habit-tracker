@@ -213,12 +213,7 @@ class TestExport:
             profile=profile, name="Bills", color="#0EA5E9"
         )
         await db_session.commit()
-        CountdownFactory(
-            profile=profile,
-            title="Rent",
-            category="Bills",
-            category_id=category.id,
-        )
+        CountdownFactory(profile=profile, title="Rent", category_id=category.id)
         await db_session.commit()
 
         await login_as(user)
@@ -227,6 +222,26 @@ class TestExport:
         body = resp.json()
 
         assert body["countdown_categories"] == [{"name": "Bills", "color": "#0EA5E9"}]
+
+    async def test_export_writes_the_category_name_from_the_record(
+        self, client, db_session, login_as
+    ):
+        """`CountdownBackup.category` comes from the joined record, not a column."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Joined")
+        await db_session.commit()
+        category = CountdownCategoryFactory(
+            profile=profile, name="Bills", color="#0EA5E9"
+        )
+        await db_session.commit()
+        CountdownFactory(profile=profile, title="Rent", category_id=category.id)
+        await db_session.commit()
+
+        await login_as(user)
+        body = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        assert body["countdowns"][0]["category"] == "Bills"
 
     async def test_export_unknown_profile_returns_404(
         self, client, db_session, login_as
@@ -407,12 +422,7 @@ class TestImportRoundTrip:
             profile=profile, name="Bills", color="#0EA5E9"
         )
         await db_session.commit()
-        CountdownFactory(
-            profile=profile,
-            title="Rent",
-            category="Bills",
-            category_id=category.id,
-        )
+        CountdownFactory(profile=profile, title="Rent", category_id=category.id)
         await db_session.commit()
 
         await login_as(user)
@@ -454,22 +464,26 @@ class TestImportRoundTrip:
         await db_session.commit()
         profile = ProfileFactory(user=user, name="PreChange")
         await db_session.commit()
-        CountdownFactory(
-            profile=profile, title="Checkup", category="Health", color="#22C55E"
-        )
-        # A second countdown sharing the same free-text category: the
-        # fallback should recreate the group once and relink both, not
-        # create a duplicate. Its text is untrimmed, as a document written
-        # before the category record existed can be.
-        CountdownFactory(
-            profile=profile, title="Dentist", category="Health ", color="#22C55E"
-        )
+        CountdownFactory(profile=profile, title="Checkup")
+        CountdownFactory(profile=profile, title="Dentist")
         await db_session.commit()
 
         await login_as(user)
         export = (await client.get(f"/backup/profiles/{profile.id}")).json()
         assert export["countdown_categories"] == []
         del export["countdown_categories"]
+        # Simulate a document written before category_id existed: only
+        # free-text category, no record behind it. The fallback should
+        # recreate the group once and relink both countdowns, not create a
+        # duplicate. "Dentist"'s text is untrimmed, as such a document's text
+        # can be. Both countdowns also carry a "color" key, retired from the
+        # read model, to confirm Pydantic's extra='ignore' still lets them
+        # import.
+        by_title = {c["title"]: c for c in export["countdowns"]}
+        by_title["Checkup"]["category"] = "Health"
+        by_title["Checkup"]["color"] = "#0EA5E9"
+        by_title["Dentist"]["category"] = "Health "
+        by_title["Dentist"]["color"] = "#22C55E"
 
         resp = await client.post("/backup/profiles", json=export)
         assert resp.status_code == 201
@@ -489,7 +503,7 @@ class TestImportRoundTrip:
             .one()
         )
         assert new_category.name == "Health"
-        assert new_category.color == "#22C55E"
+        assert new_category.color is None
 
         new_countdowns = (
             (
@@ -502,8 +516,6 @@ class TestImportRoundTrip:
         )
         assert len(new_countdowns) == 2
         assert all(c.category_id == new_category.id for c in new_countdowns)
-        # The mirror comes from the record, not from the document's text.
-        assert all(c.category == "Health" for c in new_countdowns)
 
     async def test_import_normalises_an_untrimmed_countdown_category(
         self, client, db_session, login_as
@@ -557,7 +569,6 @@ class TestImportRoundTrip:
             .one()
         )
         assert new_countdown.category_id == new_category.id
-        assert new_countdown.category == "Bills"
 
     async def test_import_summary_counts_categories(self, client, db_session, login_as):
         user = UserFactory()
@@ -566,7 +577,7 @@ class TestImportRoundTrip:
         await db_session.commit()
         category = CountdownCategoryFactory(profile=profile, name="Bills")
         await db_session.commit()
-        CountdownFactory(profile=profile, category="Bills", category_id=category.id)
+        CountdownFactory(profile=profile, category_id=category.id)
         await db_session.commit()
 
         await login_as(user)

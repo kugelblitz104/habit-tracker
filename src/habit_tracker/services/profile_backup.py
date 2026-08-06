@@ -193,12 +193,25 @@ def build_profile_backup(
     exported_at: datetime | None = None,
 ) -> ProfileBackup:
     """Assemble the portable backup document from loaded ORM rows (pure)."""
+    categories = list(countdown_categories)
+    category_names = {c.id: c.name for c in categories}
     return ProfileBackup(
         exported_at=exported_at or datetime.now(UTC),
         profile=ProfileSettings.model_validate(profile),
         projects=[ProjectBackup.model_validate(p) for p in projects],
         tasks=[TaskBackup.model_validate(t) for t in tasks],
-        countdowns=[CountdownBackup.model_validate(c) for c in countdowns],
+        countdowns=[
+            CountdownBackup.model_validate(c).model_copy(
+                update={
+                    "category": (
+                        category_names.get(c.category_id)
+                        if c.category_id is not None
+                        else None
+                    )
+                }
+            )
+            for c in countdowns
+        ],
         time_entries=[TimeEntryBackup.model_validate(e) for e in time_entries],
         habits=[HabitBackup.model_validate(h) for h in habits],
         trackers=[TrackerBackup.model_validate(t) for t in trackers],
@@ -210,7 +223,7 @@ def build_profile_backup(
             for c in integration_connections
         ],
         countdown_categories=[
-            CountdownCategoryBackup.model_validate(c) for c in countdown_categories
+            CountdownCategoryBackup.model_validate(c) for c in categories
         ],
     )
 
@@ -415,14 +428,12 @@ async def restore_profile_backup(
 
     # Countdowns -------------------------------------------------------------
     for item in backup.countdowns:
-        # Routed through the resolver like every other write path, so the
-        # mirror is the record's name rather than the document's text and a
-        # category the document has no record for is recreated from that text.
-        category_id, category = await resolve_for_countdown(
+        # Routed through the resolver like every other write path, so a
+        # category the document has no record for is recreated from its text.
+        category_id = await resolve_for_countdown(
             db,
             profile_id=profile.id,
             name=item.category,
-            seed_color=item.color,
         )
         if category_id is not None:
             category_ids.add(category_id)
@@ -430,7 +441,6 @@ async def restore_profile_backup(
             profile_id=profile.id,
             task_id=(task_map.get(item.task_id) if item.task_id is not None else None),
             category_id=category_id,
-            category=category,
             **item.model_dump(exclude={"id", "task_id", "category"}, exclude_none=True),
         )
         db.add(row)

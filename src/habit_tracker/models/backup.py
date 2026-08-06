@@ -97,7 +97,6 @@ class CountdownBackup(_FromORM):
     target_date: date
     target_time: time | None = None
     category: str | None = None
-    color: str | None = None
     repeat: str = "none"
     show_occurrence: bool = False
     created_date: datetime | None = None
@@ -108,7 +107,7 @@ class CountdownCategoryBackup(_FromORM):
     """A countdown group's name and colour.
 
     The `id` is not carried: countdowns resolve their category by name on
-    restore, since `Countdown.category` mirrors it exactly.
+    restore, matched against `CountdownBackup.category`.
     """
 
     name: str
