@@ -79,6 +79,30 @@ def trimmed_string(v: str | None, label: str) -> str | None:
     return v.strip()
 
 
+def trimmed_or_none(v: str | None) -> str | None:
+    """Blank/whitespace-only -> `None`; otherwise strip.
+
+    Differs from `trimmed_string`, which rejects a blank: here an empty string
+    means "no value", so it is nulled rather than 422'd.
+    """
+    if v is None or not v.strip():
+        return None
+    return v.strip()
+
+
+def normalize_external_url(v: str | None) -> str | None:
+    """Blank/whitespace-only -> `None`. Otherwise strip and require an http(s)
+    scheme, because the value is rendered as a link target.
+
+    Unlike `normalize_base_url` this keeps a trailing slash: nothing joins path
+    segments onto this URL, and the slash can be part of the target.
+    """
+    v = trimmed_or_none(v)
+    if v is not None and not v.startswith(("http://", "https://")):
+        raise ValueError("external_url must start with http:// or https://")
+    return v
+
+
 def non_negative_int(v: int | None, label: str) -> int | None:
     if v is not None and v < 0:
         raise ValueError(f"{label} cannot be negative")

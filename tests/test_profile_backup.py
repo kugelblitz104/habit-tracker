@@ -641,3 +641,49 @@ class TestImportRoundTrip:
     async def test_import_requires_authentication(self, client, db_session):
         resp = await client.post("/backup/profiles", json={})
         assert resp.status_code in (401, 422)
+
+
+class TestImportPermissiveness:
+    """A restore accepts values the request models would now reject.
+
+    `TaskBase`/`TaskUpdate` validate the external-link triple - `external_url`
+    needs an http(s) scheme and `source` must name a known provider - but
+    `TaskBackup` deliberately carries no validators, so a document exported
+    before those rules existed still imports rather than 422-ing as a whole.
+    """
+
+    async def test_task_with_a_legacy_external_link_still_imports(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Legacy")
+        await db_session.commit()
+        TaskFactory(profile=profile, title="Chase the ticket")
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        # Values a pre-validation document can hold: a provider name that is
+        # not one of the two known ones, and a URL with no scheme.
+        export["tasks"][0]["source"] = "loop"
+        export["tasks"][0]["external_ref"] = "LOOP-7"
+        export["tasks"][0]["external_url"] = "intranet.local/items/7"
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        new_profile_id = resp.json()["profile_id"]
+
+        imported = (
+            (
+                await db_session.execute(
+                    select(Task).where(Task.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert imported.source == "loop"
+        assert imported.external_ref == "LOOP-7"
+        assert imported.external_url == "intranet.local/items/7"

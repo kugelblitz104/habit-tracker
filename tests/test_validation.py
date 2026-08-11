@@ -8,7 +8,13 @@ that asserts a 2xx happy path, it belongs there, not here.
 """
 
 from habit_tracker.constants import TrackerStatus
-from tests.factories import AdminUserFactory, HabitFactory, TrackerFactory, UserFactory
+from tests.factories import (
+    AdminUserFactory,
+    HabitFactory,
+    TaskFactory,
+    TrackerFactory,
+    UserFactory,
+)
 
 
 class TestEmailValidation:
@@ -848,3 +854,107 @@ class TestInvalidIds:
 
         response = await client.get("/trackers/0")
         assert response.status_code in [404, 422]
+
+
+class TestExternalLinkValidation:
+    """Rejection of bad values in a task's external-link triple
+    (`source` / `external_ref` / `external_url`).
+
+    `external_url` is rendered into an `href` by the client, so a value with no
+    http(s) scheme is rejected rather than stored. `source` names the provider
+    that produced the link; NULL (a link with no provider behind it) is valid
+    and lives in test_edge_cases.py.
+    """
+
+    async def test_external_url_without_scheme_rejected(
+        self, client, db_session, login_as
+    ):
+        """A scheme-less URL is rejected - it would render as a relative href."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "Review the spec",
+                "external_ref": "PROJ-412",
+                "external_url": "dev.azure.com/org/proj/_workitems/edit/412",
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_javascript_scheme_external_url_rejected(
+        self, client, db_session, login_as
+    ):
+        """A javascript: URL is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "Review the spec",
+                "external_ref": "PROJ-412",
+                "external_url": "javascript:alert(1)",
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_unknown_source_rejected(self, client, db_session, login_as):
+        """A source outside the known providers is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "Review the spec",
+                "source": "jira",
+                "external_ref": "PROJ-412",
+                "external_url": "https://example.atlassian.net/browse/PROJ-412",
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_update_external_url_without_scheme_rejected(
+        self, client, db_session, login_as
+    ):
+        """PATCH is validated the same way as create."""
+        user = UserFactory()
+        await db_session.commit()
+
+        task = TaskFactory(profile=user.profiles[0])
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"external_url": "example.com/browse/PROJ-412"},
+        )
+        assert response.status_code == 422
+
+    async def test_update_unknown_source_rejected(self, client, db_session, login_as):
+        """PATCH with an unknown source is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        task = TaskFactory(profile=user.profiles[0])
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"source": "gitlab"},
+        )
+        assert response.status_code == 422

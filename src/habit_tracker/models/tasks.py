@@ -3,16 +3,26 @@ from typing import overload
 
 from pydantic import BaseModel, ValidationInfo, field_validator
 
-from habit_tracker.constants import TaskBand, TaskPriority, TaskStatus
+from habit_tracker.constants import (
+    IntegrationProvider,
+    TaskBand,
+    TaskPriority,
+    TaskStatus,
+)
 from habit_tracker.models._base import _FromORM
 from habit_tracker.models._validators import (
     non_blank_string,
     non_negative_int,
+    normalize_external_url,
     reject_null,
+    trimmed_or_none,
     validate_membership,
 )
 
 _PRIORITY_VALUES = tuple(p.value for p in TaskPriority)
+# The provider that produced an external link. NULL is also valid and means the
+# link has no integration behind it - a work item pasted in by hand.
+_SOURCE_VALUES = {p.value for p in IntegrationProvider}
 
 
 @overload
@@ -30,6 +40,12 @@ def _validate_status(v: None) -> None: ...
 def _validate_status(v: int | None) -> int | None:
     return validate_membership(
         v, [s.value for s in TaskStatus], "Status must be a valid TaskStatus value"
+    )
+
+
+def _validate_source(v: str | None) -> str | None:
+    return validate_membership(
+        v, _SOURCE_VALUES, f"source must be one of {sorted(_SOURCE_VALUES)} or null"
     )
 
 
@@ -72,6 +88,21 @@ class TaskBase(BaseModel):
     @classmethod
     def validate_status(cls, v: int) -> int:
         return _validate_status(v)
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str | None) -> str | None:
+        return _validate_source(v)
+
+    @field_validator("external_ref")
+    @classmethod
+    def validate_external_ref(cls, v: str | None) -> str | None:
+        return trimmed_or_none(v)
+
+    @field_validator("external_url")
+    @classmethod
+    def validate_external_url(cls, v: str | None) -> str | None:
+        return normalize_external_url(v)
 
 
 class TaskCreate(TaskBase):
@@ -139,6 +170,23 @@ class TaskUpdate(BaseModel):
     @classmethod
     def validate_estimated_effort(cls, v: int | None) -> int | None:
         return non_negative_int(v, "Estimated effort")
+
+    # The link triple stays out of `reject_null` above: all three columns are
+    # nullable, and sending explicit nulls is how a client unlinks a task.
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str | None) -> str | None:
+        return _validate_source(v)
+
+    @field_validator("external_ref")
+    @classmethod
+    def validate_external_ref(cls, v: str | None) -> str | None:
+        return trimmed_or_none(v)
+
+    @field_validator("external_url")
+    @classmethod
+    def validate_external_url(cls, v: str | None) -> str | None:
+        return normalize_external_url(v)
 
 
 class TaskList(BaseModel):
