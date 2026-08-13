@@ -958,3 +958,50 @@ class TestExternalLinkValidation:
             json={"source": "gitlab"},
         )
         assert response.status_code == 422
+
+
+class TestRetiredTaskStatus:
+    """Status 9 ("unclear") was merged into NEEDS_INFO (4) and is no longer a
+    valid TaskStatus, so it is rejected everywhere a status can be written.
+
+    Leaving 9 writable is what would make reissuing it for a future status
+    unsafe, so these tests are the guard on that: they must fail if anyone
+    re-adds the member without also re-migrating the column.
+    """
+
+    async def test_create_with_retired_status_rejected(
+        self, client, db_session, login_as
+    ):
+        """POST with the retired status 9 is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "Clarify the acceptance criteria",
+                "status": 9,
+            },
+        )
+        assert response.status_code == 422
+
+    async def test_update_to_retired_status_rejected(
+        self, client, db_session, login_as
+    ):
+        """PATCH to the retired status 9 is rejected."""
+        user = UserFactory()
+        await db_session.commit()
+
+        task = TaskFactory(profile=user.profiles[0])
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"status": 9},
+        )
+        assert response.status_code == 422

@@ -26,9 +26,10 @@ Two things are deliberately NOT round-tripped:
 
 from datetime import date, datetime, time
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from habit_tracker.models._base import _FromORM
+from habit_tracker.models.tasks import _validate_status
 
 # Bump VERSION on any breaking change to the document shape; FORMAT lets the
 # importer reject an unrelated JSON file with a clear message.
@@ -88,6 +89,15 @@ class TaskBackup(_FromORM):
     created_date: datetime | None = None
     updated_date: datetime | None = None
     sort_order: int = 0
+
+    # The only validated field on this model. Everything else stays permissive
+    # so a document predating a rule still imports, but an unknown status would
+    # be written to the column verbatim, and 9 ("unclear", merged into
+    # NEEDS_INFO) is meant to be reusable by a future status.
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: int) -> int:
+        return _validate_status(v)
 
 
 class CountdownBackup(_FromORM):

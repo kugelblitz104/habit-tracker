@@ -24,12 +24,17 @@ class TaskStatus(int, Enum):
     1 = in progress
     2 = scheduled
     3 = blocked
-    4 = needs info
+    4 = needs info (waiting on an answer or a clarification, from me or others)
     5 = deferred
     6 = done
     7 = cancelled
     8 = pending (work done on my end, waiting for others to validate/close)
-    9 = unclear (requirements are unclear / need clarification)
+
+    9 was "unclear" and was merged into NEEDS_INFO. The value is free for a
+    future status, and stays free only because both halves hold: the migration
+    rewrote every stored 9 to 4, and TaskBackup rejects a 9 rather than storing
+    one. Drop either and a stale 9 survives to be absorbed by whatever claims
+    the value next.
     """
 
     OPEN = 0
@@ -41,7 +46,6 @@ class TaskStatus(int, Enum):
     DONE = 6
     CANCELLED = 7
     PENDING = 8
-    UNCLEAR = 9
 
 
 class TimeEntryKind(int, Enum):

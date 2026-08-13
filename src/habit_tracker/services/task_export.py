@@ -41,7 +41,6 @@ _STATUS_LABELS = {
     TaskStatus.DONE.value: "Done",
     TaskStatus.CANCELLED.value: "Cancelled",
     TaskStatus.PENDING.value: "Pending",
-    TaskStatus.UNCLEAR.value: "Unclear",
 }
 
 _PRIORITY_LABELS = {
@@ -101,7 +100,10 @@ def _render_task(
     lines = [f"{indent}- [{checkbox}] {task.title}"]
 
     if task.status not in (TaskStatus.OPEN.value, TaskStatus.DONE.value):
-        lines.append(f"{indent}  - Status: {_STATUS_LABELS[task.status]}")
+        # .get, not [], so a status the map doesn't cover degrades to its raw
+        # value instead of 500-ing the export.
+        label = _STATUS_LABELS.get(task.status, str(task.status))
+        lines.append(f"{indent}  - Status: {label}")
     if task.priority > 0:
         lines.append(f"{indent}  - Priority: {_PRIORITY_LABELS[task.priority]}")
     if task.due_date is not None:

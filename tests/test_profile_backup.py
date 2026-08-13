@@ -648,8 +648,11 @@ class TestImportPermissiveness:
 
     `TaskBase`/`TaskUpdate` validate the external-link triple - `external_url`
     needs an http(s) scheme and `source` must name a known provider - but
-    `TaskBackup` deliberately carries no validators, so a document exported
-    before those rules existed still imports rather than 422-ing as a whole.
+    `TaskBackup` carries no validator for them, so a document exported before
+    those rules existed still imports rather than 422-ing as a whole.
+
+    `status` is the one deliberate exception - see
+    TestImportRejectsRetiredStatus.
     """
 
     async def test_task_with_a_legacy_external_link_still_imports(
@@ -687,3 +690,64 @@ class TestImportPermissiveness:
         assert imported.source == "loop"
         assert imported.external_ref == "LOOP-7"
         assert imported.external_url == "intranet.local/items/7"
+
+
+class TestImportRejectsRetiredStatus:
+    """`status` is the one field where a restore is stricter than the rest of
+    TaskBackup, and the strictness is the point.
+
+    Status 9 ("unclear") was merged into NEEDS_INFO, and the value is meant to
+    be reusable by a future status. Importing a 9 unvalidated would write it
+    straight into the column - a value no client can render, which whatever
+    claims 9 next would silently absorb. Rejecting the document is what keeps
+    the value clean; the compatibility cost was accepted deliberately.
+    """
+
+    async def test_document_carrying_the_retired_status_is_rejected(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="PreMerge")
+        await db_session.commit()
+        TaskFactory(profile=profile, title="Clarify the acceptance criteria")
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        export["tasks"][0]["status"] = 9
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 422
+
+    async def test_a_document_with_only_live_statuses_still_imports(
+        self, client, db_session, login_as
+    ):
+        """The guard is on 9 specifically, not on status as a whole."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="Current")
+        await db_session.commit()
+        TaskFactory(
+            profile=profile,
+            title="Chase the ticket",
+            status=TaskStatus.NEEDS_INFO,
+        )
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+
+        imported = (
+            (
+                await db_session.execute(
+                    select(Task).where(Task.profile_id == resp.json()["profile_id"])
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert imported.status == TaskStatus.NEEDS_INFO

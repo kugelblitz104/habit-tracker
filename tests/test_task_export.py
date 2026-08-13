@@ -58,6 +58,20 @@ class TestRenderTasksMarkdown:
         )
         assert doc.index("Priority two") < doc.index("Due near") < doc.index("Due far")
 
+    def test_status_outside_the_label_map_renders_as_its_number(self):
+        """An unmapped status degrades to its raw value rather than raising.
+
+        Nothing writes one today - status 9 was migrated away and is rejected
+        on every write path - but the formatter reads live rows, so during a
+        rolling deploy it can meet a row the migration has not reached yet.
+        A 500 on the export endpoint is a worse answer than "Status: 9".
+        """
+        today = date(2026, 7, 9)
+        doc = render_tasks_markdown(
+            "Personal", [_task(title="Stale row", status=9)], {}, today=today
+        )
+        assert "- Status: 9" in doc
+
     def test_subtasks_nest_under_parent_not_top_level(self):
         """Subtasks render indented under their parent, never top-level."""
         today = date(2026, 7, 9)
