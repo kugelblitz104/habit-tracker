@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, ValidationInfo, field_validator
 
@@ -58,6 +58,9 @@ class CountdownRead(_StampedRead, CountdownBase):
     # Declared last so adding it appends to the OpenAPI properties rather than
     # reordering them.
     category_id: int | None = None
+    # Server-stamped when the countdown is archived; null means live. Declared
+    # after category_id for the same append-not-reorder reason.
+    archived_date: datetime | None = None
 
 
 class CountdownUpdate(BaseModel):
@@ -72,8 +75,13 @@ class CountdownUpdate(BaseModel):
     # Declared last so adding it appends to the OpenAPI properties rather than
     # reordering them.
     category_id: int | None = None
+    # Retires or restores the countdown. The server owns the timestamp, so this
+    # is a flag rather than archived_date itself.
+    archived: bool | None = None
 
-    @field_validator("profile_id", "title", "target_date", "repeat", "show_occurrence")
+    @field_validator(
+        "profile_id", "title", "target_date", "repeat", "show_occurrence", "archived"
+    )
     @classmethod
     def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
         return reject_null(v, info)

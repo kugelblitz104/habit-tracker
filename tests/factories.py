@@ -211,6 +211,7 @@ class CountdownFactory(BaseFactory):
     profile = SubFactory(ProfileFactory)
     created_date = LazyFunction(datetime.now)
     updated_date = None
+    archived_date = None
 
 
 class CalendarConnectionFactory(BaseFactory):

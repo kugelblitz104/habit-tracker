@@ -457,6 +457,68 @@ class TestImportRoundTrip:
         )
         assert new_countdown.category_id == new_category.id
 
+    async def test_roundtrip_preserves_an_archived_countdown(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="WithArchived")
+        await db_session.commit()
+        archived_at = datetime(2026, 8, 10, 9, 30)
+        CountdownFactory(profile=profile, title="Live", archived_date=None)
+        CountdownFactory(profile=profile, title="Retired", archived_date=archived_at)
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        new_profile_id = resp.json()["profile_id"]
+
+        restored = {
+            c.title: c.archived_date
+            for c in (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .all()
+        }
+        assert restored == {"Live": None, "Retired": archived_at}
+
+    async def test_import_of_a_document_without_archived_date_keeps_countdowns_live(
+        self, client, db_session, login_as
+    ):
+        """A document exported before archiving existed carries no such key."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user, name="NoArchiveKey")
+        await db_session.commit()
+        CountdownFactory(profile=profile, title="Checkup")
+        await db_session.commit()
+
+        await login_as(user)
+        export = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        for c in export["countdowns"]:
+            del c["archived_date"]
+
+        resp = await client.post("/backup/profiles", json=export)
+        assert resp.status_code == 201
+        new_profile_id = resp.json()["profile_id"]
+
+        restored = (
+            (
+                await db_session.execute(
+                    select(Countdown).where(Countdown.profile_id == new_profile_id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert restored.archived_date is None
+
     async def test_import_of_a_pre_change_document_still_works(
         self, client, db_session, login_as
     ):

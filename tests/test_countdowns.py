@@ -133,6 +133,57 @@ class TestListCountdowns:
         assert data["offset"] == 1
         assert len(data["countdowns"]) == 2
 
+    async def test_list_countdowns_excludes_archived_by_default(
+        self, client, db_session, login_as
+    ):
+        """Archived countdowns are absent from the default list, total included."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        live = CountdownFactory(profile=profile, title="Live")
+        CountdownFactory(
+            profile=profile, title="Archived", archived_date=datetime.now()
+        )
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get("/countdowns/", params={"profile_id": profile.id})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert [c["id"] for c in data["countdowns"]] == [live.id]
+
+    async def test_list_countdowns_archived_returns_only_archived(
+        self, client, db_session, login_as
+    ):
+        """archived=true lists the archived ones and nothing else."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        CountdownFactory(profile=profile, title="Live")
+        archived = CountdownFactory(
+            profile=profile, title="Archived", archived_date=datetime.now()
+        )
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/countdowns/", params={"profile_id": profile.id, "archived": True}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert [c["id"] for c in data["countdowns"]] == [archived.id]
+        assert data["countdowns"][0]["archived_date"] is not None
+
 
 class TestCreateCountdown:
     """Tests for POST /countdowns/ endpoint."""
@@ -720,6 +771,123 @@ class TestPatchCountdown:
             f"/countdowns/{countdown.id}", json={"title": "Hacked"}
         )
         assert response.status_code == 403
+
+    async def test_patch_countdown_archive_stamps_archived_date(
+        self, client, db_session, login_as
+    ):
+        """archived=true stamps the archive time; the client never sends a date."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile)
+        await db_session.commit()
+        assert countdown.archived_date is None
+
+        await login_as(user)
+
+        before = datetime.now()
+        response = await client.patch(
+            f"/countdowns/{countdown.id}", json={"archived": True}
+        )
+        assert response.status_code == 200
+        assert response.json()["archived_date"] is not None
+
+        await db_session.refresh(countdown)
+        assert countdown.archived_date is not None
+        assert countdown.archived_date >= before
+
+    async def test_patch_countdown_unarchive_clears_archived_date(
+        self, client, db_session, login_as
+    ):
+        """archived=false puts an archived countdown back in the live list."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile, archived_date=datetime.now())
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown.id}", json={"archived": False}
+        )
+        assert response.status_code == 200
+        assert response.json()["archived_date"] is None
+
+        await db_session.refresh(countdown)
+        assert countdown.archived_date is None
+
+    async def test_patch_countdown_re_archive_keeps_the_original_date(
+        self, client, db_session, login_as
+    ):
+        """Archiving an already-archived countdown does not re-stamp it."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        first_archived = datetime.now() - timedelta(days=3)
+        countdown = CountdownFactory(profile=profile, archived_date=first_archived)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown.id}", json={"archived": True}
+        )
+        assert response.status_code == 200
+
+        await db_session.refresh(countdown)
+        assert countdown.archived_date == first_archived
+
+    async def test_patch_countdown_null_archived_rejected(
+        self, client, db_session, login_as
+    ):
+        """An explicit null for archived is rejected rather than unarchiving."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile, archived_date=datetime.now())
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown.id}", json={"archived": None}
+        )
+        assert response.status_code == 422
+
+    async def test_patch_countdown_archived_date_not_client_settable(
+        self, client, db_session, login_as
+    ):
+        """archived_date is server-managed and not part of the update schema."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        countdown = CountdownFactory(profile=profile)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.patch(
+            f"/countdowns/{countdown.id}",
+            json={"archived_date": "2020-01-01T00:00:00"},
+        )
+        assert response.status_code == 200
+        assert response.json()["archived_date"] is None
 
     async def test_patch_nonexistent_countdown(self, client, db_session, login_as):
         """Return 404 for non-existent countdown."""

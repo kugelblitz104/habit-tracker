@@ -91,11 +91,23 @@ async def list_countdowns(
     profile_id: int = Query(description="The profile whose countdowns to list"),
     limit: int = Query(default=100, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    archived: bool = Query(
+        default=False,
+        description="True lists the archived countdowns instead of the live ones",
+    ),
 ) -> CountdownList:
-    """List a profile's countdowns, soonest target first."""
+    """List a profile's countdowns, soonest target first. Archived countdowns are
+    excluded unless `archived` is true, which lists those and only those."""
     await get_owned_profile(db, profile_id, current_user, "countdown")
 
-    query = select(Countdown).filter(Countdown.profile_id == profile_id)
+    archived_filter = (
+        Countdown.archived_date.is_not(None)
+        if archived
+        else Countdown.archived_date.is_(None)
+    )
+    query = select(Countdown).filter(
+        Countdown.profile_id == profile_id, archived_filter
+    )
     result = await db.execute(
         query.order_by(Countdown.target_date, Countdown.target_time)
         .limit(limit)
@@ -104,7 +116,7 @@ async def list_countdowns(
     countdowns = result.scalars().all()
 
     count_result = await db.execute(
-        select(func.count()).filter(Countdown.profile_id == profile_id)
+        select(func.count()).filter(Countdown.profile_id == profile_id, archived_filter)
     )
     total = count_result.scalar() or 0
 
@@ -160,12 +172,22 @@ async def patch_countdown(
     user. `category_id` files it into an existing group in the same profile and a
     null clears the group. The group also re-resolves on a profile move, since a
     group belongs to one profile: it is recreated in the target profile under the
-    same name."""
+    same name. `archived` retires the countdown or restores it; the archive
+    timestamp is server-stamped, and re-archiving keeps the original one."""
     db_countdown, profile = await _get_countdown_and_profile(
         db, countdown_id, current_user
     )
 
     data = countdown_update.model_dump(exclude_unset=True)
+
+    # `archived` is a flag over a server-owned timestamp, so it never reaches the
+    # setattr loop under its own name.
+    if "archived" in data:
+        archived = data.pop("archived")
+        if not archived:
+            data["archived_date"] = None
+        elif db_countdown.archived_date is None:
+            data["archived_date"] = datetime.now()
 
     new_profile_id = data.get("profile_id")
     if new_profile_id is not None and new_profile_id != db_countdown.profile_id:

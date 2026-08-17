@@ -539,6 +539,9 @@ class Countdown(Base):
     show_occurrence: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    # When set, the countdown is retired: it stays in the profile but is absent
+    # from the default list. NULL means live.
+    archived_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

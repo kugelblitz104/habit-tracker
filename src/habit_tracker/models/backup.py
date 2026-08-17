@@ -111,6 +111,7 @@ class CountdownBackup(_FromORM):
     show_occurrence: bool = False
     created_date: datetime | None = None
     updated_date: datetime | None = None
+    archived_date: datetime | None = None
 
 
 class CountdownCategoryBackup(_FromORM):
