@@ -170,7 +170,56 @@ class TestListHabitTrackers:
         response = await client.get(f"/habits/{habit.id}/trackers?limit=3")
         assert response.status_code == 200
         data = response.json()
-        assert data["total"] == 3  # Note: current impl returns len of returned items
+        assert len(data["trackers"]) == 3
+        assert data["total"] == 8
+
+    async def test_list_habit_trackers_offset_skips(self, client, db_session, login_as):
+        """offset skips rows without changing total."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        for i in range(8):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        await login_as(user)
+
+        first = await client.get(f"/habits/{habit.id}/trackers?limit=3&offset=0")
+        second = await client.get(f"/habits/{habit.id}/trackers?limit=3&offset=3")
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_ids = [t["id"] for t in first.json()["trackers"]]
+        second_ids = [t["id"] for t in second.json()["trackers"]]
+        assert len(second_ids) == 3
+        assert set(first_ids).isdisjoint(second_ids)
+        assert first.json()["total"] == 8
+        assert second.json()["total"] == 8
+        assert second.json()["offset"] == 3
+
+    async def test_list_habit_trackers_offset_past_end_is_empty(
+        self, client, db_session, login_as
+    ):
+        """An offset beyond total returns no rows but still reports total."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date.today())
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers?offset=50")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["trackers"] == []
+        assert data["total"] == 1
 
 
 class TestListHabitTrackersLite:
@@ -533,3 +582,91 @@ class TestListHabitTrackersLite:
 
         assert date.today().isoformat() in data["auto_skipped_dates"]
         assert [t["dated"] for t in data["trackers"]] == [date.today().isoformat()]
+
+    async def test_list_trackers_lite_total_is_the_window_count(
+        self, client, db_session, login_as
+    ):
+        """total counts the whole window, not the returned page."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        for i in range(10):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(f"/habits/{habit.id}/trackers/lite?days=30&limit=4")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["trackers"]) == 4
+        assert data["total"] == 10
+        assert data["limit"] == 4
+        assert data["offset"] == 0
+
+    async def test_list_trackers_lite_offset_slices_the_window(
+        self, client, db_session, login_as
+    ):
+        """limit and offset walk the window without overlap."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+
+        for i in range(10):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        await login_as(user)
+
+        first = await client.get(f"/habits/{habit.id}/trackers/lite?days=30&limit=4")
+        second = await client.get(
+            f"/habits/{habit.id}/trackers/lite?days=30&limit=4&offset=4"
+        )
+        first_ids = [t["id"] for t in first.json()["trackers"]]
+        second_ids = [t["id"] for t in second.json()["trackers"]]
+        assert len(second_ids) == 4
+        assert set(first_ids).isdisjoint(second_ids)
+        assert second.json()["offset"] == 4
+
+    async def test_list_trackers_lite_range_fields_are_page_independent(
+        self, client, db_session, login_as
+    ):
+        """end_date, days, has_previous and auto_skipped_dates describe the
+        window, so every page of a walk reports them identically.
+
+        The client keeps only the first page's copy, so a page-dependent value
+        here would corrupt streak rendering with no visible error.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, frequency=1, range=7)
+        await db_session.commit()
+
+        for i in range(12):
+            TrackerFactory(habit=habit, dated=date.today() - timedelta(days=i))
+        await db_session.commit()
+
+        await login_as(user)
+
+        pages = []
+        for offset in (0, 4, 8):
+            response = await client.get(
+                f"/habits/{habit.id}/trackers/lite?days=30&limit=4&offset={offset}"
+            )
+            assert response.status_code == 200
+            pages.append(response.json())
+
+        range_fields = [
+            {
+                k: p[k]
+                for k in ("end_date", "days", "has_previous", "auto_skipped_dates")
+            }
+            for p in pages
+        ]
+        assert range_fields[0] == range_fields[1] == range_fields[2]

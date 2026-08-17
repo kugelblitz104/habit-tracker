@@ -1693,3 +1693,46 @@ class TestListHabits:
         data = response.json()
         assert data["total"] == 0
         assert data["habits"] == []
+
+    async def test_list_habits_offset_skips(self, client, db_session, login_as):
+        """offset skips habits in sort_order without changing total."""
+        user = UserFactory()
+        await db_session.commit()
+
+        habits = [
+            HabitFactory(user=user, name=f"Habit {i}", sort_order=i) for i in range(10)
+        ]
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/",
+            params={"profile_id": user.profiles[0].id, "limit": 3, "offset": 3},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 10
+        assert data["offset"] == 3
+        expected_ids = [h.id for h in sorted(habits, key=lambda h: h.sort_order)[3:6]]
+        assert [h["id"] for h in data["habits"]] == expected_ids
+
+    async def test_list_habits_offset_past_end_is_empty(
+        self, client, db_session, login_as
+    ):
+        """An offset beyond total returns no habits but still reports total."""
+        user = UserFactory()
+        await db_session.commit()
+
+        HabitFactory(user=user, name="Only", sort_order=0)
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/", params={"profile_id": user.profiles[0].id, "offset": 50}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["habits"] == []
+        assert data["total"] == 1

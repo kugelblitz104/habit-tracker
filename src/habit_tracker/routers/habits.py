@@ -166,6 +166,7 @@ async def list_habits(
             "zone; when omitted, the server's local date is used."
         ),
     ),
+    offset: int = Query(default=0, ge=0, description="Number of habits to skip"),
 ) -> HabitList:
     """
     Get a paginated list of habits belonging to a profile.
@@ -173,6 +174,7 @@ async def list_habits(
     - **profile_id**: The profile whose habits to list (required)
     - **limit**: Maximum number of habits to return (default: 5, max: 100)
     - **tz**: Optional IANA timezone for determining "today" (invalid name -> 422)
+    - **offset**: Number of habits to skip (default: 0)
     """
     await get_owned_profile(db, profile_id, current_user, "habit")
 
@@ -183,6 +185,7 @@ async def list_habits(
         .filter(Habit.profile_id == profile_id)
         .order_by(Habit.sort_order, Habit.id)
         .limit(limit)
+        .offset(offset)
     )
     db_habits = result.scalars().all()
 
@@ -220,7 +223,7 @@ async def list_habits(
         habits=habits_read,
         total=total,
         limit=limit,
-        offset=0,
+        offset=offset,
     )
 
 
@@ -325,12 +328,14 @@ async def list_habit_trackers(
         le=1000,
         description="Maximum number of trackers to return (1-1000)",
     ),
+    offset: int = Query(default=0, ge=0, description="Number of trackers to skip"),
 ) -> TrackerList:
     """
     Get all tracker entries for a specific habit, ordered by date (most recent first).
 
     - **habit_id**: The unique identifier of the habit
     - **limit**: Maximum number of trackers to return (default: 5, max: 1000)
+    - **offset**: Number of trackers to skip (default: 0)
 
     Returns tracker entries showing completion/skip status for each date.
     """
@@ -341,14 +346,20 @@ async def list_habit_trackers(
         .filter(Tracker.habit_id == habit_id)
         .order_by(Tracker.dated.desc())
         .limit(limit)  # ge=1 validation guarantees a positive limit
+        .offset(offset)
     )
     db_trackers = result.scalars().all()
 
+    count_result = await db.execute(
+        select(func.count()).select_from(Tracker).filter(Tracker.habit_id == habit_id)
+    )
+    total = count_result.scalar() or 0
+
     return TrackerList(
         trackers=[TrackerRead.model_validate(t) for t in db_trackers],
-        total=len(db_trackers),
+        total=total,
         limit=limit,
-        offset=0,
+        offset=offset,
     )
 
 
@@ -375,6 +386,13 @@ async def list_habit_trackers_lite(
             "server's local date is used."
         ),
     ),
+    limit: int = Query(
+        default=1000,
+        ge=1,
+        le=1000,
+        description="Maximum number of trackers to return (1-1000)",
+    ),
+    offset: int = Query(default=0, ge=0, description="Number of trackers to skip"),
 ) -> TrackerLiteList:
     """
     Get tracker entries in a lightweight format with date-based pagination.
@@ -396,6 +414,8 @@ async def list_habit_trackers_lite(
     - **end_date**: End date for the range (defaults to today)
     - **days**: Number of days to fetch (1-3660, default: 42 = 6 weeks)
     - **tz**: Optional IANA timezone for the default end_date (invalid name -> 422)
+    - **limit**: Maximum number of trackers to return (1-1000, default: 1000)
+    - **offset**: Number of trackers to skip (default: 0)
     """
     habit, _ = await get_owned_habit(db, habit_id, current_user)
 
@@ -411,15 +431,26 @@ async def list_habit_trackers_lite(
     # Calculate start date
     start_date = end_date - timedelta(days=days - 1)
 
+    in_window = (
+        Tracker.habit_id == habit_id,
+        Tracker.dated >= start_date,
+        Tracker.dated <= end_date,
+    )
+
     # Query trackers within the date range
     result = await db.execute(
         select(Tracker)
-        .filter(Tracker.habit_id == habit_id)
-        .filter(Tracker.dated >= start_date)
-        .filter(Tracker.dated <= end_date)
+        .filter(*in_window)
         .order_by(Tracker.dated.desc())
+        .limit(limit)
+        .offset(offset)
     )
     db_trackers = result.scalars().all()
+
+    count_result = await db.execute(
+        select(func.count()).select_from(Tracker).filter(*in_window)
+    )
+    total = count_result.scalar() or 0
 
     # Check if there are older trackers (for has_previous flag)
     older_result = await db.execute(
@@ -466,11 +497,13 @@ async def list_habit_trackers_lite(
 
     return TrackerLiteList(
         trackers=trackers_lite,
-        total=len(trackers_lite),
+        total=total,
         end_date=end_date,
         days=days,
         has_previous=has_previous,
         auto_skipped_dates=auto_skipped_dates,
+        limit=limit,
+        offset=offset,
     )
 
 

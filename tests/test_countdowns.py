@@ -133,6 +133,43 @@ class TestListCountdowns:
         assert data["offset"] == 1
         assert len(data["countdowns"]) == 2
 
+    async def test_list_countdowns_two_page_walk_covers_ties_once(
+        self, client, db_session, login_as
+    ):
+        """A tie on (target_date, target_time) that straddles a page boundary
+        must not duplicate one countdown while dropping another - the id
+        tiebreaker makes the order total."""
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        same_date = date.today() + timedelta(days=5)
+        tied = [
+            CountdownFactory(profile=profile, title=f"Tied {i}", target_date=same_date)
+            for i in range(5)
+        ]
+        await db_session.commit()
+        expected_ids = {c.id for c in tied}
+
+        await login_as(user)
+
+        first = await client.get(
+            "/countdowns/", params={"profile_id": profile.id, "limit": 3, "offset": 0}
+        )
+        second = await client.get(
+            "/countdowns/", params={"profile_id": profile.id, "limit": 3, "offset": 3}
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_ids = [c["id"] for c in first.json()["countdowns"]]
+        second_ids = [c["id"] for c in second.json()["countdowns"]]
+        walked_ids = first_ids + second_ids
+        assert len(walked_ids) == len(set(walked_ids))
+        assert set(walked_ids) == expected_ids
+
     async def test_list_countdowns_excludes_archived_by_default(
         self, client, db_session, login_as
     ):

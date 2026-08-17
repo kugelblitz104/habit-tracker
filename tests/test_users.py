@@ -167,6 +167,65 @@ class TestListUsers:
         assert data["total"] == 8  # admin + 7 users
         assert len(data["users"]) == 3
 
+    async def test_list_users_offset_skips_as_admin(self, client, db_session, login_as):
+        """offset skips users without changing total."""
+        admin = AdminUserFactory()
+        for _ in range(4):
+            UserFactory()
+        await db_session.commit()
+
+        await login_as(admin)
+
+        first = await client.get("/users/?limit=2&offset=0")
+        second = await client.get("/users/?limit=2&offset=2")
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_ids = [u["id"] for u in first.json()["users"]]
+        second_ids = [u["id"] for u in second.json()["users"]]
+        assert len(second_ids) == 2
+        assert set(first_ids).isdisjoint(second_ids)
+        assert first.json()["total"] == 5
+        assert second.json()["offset"] == 2
+
+    async def test_list_users_two_page_walk_covers_every_user_once(
+        self, client, db_session, login_as
+    ):
+        """Walking two pages by offset returns each user exactly once, proving
+        the list is ordered rather than left to Postgres's incidental order."""
+        admin = AdminUserFactory()
+        others = [UserFactory() for _ in range(4)]
+        await db_session.commit()
+        expected_ids = {admin.id, *(u.id for u in others)}
+
+        await login_as(admin)
+
+        first = await client.get("/users/?limit=3&offset=0")
+        second = await client.get("/users/?limit=3&offset=3")
+        assert first.status_code == 200
+        assert second.status_code == 200
+
+        first_ids = [u["id"] for u in first.json()["users"]]
+        second_ids = [u["id"] for u in second.json()["users"]]
+        walked_ids = first_ids + second_ids
+        assert len(walked_ids) == len(set(walked_ids))
+        assert set(walked_ids) == expected_ids
+
+    async def test_list_users_offset_ignored_for_regular_user(
+        self, client, db_session, login_as
+    ):
+        """A regular user always sees exactly themselves, offset or not."""
+        user = UserFactory()
+        await db_session.commit()
+
+        await login_as(user)
+
+        response = await client.get("/users/?offset=5")
+        assert response.status_code == 200
+        data = response.json()
+        assert [u["id"] for u in data["users"]] == [user.id]
+        assert data["total"] == 1
+
 
 class TestUpdateUserPut:
     """Tests for PUT /users/{user_id} endpoint."""

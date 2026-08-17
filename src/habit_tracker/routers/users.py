@@ -31,6 +31,7 @@ async def list_users(
     limit: int = Query(
         default=5, ge=1, le=100, description="Maximum number of users to return (1-100)"
     ),
+    offset: int = Query(default=0, ge=0, description="Number of users to skip"),
 ) -> UserList:
     """
     Get a paginated list of all users in the system.
@@ -38,12 +39,15 @@ async def list_users(
     Admins can see all users.
 
     - **limit**: Maximum number of users to return (default: 5, max: 100)
+    - **offset**: Number of users to skip (default: 0)
 
     Returns a list of users with pagination metadata including total count.
     """
     if current_user.is_admin:
         # Admins can see all users
-        result = await db.execute(select(User).limit(limit))
+        result = await db.execute(
+            select(User).order_by(User.id).limit(limit).offset(offset)
+        )
         db_users = result.scalars().all()
 
         count_result = await db.execute(select(func.count()).select_from(User))
@@ -53,7 +57,7 @@ async def list_users(
             users=[UserRead.model_validate(u) for u in db_users],
             total=total,
             limit=limit,
-            offset=0,
+            offset=offset,
         )
     else:
         # Regular users can only see themselves

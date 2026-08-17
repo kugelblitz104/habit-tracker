@@ -82,3 +82,5 @@ class TrackerLiteList(BaseModel):
     auto_skipped_dates: list[date] = Field(
         default_factory=list,
     )
+    limit: int = 1000
+    offset: int = 0

@@ -109,7 +109,7 @@ async def list_countdowns(
         Countdown.profile_id == profile_id, archived_filter
     )
     result = await db.execute(
-        query.order_by(Countdown.target_date, Countdown.target_time)
+        query.order_by(Countdown.target_date, Countdown.target_time, Countdown.id)
         .limit(limit)
         .offset(offset)
     )
