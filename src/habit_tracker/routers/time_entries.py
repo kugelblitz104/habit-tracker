@@ -203,6 +203,22 @@ async def list_time_entries(
         description="Maximum number of entries to return (1-100)",
     ),
     offset: int = Query(default=0, ge=0, description="Number of entries to skip"),
+    started_from: datetime | None = Query(
+        default=None,
+        description=(
+            "Only entries whose started_at is at or after this instant. "
+            "Naive UTC, matching what the server stores; send the UTC "
+            "bounds of the day you mean."
+        ),
+    ),
+    started_to: datetime | None = Query(
+        default=None,
+        description=(
+            "Only entries whose started_at is strictly before this instant. "
+            "Half-open with started_from, so consecutive days tile without "
+            "overlapping."
+        ),
+    ),
 ) -> TimeEntryList:
     """
     Get a paginated list of time entries belonging to a profile, ordered by
@@ -242,6 +258,10 @@ async def list_time_entries(
             filters.append(TimeEntry.ended_at.is_(None))
         else:
             filters.append(TimeEntry.ended_at.is_not(None))
+    if started_from is not None:
+        filters.append(TimeEntry.started_at >= started_from)
+    if started_to is not None:
+        filters.append(TimeEntry.started_at < started_to)
     if project_id is not None:
         # An entry counts toward a project via its task's project, its parent
         # task's project (subtasks carry none of their own), or its own

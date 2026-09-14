@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,10 +12,12 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
+    get_owned_profile,
 )
 from habit_tracker.core.http import bulk_delete_in_profile, integrity_conflict
 from habit_tracker.models import (
     TrackerCreate,
+    TrackerList,
     TrackerRead,
     TrackerUpdate,
 )
@@ -78,6 +80,75 @@ async def create_tracker(
         raise integrity_conflict("Tracker entry for this habit and date already exists")
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
+
+
+@router.get("/", summary="List tracker entries for a profile")
+async def list_trackers(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    profile_id: int = Query(description="The profile whose trackers to list"),
+    dated_from: date | None = Query(
+        default=None, description="Only entries dated on or after this local date"
+    ),
+    dated_to: date | None = Query(
+        default=None,
+        description=(
+            "Only entries dated on or before this local date. Inclusive, "
+            "unlike the instant filters elsewhere: dated is a date, so one "
+            "day is the same value in both bounds."
+        ),
+    ),
+    limit: int = Query(
+        default=100,
+        ge=1,
+        le=100,
+        description="Maximum number of entries to return (1-100)",
+    ),
+    offset: int = Query(default=0, ge=0, description="Number of entries to skip"),
+) -> TrackerList:
+    """
+    Get a paginated list of tracker entries across every habit in a profile,
+    most recent date first.
+
+    The per-habit endpoints under /habits/{habit_id}/trackers answer "this
+    habit's history"; this one answers "what was recorded over these days",
+    which otherwise costs one request per habit.
+
+    - **profile_id**: The profile whose trackers to list (required)
+    - **dated_from**: Optional. Entries on or after this local date
+    - **dated_to**: Optional. Entries on or before this local date
+    - **limit**: Maximum number of entries to return (default: 100, max: 100)
+    - **offset**: Number of entries to skip (default: 0)
+    """
+    await get_owned_profile(db, profile_id, current_user, "tracker")
+
+    # A tracker has no profile_id of its own; it reaches one through its habit.
+    filters = [Habit.profile_id == profile_id]
+    if dated_from is not None:
+        filters.append(Tracker.dated >= dated_from)
+    if dated_to is not None:
+        filters.append(Tracker.dated <= dated_to)
+
+    scoped = select(Tracker).join(Habit, Tracker.habit_id == Habit.id).filter(*filters)
+
+    count_result = await db.execute(
+        select(func.count(Tracker.id))
+        .select_from(Tracker)
+        .join(Habit, Tracker.habit_id == Habit.id)
+        .filter(*filters)
+    )
+    total = count_result.scalar() or 0
+
+    result = await db.execute(
+        scoped.order_by(Tracker.dated.desc(), Tracker.id).limit(limit).offset(offset)
+    )
+
+    return TrackerList(
+        trackers=[TrackerRead.model_validate(t) for t in result.scalars().all()],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/{tracker_id}", summary="Get a tracker entry by ID")

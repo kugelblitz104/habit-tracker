@@ -15,6 +15,173 @@ from tests.factories import (
 )
 
 
+class TestListTrackers:
+    """Tests for GET /trackers/ endpoint."""
+
+    async def test_requires_profile_id(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/trackers/")
+        assert response.status_code == 422
+
+    async def test_lists_every_habit_in_the_profile_for_one_date(
+        self, client, db_session, login_as
+    ):
+        """The point of the endpoint: one request instead of one per habit."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        reading = HabitFactory(user=user, profile=profile, name="Reading")
+        running = HabitFactory(user=user, profile=profile, name="Running")
+        await db_session.commit()
+
+        TrackerFactory(habit=reading, dated=date(2026, 9, 10))
+        TrackerFactory(habit=running, dated=date(2026, 9, 10))
+        TrackerFactory(habit=reading, dated=date(2026, 9, 11))
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/trackers/",
+            params={
+                "profile_id": profile.id,
+                "dated_from": "2026-09-10",
+                "dated_to": "2026-09-10",
+            },
+        )
+        assert response.status_code == 200
+
+        body = response.json()
+        assert body["total"] == 2
+        assert sorted(t["habit_id"] for t in body["trackers"]) == sorted(
+            [reading.id, running.id]
+        )
+
+    async def test_bounds_are_inclusive_at_both_ends(
+        self, client, db_session, login_as
+    ):
+        """`dated` is a date, not an instant, so a window names the first and
+        last day it covers rather than half-opening at the end."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        habit = HabitFactory(user=user, profile=profile)
+        await db_session.commit()
+
+        for day in (9, 10, 11, 12):
+            TrackerFactory(habit=habit, dated=date(2026, 9, day))
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/trackers/",
+            params={
+                "profile_id": profile.id,
+                "dated_from": "2026-09-10",
+                "dated_to": "2026-09-11",
+            },
+        )
+
+        assert sorted(t["dated"] for t in response.json()["trackers"]) == [
+            "2026-09-10",
+            "2026-09-11",
+        ]
+
+    async def test_omitting_the_window_returns_the_whole_profile(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        habit = HabitFactory(user=user, profile=profile)
+        await db_session.commit()
+
+        TrackerFactory(habit=habit, dated=date(2026, 9, 10))
+        TrackerFactory(habit=habit, dated=date(2026, 9, 11))
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/trackers/", params={"profile_id": profile.id})
+        assert response.json()["total"] == 2
+
+    async def test_excludes_other_profiles(self, client, db_session, login_as):
+        """A tracker has no profile_id of its own, so the scope comes from the
+        join to its habit - which is exactly what could go wrong."""
+        user = UserFactory()
+        await db_session.commit()
+        mine = ProfileFactory(user=user, name="Mine")
+        theirs = ProfileFactory(user=user, name="Theirs")
+        await db_session.commit()
+
+        my_habit = HabitFactory(user=user, profile=mine)
+        other_habit = HabitFactory(user=user, profile=theirs)
+        await db_session.commit()
+
+        keep = TrackerFactory(habit=my_habit, dated=date(2026, 9, 10))
+        TrackerFactory(habit=other_habit, dated=date(2026, 9, 10))
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/trackers/",
+            params={
+                "profile_id": mine.id,
+                "dated_from": "2026-09-10",
+                "dated_to": "2026-09-10",
+            },
+        )
+
+        body = response.json()
+        assert [t["id"] for t in body["trackers"]] == [keep.id]
+        assert body["total"] == 1
+
+    async def test_rejects_another_users_profile(self, client, db_session, login_as):
+        owner = UserFactory()
+        intruder = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=owner)
+        await db_session.commit()
+
+        await login_as(intruder)
+        response = await client.get("/trackers/", params={"profile_id": profile.id})
+        assert response.status_code == 403
+
+    async def test_pages_without_dropping_or_repeating_a_row(
+        self, client, db_session, login_as
+    ):
+        """Ordering ends in id, so rows sharing a date cannot straddle a page
+        boundary and lose one."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        habits = [HabitFactory(user=user, profile=profile) for _ in range(3)]
+        await db_session.commit()
+        for habit in habits:
+            TrackerFactory(habit=habit, dated=date(2026, 9, 10))
+        await db_session.commit()
+        await login_as(user)
+
+        ids = []
+        for offset in (0, 2):
+            page = await client.get(
+                "/trackers/",
+                params={"profile_id": profile.id, "limit": 2, "offset": offset},
+            )
+            assert page.json()["total"] == 3
+            ids += [t["id"] for t in page.json()["trackers"]]
+
+        assert len(ids) == 3
+        assert len(set(ids)) == 3
+
+
 class TestCreateTracker:
     """Tests for POST /trackers/ endpoint."""
 

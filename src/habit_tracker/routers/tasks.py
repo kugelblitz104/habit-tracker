@@ -168,6 +168,22 @@ async def list_tasks(
             "overlapping."
         ),
     ),
+    created_from: datetime | None = Query(
+        default=None,
+        description=(
+            "Only tasks whose created_date is at or after this instant. "
+            "Naive UTC, matching what the server stores; send the UTC "
+            "bounds of the day you mean."
+        ),
+    ),
+    created_to: datetime | None = Query(
+        default=None,
+        description=(
+            "Only tasks whose created_date is strictly before this instant. "
+            "Half-open with created_from, so consecutive days tile without "
+            "overlapping."
+        ),
+    ),
 ) -> TaskList:
     """
     Get a paginated list of tasks belonging to a profile.
@@ -224,6 +240,10 @@ async def list_tasks(
         query = query.filter(Task.closed_date >= closed_from)
     if closed_to is not None:
         query = query.filter(Task.closed_date < closed_to)
+    if created_from is not None:
+        query = query.filter(Task.created_date >= created_from)
+    if created_to is not None:
+        query = query.filter(Task.created_date < created_to)
 
     if closed_only:
         query = query.order_by(Task.closed_date.desc(), Task.id)

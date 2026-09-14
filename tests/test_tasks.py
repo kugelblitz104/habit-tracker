@@ -2294,6 +2294,139 @@ class TestClosedDateRangeFilter:
         assert len(set(ids)) == 3
 
 
+class TestCreatedDateRangeFilter:
+    """Tests for the created_from/created_to query params on GET /tasks/."""
+
+    async def test_returns_only_tasks_created_in_the_half_open_range(
+        self, client, db_session, login_as
+    ):
+        """Half-open so consecutive days tile without overlapping: a task
+        created exactly at `created_to` belongs to the next window."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile,
+            title="Before",
+            created_date=datetime(2026, 9, 9, 23, 59, 59),
+        )
+        TaskFactory(
+            profile=profile,
+            title="AtLowerBound",
+            created_date=datetime(2026, 9, 10, 0, 0, 0),
+        )
+        TaskFactory(
+            profile=profile,
+            title="Inside",
+            created_date=datetime(2026, 9, 10, 12, 0, 0),
+        )
+        TaskFactory(
+            profile=profile,
+            title="Boundary",
+            created_date=datetime(2026, 9, 11, 0, 0, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}"
+            "&created_from=2026-09-10T00:00:00&created_to=2026-09-11T00:00:00"
+        )
+
+        titles = sorted(t["title"] for t in response.json()["tasks"])
+        assert titles == ["AtLowerBound", "Inside"]
+
+    async def test_created_range_covers_tasks_already_closed(
+        self, client, db_session, login_as
+    ):
+        """A task created and finished on the same day is still part of that
+        day, so the window has to reach it - which needs include_closed."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile,
+            title="SameDay",
+            status=TaskStatus.DONE,
+            created_date=datetime(2026, 9, 10, 9, 0, 0),
+            closed_date=datetime(2026, 9, 10, 17, 0, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        window = (
+            f"profile_id={profile.id}"
+            "&created_from=2026-09-10T00:00:00&created_to=2026-09-11T00:00:00"
+        )
+        without = await client.get(f"/tasks/?{window}")
+        assert without.json()["tasks"] == []
+
+        with_closed = await client.get(f"/tasks/?{window}&include_closed=true")
+        assert [t["title"] for t in with_closed.json()["tasks"]] == ["SameDay"]
+
+    async def test_created_from_alone_is_an_open_ended_tail(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile, title="Old", created_date=datetime(2026, 9, 1, 0, 0, 0)
+        )
+        TaskFactory(
+            profile=profile, title="New", created_date=datetime(2026, 9, 20, 0, 0, 0)
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}&created_from=2026-09-10T00:00:00"
+        )
+
+        assert [t["title"] for t in response.json()["tasks"]] == ["New"]
+
+    async def test_created_and_closed_windows_combine(
+        self, client, db_session, login_as
+    ):
+        """Both filters apply together rather than one replacing the other."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile,
+            title="CreatedAndClosedSameDay",
+            status=TaskStatus.DONE,
+            created_date=datetime(2026, 9, 10, 9, 0, 0),
+            closed_date=datetime(2026, 9, 10, 17, 0, 0),
+        )
+        TaskFactory(
+            profile=profile,
+            title="CreatedEarlierClosedToday",
+            status=TaskStatus.DONE,
+            created_date=datetime(2026, 9, 1, 9, 0, 0),
+            closed_date=datetime(2026, 9, 10, 17, 0, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}&include_closed=true"
+            "&created_from=2026-09-10T00:00:00&created_to=2026-09-11T00:00:00"
+            "&closed_from=2026-09-10T00:00:00&closed_to=2026-09-11T00:00:00"
+        )
+
+        titles = [t["title"] for t in response.json()["tasks"]]
+        assert titles == ["CreatedAndClosedSameDay"]
+
+
 class TestEditableClosedDate:
     async def _open_task(self, db_session, login_as):
         user = UserFactory()

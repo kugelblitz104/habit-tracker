@@ -197,6 +197,143 @@ class TestListTimeEntries:
         assert ids == {on_parent.id, on_subtask.id}
 
 
+class TestStartedAtRangeFilter:
+    """Tests for the started_from/started_to query params on GET /time-entries/."""
+
+    async def _profile_with_entries(self, db_session):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TimeEntryFactory(
+            profile=profile,
+            note="Before",
+            started_at=datetime(2026, 9, 9, 23, 59, 59),
+            ended_at=datetime(2026, 9, 10, 0, 10, 0),
+        )
+        TimeEntryFactory(
+            profile=profile,
+            note="AtLowerBound",
+            started_at=datetime(2026, 9, 10, 0, 0, 0),
+            ended_at=datetime(2026, 9, 10, 1, 0, 0),
+        )
+        TimeEntryFactory(
+            profile=profile,
+            note="Inside",
+            started_at=datetime(2026, 9, 10, 12, 0, 0),
+            ended_at=datetime(2026, 9, 10, 13, 0, 0),
+        )
+        TimeEntryFactory(
+            profile=profile,
+            note="Boundary",
+            started_at=datetime(2026, 9, 11, 0, 0, 0),
+            ended_at=datetime(2026, 9, 11, 1, 0, 0),
+        )
+        await db_session.commit()
+        return user, profile
+
+    async def test_returns_only_entries_started_in_the_half_open_range(
+        self, client, db_session, login_as
+    ):
+        """An entry starting exactly at `started_to` belongs to the next day.
+
+        Filed by start, not by overlap: the "Before" entry runs past midnight
+        into the window and is still excluded, which is what keeps a day's
+        entries from being counted twice.
+        """
+        user, profile = await self._profile_with_entries(db_session)
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/",
+            params={
+                "profile_id": profile.id,
+                "started_from": "2026-09-10T00:00:00",
+                "started_to": "2026-09-11T00:00:00",
+            },
+        )
+
+        body = response.json()
+        assert sorted(e["note"] for e in body["time_entries"]) == [
+            "AtLowerBound",
+            "Inside",
+        ]
+
+    async def test_total_counts_the_window_not_the_profile(
+        self, client, db_session, login_as
+    ):
+        """`total` has to respect the filter, or a paging client walks past
+        the end of the window and pulls in neighbouring days."""
+        user, profile = await self._profile_with_entries(db_session)
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/",
+            params={
+                "profile_id": profile.id,
+                "started_from": "2026-09-10T00:00:00",
+                "started_to": "2026-09-11T00:00:00",
+            },
+        )
+
+        assert response.json()["total"] == 2
+
+    async def test_started_from_alone_is_an_open_ended_tail(
+        self, client, db_session, login_as
+    ):
+        user, profile = await self._profile_with_entries(db_session)
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/",
+            params={"profile_id": profile.id, "started_from": "2026-09-10T00:00:00"},
+        )
+
+        assert sorted(e["note"] for e in response.json()["time_entries"]) == [
+            "AtLowerBound",
+            "Boundary",
+            "Inside",
+        ]
+
+    async def test_window_combines_with_the_other_filters(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TimeEntryFactory(
+            profile=profile,
+            note="Stopwatch",
+            kind=TimeEntryKind.STOPWATCH,
+            started_at=datetime(2026, 9, 10, 9, 0, 0),
+            ended_at=datetime(2026, 9, 10, 10, 0, 0),
+        )
+        TimeEntryFactory(
+            profile=profile,
+            note="Pomodoro",
+            kind=TimeEntryKind.POMODORO,
+            started_at=datetime(2026, 9, 10, 11, 0, 0),
+            ended_at=datetime(2026, 9, 10, 11, 25, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/time-entries/",
+            params={
+                "profile_id": profile.id,
+                "kind": TimeEntryKind.POMODORO.value,
+                "started_from": "2026-09-10T00:00:00",
+                "started_to": "2026-09-11T00:00:00",
+            },
+        )
+
+        assert [e["note"] for e in response.json()["time_entries"]] == ["Pomodoro"]
+
+
 class TestCreateTimeEntry:
     """Tests for POST /time-entries/ endpoint."""
 
