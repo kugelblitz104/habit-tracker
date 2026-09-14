@@ -2182,3 +2182,271 @@ class TestDeleteAllTasks:
         assert await db_session.get(TimeEntry, entry_id) is None  # cascaded
         survivor = await db_session.get(Countdown, countdown_id)
         assert survivor is not None and survivor.task_id is None  # unlinked
+
+
+class TestClosedDateRangeFilter:
+    """Tests for the closed_from/closed_to query params on GET /tasks/."""
+
+    async def test_returns_only_tasks_closed_in_the_half_open_range(
+        self, client, db_session, login_as
+    ):
+        """Half-open so consecutive days tile without overlapping: a task
+        closed exactly at `closed_to` belongs to the next window."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        before = TaskFactory(
+            profile=profile,
+            title="Before",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 9, 23, 59, 59),
+        )
+        inside = TaskFactory(
+            profile=profile,
+            title="Inside",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 10, 12, 0, 0),
+        )
+        boundary = TaskFactory(
+            profile=profile,
+            title="Boundary",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 11, 0, 0, 0),
+        )
+        await db_session.commit()
+        assert before.id and boundary.id
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}&include_closed=true"
+            "&closed_from=2026-09-10T00:00:00&closed_to=2026-09-11T00:00:00"
+        )
+
+        titles = [t["title"] for t in response.json()["tasks"]]
+        assert titles == ["Inside"]
+        assert inside.id is not None
+
+    async def test_closed_from_is_inclusive_at_the_lower_bound(
+        self, client, db_session, login_as
+    ):
+        """>= at closed_from: a task closed at exactly that instant is IN."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        at_bound = TaskFactory(
+            profile=profile,
+            title="AtBound",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 10, 0, 0, 0),
+        )
+        await db_session.commit()
+        assert at_bound.id is not None
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}&include_closed=true"
+            "&closed_from=2026-09-10T00:00:00&closed_to=2026-09-11T00:00:00"
+        )
+
+        titles = [t["title"] for t in response.json()["tasks"]]
+        assert titles == ["AtBound"]
+
+    async def test_closed_range_without_include_closed_returns_nothing(
+        self, client, db_session, login_as
+    ):
+        """closed_from/closed_to alone always return empty: include_closed
+        defaults to False, which excludes every task that could match (only
+        closed tasks ever have a closed_date). The same range with
+        include_closed=true finds the task."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile,
+            title="ClosedToday",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 10, 12, 0, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        without_include_closed = await client.get(
+            f"/tasks/?profile_id={profile.id}"
+            "&closed_from=2026-09-10T00:00:00&closed_to=2026-09-11T00:00:00"
+        )
+        with_include_closed = await client.get(
+            f"/tasks/?profile_id={profile.id}&include_closed=true"
+            "&closed_from=2026-09-10T00:00:00&closed_to=2026-09-11T00:00:00"
+        )
+
+        assert without_include_closed.json()["tasks"] == []
+        titles = [t["title"] for t in with_include_closed.json()["tasks"]]
+        assert titles == ["ClosedToday"]
+
+    async def test_closed_from_alone_is_an_open_ended_tail(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        TaskFactory(
+            profile=profile,
+            title="Old",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 1, 12, 0, 0),
+        )
+        TaskFactory(
+            profile=profile,
+            title="Recent",
+            status=TaskStatus.DONE,
+            closed_date=datetime(2026, 9, 20, 12, 0, 0),
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            f"/tasks/?profile_id={profile.id}&include_closed=true"
+            "&closed_from=2026-09-10T00:00:00"
+        )
+
+        titles = [t["title"] for t in response.json()["tasks"]]
+        assert titles == ["Recent"]
+
+    async def test_ordering_is_total_so_paging_cannot_drop_a_row(
+        self, client, db_session, login_as
+    ):
+        """Three tasks identical on every sort key. Without an id tiebreaker
+        the page boundary can duplicate one and drop another."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+
+        stamp = datetime(2026, 9, 10, 12, 0, 0)
+        for n in range(3):
+            TaskFactory(
+                profile=profile,
+                title=f"Tie {n}",
+                priority=1,
+                due_date=None,
+                created_date=stamp,
+            )
+        await db_session.commit()
+        await login_as(user)
+
+        first = await client.get(f"/tasks/?profile_id={profile.id}&limit=2&offset=0")
+        second = await client.get(f"/tasks/?profile_id={profile.id}&limit=2&offset=2")
+
+        ids = [t["id"] for t in first.json()["tasks"]] + [
+            t["id"] for t in second.json()["tasks"]
+        ]
+        assert len(ids) == 3
+        assert len(set(ids)) == 3
+
+
+class TestEditableClosedDate:
+    async def _open_task(self, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        task = TaskFactory(profile=profile, title="Fix the tap")
+        await db_session.commit()
+        await login_as(user)
+        return task
+
+    async def test_closing_with_an_explicit_date_keeps_it(
+        self, client, db_session, login_as
+    ):
+        """Close it today, dated last Tuesday, in one request."""
+        task = await self._open_task(db_session, login_as)
+
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"status": TaskStatus.DONE, "closed_date": "2026-09-02T14:30:00"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["closed_date"].startswith("2026-09-02T14:30:00")
+
+    async def test_closing_without_one_still_stamps_now(
+        self, client, db_session, login_as
+    ):
+        task = await self._open_task(db_session, login_as)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"status": TaskStatus.DONE}
+        )
+
+        assert response.json()["closed_date"] is not None
+
+    async def test_amending_the_date_on_an_already_closed_task(
+        self, client, db_session, login_as
+    ):
+        task = await self._open_task(db_session, login_as)
+        await client.patch(f"/tasks/{task.id}", json={"status": TaskStatus.DONE})
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"closed_date": "2026-09-02T14:30:00"}
+        )
+
+        assert response.json()["closed_date"].startswith("2026-09-02T14:30:00")
+
+    async def test_setting_it_on_an_open_task_is_422(
+        self, client, db_session, login_as
+    ):
+        task = await self._open_task(db_session, login_as)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"closed_date": "2026-09-02T14:30:00"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_reopening_while_supplying_one_is_422(
+        self, client, db_session, login_as
+    ):
+        task = await self._open_task(db_session, login_as)
+        await client.patch(f"/tasks/{task.id}", json={"status": TaskStatus.DONE})
+
+        response = await client.patch(
+            f"/tasks/{task.id}",
+            json={"status": TaskStatus.OPEN, "closed_date": "2026-09-02T14:30:00"},
+        )
+
+        assert response.status_code == 422
+
+    async def test_explicit_null_clears_the_date_on_a_closed_task(
+        self, client, db_session, login_as
+    ):
+        """The column is nullable, so clearing it is allowed rather than a 422.
+        Such a task then sorts first in the hidden band (Postgres orders NULLs
+        first under DESC) and matches no closed_from/closed_to range."""
+        task = await self._open_task(db_session, login_as)
+        await client.patch(f"/tasks/{task.id}", json={"status": TaskStatus.DONE})
+
+        response = await client.patch(f"/tasks/{task.id}", json={"closed_date": None})
+
+        assert response.status_code == 200
+        assert response.json()["closed_date"] is None
+        assert response.json()["status"] == TaskStatus.DONE
+
+    async def test_a_future_closed_date_is_allowed(self, client, db_session, login_as):
+        """The client sends its own local date, so a user east of the server
+        legitimately closes a task on a date the server has not reached."""
+        task = await self._open_task(db_session, login_as)
+        ahead = (datetime.now() + timedelta(hours=20)).isoformat()
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"status": TaskStatus.DONE, "closed_date": ahead}
+        )
+
+        assert response.status_code == 200

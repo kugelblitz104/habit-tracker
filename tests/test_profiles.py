@@ -726,3 +726,90 @@ class TestHabitProfileIntegration:
 
         response = await client.get("/habits/", params={"profile_id": foreign.id})
         assert response.status_code == 403
+
+
+class TestProfileJournalSettings:
+    async def test_defaults_are_off_and_empty(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post("/profiles/", json={"name": "Work"})
+
+        body = response.json()
+        assert body["journal_enabled"] is False
+        assert body["journal_prompt_time"] is None
+        assert body["journal_prompt"] is None
+        # True by default, unlike journal_enabled.
+        assert body["journal_gratitude_enabled"] is True
+
+    async def test_round_trips_through_create_and_patch(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/profiles/",
+            json={
+                "name": "Work",
+                "journal_enabled": True,
+                "journal_prompt_time": "17:00:00",
+                "journal_prompt": "What moved today?",
+            },
+        )
+        assert created.json()["journal_prompt"] == "What moved today?"
+
+        patched = await client.patch(
+            f"/profiles/{created.json()['id']}",
+            json={"journal_prompt_time": "22:00:00"},
+        )
+
+        assert patched.json()["journal_prompt_time"] == "22:00:00"
+        assert patched.json()["journal_enabled"] is True
+
+    async def test_gratitude_prompt_can_be_switched_off(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        created = await client.post(
+            "/profiles/", json={"name": "Work", "journal_enabled": True}
+        )
+
+        patched = await client.patch(
+            f"/profiles/{created.json()['id']}",
+            json={"journal_gratitude_enabled": False},
+        )
+
+        assert patched.json()["journal_gratitude_enabled"] is False
+        assert patched.json()["journal_enabled"] is True
+
+    async def test_patch_rejects_explicit_null_enabled(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        created = await client.post("/profiles/", json={"name": "Work"})
+
+        response = await client.patch(
+            f"/profiles/{created.json()['id']}", json={"journal_enabled": None}
+        )
+
+        assert response.status_code == 422
+
+    async def test_whitespace_only_prompt_normalises_to_null(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/profiles/", json={"name": "Work", "journal_prompt": "   "}
+        )
+
+        assert response.json()["journal_prompt"] is None

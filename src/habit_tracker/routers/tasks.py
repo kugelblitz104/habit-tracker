@@ -161,6 +161,24 @@ async def list_tasks(
     parent_id: int | None = Query(
         default=None, description="Only subtasks of this parent task"
     ),
+    closed_from: datetime | None = Query(
+        default=None,
+        description=(
+            "Only tasks whose closed_date is at or after this instant. "
+            "Naive UTC, matching what the server stores; send the UTC "
+            "bounds of the day you mean. Only closed tasks ever have a "
+            "closed_date, so combine this with include_closed=true (or an "
+            "explicit status) or the result is always empty."
+        ),
+    ),
+    closed_to: datetime | None = Query(
+        default=None,
+        description=(
+            "Only tasks whose closed_date is strictly before this instant. "
+            "Half-open with closed_from, so consecutive days tile without "
+            "overlapping."
+        ),
+    ),
 ) -> TaskList:
     """
     Get a paginated list of tasks belonging to a profile. Each task carries
@@ -219,17 +237,24 @@ async def list_tasks(
         query = query.filter(Task.status == task_status)
     elif not include_closed:
         query = query.filter(Task.status.not_in(CLOSED_STATUSES))
+    if closed_from is not None:
+        query = query.filter(Task.closed_date >= closed_from)
+    if closed_to is not None:
+        query = query.filter(Task.closed_date < closed_to)
 
     if include_closed and band == TaskBand.HIDDEN:
-        query = query.order_by(Task.closed_date.desc())
+        query = query.order_by(Task.closed_date.desc(), Task.id)
     else:
         # Mirrored in Python by services.task_export._active_sort_key (the
         # Markdown export has no database to order in); the two are pinned
         # against each other in tests/test_task_export.py, not shared code.
+        # Task.id last makes the ordering total: without it a tie straddling
+        # a page boundary duplicates one row and drops another.
         query = query.order_by(
             Task.priority.desc(),
             Task.due_date.asc().nulls_last(),
             Task.created_date.asc(),
+            Task.id,
         )
 
     result = await db.execute(query)
@@ -608,15 +633,35 @@ async def patch_task(
                 detail="A task with subtasks cannot itself become a subtask",
             )
 
-    # Status transitions: entering done/cancelled stamps closed_date (unless
-    # already closed); leaving them for an active status clears it
+    # Status transitions: entering done/cancelled stamps closed_date unless
+    # the same patch supplied one, which is what makes "close it today, dated
+    # last Tuesday" a single request. Leaving them for an active status
+    # clears it.
+    supplied_closed_date = "closed_date" in task_data
+    was_closed = db_task.status in CLOSED_STATUSES
+    is_closing = (
+        task_data["status"] in CLOSED_STATUSES if "status" in task_data else was_closed
+    )
+
+    if supplied_closed_date and not is_closing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="closed_date can only be set on a done or cancelled task",
+        )
+
     if "status" in task_data:
-        new_status = task_data["status"]
-        if new_status in CLOSED_STATUSES:
-            if db_task.status not in CLOSED_STATUSES:
+        if is_closing:
+            if supplied_closed_date:
+                db_task.closed_date = task_data["closed_date"]
+            elif not was_closed:
                 db_task.closed_date = datetime.now()
-        elif db_task.status in CLOSED_STATUSES:
+        else:
             db_task.closed_date = None
+    elif supplied_closed_date:
+        db_task.closed_date = task_data["closed_date"]
+
+    # Applied above; must not also go through the generic setattr loop below.
+    task_data.pop("closed_date", None)
 
     previous_title = db_task.title
     previous_profile_id = db_task.profile_id

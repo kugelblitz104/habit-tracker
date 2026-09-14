@@ -1,3 +1,4 @@
+from datetime import time
 from typing import overload
 
 from pydantic import BaseModel, ValidationInfo, field_validator
@@ -8,6 +9,7 @@ from habit_tracker.models._validators import (
     min_value_int,
     non_blank_string,
     reject_null,
+    trimmed_or_none,
     validate_hex_color,
     validate_membership,
 )
@@ -51,6 +53,10 @@ class ProfileBase(BaseModel):
     pomodoro_break_minutes: int = 5
     pomodoro_long_break_minutes: int = 15
     pomodoro_cycles: int = 4
+    journal_enabled: bool = False
+    journal_prompt_time: time | None = None
+    journal_prompt: str | None = None
+    journal_gratitude_enabled: bool = True
 
     @field_validator("name")
     @classmethod
@@ -76,6 +82,11 @@ class ProfileBase(BaseModel):
     @classmethod
     def validate_default_landing(cls, v: str) -> str:
         return _validate_default_landing(v)
+
+    @field_validator("journal_prompt")
+    @classmethod
+    def validate_journal_prompt(cls, v: str | None) -> str | None:
+        return trimmed_or_none(v)
 
 
 class ProfileCreate(ProfileBase):
@@ -103,6 +114,10 @@ class ProfileUpdate(BaseModel):
     pomodoro_break_minutes: int | None = None
     pomodoro_long_break_minutes: int | None = None
     pomodoro_cycles: int | None = None
+    journal_enabled: bool | None = None
+    journal_prompt_time: time | None = None
+    journal_prompt: str | None = None
+    journal_gratitude_enabled: bool | None = None
 
     @field_validator(
         "name",
@@ -121,10 +136,17 @@ class ProfileUpdate(BaseModel):
         "pomodoro_break_minutes",
         "pomodoro_long_break_minutes",
         "pomodoro_cycles",
+        "journal_enabled",
+        "journal_gratitude_enabled",
     )
     @classmethod
     def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
         return reject_null(v, info)
+
+    @field_validator("journal_prompt")
+    @classmethod
+    def validate_journal_prompt(cls, v: str | None) -> str | None:
+        return trimmed_or_none(v)
 
     @field_validator(
         "pomodoro_work_minutes",

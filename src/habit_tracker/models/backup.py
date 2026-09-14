@@ -56,6 +56,10 @@ class ProfileSettings(_FromORM):
     pomodoro_break_minutes: int
     pomodoro_long_break_minutes: int
     pomodoro_cycles: int
+    journal_enabled: bool = False
+    journal_prompt_time: time | None = None
+    journal_prompt: str | None = None
+    journal_gratitude_enabled: bool = True
 
 
 class ProjectBackup(_FromORM):
@@ -191,6 +195,17 @@ class IntegrationConnectionBackup(_FromORM):
     has_token: bool = False
 
 
+class JournalEntryBackup(_FromORM):
+    """One day's journal entry inside a profile backup."""
+
+    entry_date: date
+    body: str | None = None
+    gratitude: str | None = None
+    day_quality: str | None = None
+    created_date: datetime | None = None
+    updated_date: datetime | None = None
+
+
 class ProfileBackup(BaseModel):
     """A complete, portable snapshot of one profile and its data."""
 
@@ -206,10 +221,10 @@ class ProfileBackup(BaseModel):
     trackers: list[TrackerBackup] = []
     calendar_connections: list[CalendarConnectionBackup] = []
     integration_connections: list[IntegrationConnectionBackup] = []
-    # Declared last so adding it appends to the OpenAPI properties rather than
-    # reordering them. Defaults to [] so documents exported before countdown
-    # categories existed still import, which is why BACKUP_VERSION is unchanged.
+    # Both declared last (in the order added) so each addition appends to the
+    # OpenAPI properties rather than reordering them.
     countdown_categories: list[CountdownCategoryBackup] = []
+    journal_entries: list[JournalEntryBackup] = []
 
 
 class ImportSummary(BaseModel):
@@ -231,3 +246,4 @@ class ImportSummary(BaseModel):
     # After `warnings` rather than beside the other counts: appending is what
     # keeps the old properties list a prefix of the new one.
     countdown_categories_imported: int = 0
+    journal_entries_imported: int = 0

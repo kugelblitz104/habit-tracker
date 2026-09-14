@@ -14,6 +14,7 @@ from habit_tracker.routers import (
     habits,
     imports,
     integrations,
+    journal,
     profiles,
     projects,
     tasks,
@@ -62,3 +63,4 @@ app.include_router(integrations.router)
 app.include_router(countdown_categories.router)
 app.include_router(countdowns.router)
 app.include_router(backup.router)
+app.include_router(journal.router)

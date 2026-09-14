@@ -92,6 +92,18 @@ class Profile(Base):
     show_estimated_effort: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    # Daily journal, opt-in per profile.
+    journal_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    # Wall-clock reminder time, compared against the browser's local clock.
+    journal_prompt_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    # The user's own writing prompt, rendered above the editor.
+    journal_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether the fixed second prompt is shown.
+    journal_gratitude_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
@@ -570,6 +582,39 @@ class CountdownCategory(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     # Optional accent for the group; unset renders as the faint default.
     color: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship("Profile", lazy="select")
+
+
+class JournalEntry(Base):
+    __tablename__ = "journal_entry"
+    __table_args__ = (
+        UniqueConstraint("profile_id", "entry_date", name="uq_journal_profile_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # A calendar day, never an instant. Never timezone-shifted, for the same
+    # reason as task.due_date and tracker.dated.
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Answers a fixed second prompt, kept its own column rather than folded
+    # into body so it stays separately queryable.
+    gratitude: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A DayQuality value. Stored as text rather than an enum type so adding
+    # a quality needs no migration. Nullable because imported history may
+    # not carry one.
+    day_quality: Mapped[str | None] = mapped_column(String, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )

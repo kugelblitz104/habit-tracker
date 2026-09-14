@@ -1,6 +1,6 @@
 """Tests for the full-profile backup export/import (JSON round-trip)."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 
@@ -15,6 +15,7 @@ from habit_tracker.schemas.db_models import (
     CountdownCategory,
     Habit,
     IntegrationConnection,
+    JournalEntry,
     Profile,
     Task,
     TimeEntry,
@@ -71,6 +72,8 @@ class TestBuildProfileBackup:
             pomodoro_break_minutes=10,
             pomodoro_long_break_minutes=20,
             pomodoro_cycles=3,
+            journal_enabled=False,
+            journal_gratitude_enabled=True,
         )
         task = Task(
             title="Ship it",
@@ -100,6 +103,7 @@ class TestBuildProfileBackup:
             calendar_connections=[],
             integration_connections=[integration],
             countdown_categories=[],
+            journal_entries=[],
             exported_at=datetime(2026, 7, 24, 12, 0),
         )
 
@@ -813,3 +817,102 @@ class TestImportRejectsRetiredStatus:
             .one()
         )
         assert imported.status == TaskStatus.NEEDS_INFO
+
+
+class TestJournalBackup:
+    async def test_entries_round_trip(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        await client.put(
+            "/journal/2026-09-10",
+            json={
+                "profile_id": profile.id,
+                "body": "A good day.",
+                "gratitude": "sydney for making dinner",
+                "day_quality": "productive",
+            },
+        )
+
+        exported = await client.get(f"/backup/profiles/{profile.id}")
+        document = exported.json()
+        assert len(document["journal_entries"]) == 1
+        entry = document["journal_entries"][0]
+        assert entry["entry_date"] == "2026-09-10"
+        assert entry["body"] == "A good day."
+        assert entry["gratitude"] == "sydney for making dinner"
+        assert entry["day_quality"] == "productive"
+
+        restored = await client.post("/backup/profiles", json=document)
+        assert restored.json()["journal_entries_imported"] == 1
+
+        new_profile_id = restored.json()["profile_id"]
+        imported = (
+            (
+                await db_session.execute(
+                    select(JournalEntry).where(
+                        JournalEntry.profile_id == new_profile_id
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert imported.entry_date == date(2026, 9, 10)
+        assert imported.body == "A good day."
+        assert imported.gratitude == "sydney for making dinner"
+        assert imported.day_quality == "productive"
+
+    async def test_profile_journal_settings_round_trip(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        profile.journal_enabled = True
+        profile.journal_prompt_time = time(21, 30)
+        profile.journal_prompt = "How did today go?"
+        profile.journal_gratitude_enabled = False
+        await db_session.commit()
+        await login_as(user)
+
+        exported = await client.get(f"/backup/profiles/{profile.id}")
+        document = exported.json()
+        assert document["profile"]["journal_enabled"] is True
+        assert document["profile"]["journal_prompt_time"] == "21:30:00"
+        assert document["profile"]["journal_prompt"] == "How did today go?"
+        # Non-default, so it proves the value travels rather than the default
+        # being reapplied on restore.
+        assert document["profile"]["journal_gratitude_enabled"] is False
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_profile_id = restored.json()["profile_id"]
+
+        new_profile = await db_session.get(Profile, new_profile_id)
+        assert new_profile.journal_enabled is True
+        assert new_profile.journal_prompt_time == time(21, 30)
+        assert new_profile.journal_prompt == "How did today go?"
+        assert new_profile.journal_gratitude_enabled is False
+
+    async def test_a_pre_change_document_still_imports(
+        self, client, db_session, login_as
+    ):
+        """journal_entries defaults to [], which is why BACKUP_VERSION is
+        unchanged."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        exported = await client.get(f"/backup/profiles/{profile.id}")
+        document = exported.json()
+        document.pop("journal_entries", None)
+
+        restored = await client.post("/backup/profiles", json=document)
+
+        assert restored.status_code == 201
+        assert restored.json()["journal_entries_imported"] == 0

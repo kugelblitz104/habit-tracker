@@ -34,6 +34,7 @@ from habit_tracker.models.backup import (
     HabitBackup,
     ImportSummary,
     IntegrationConnectionBackup,
+    JournalEntryBackup,
     ProfileBackup,
     ProfileSettings,
     ProjectBackup,
@@ -47,6 +48,7 @@ from habit_tracker.schemas.db_models import (
     CountdownCategory,
     Habit,
     IntegrationConnection,
+    JournalEntry,
     Profile,
     Project,
     Task,
@@ -165,6 +167,17 @@ async def load_profile_rows(db: AsyncSession, profile_id: int) -> dict:
         .scalars()
         .all()
     )
+    journal_entries = (
+        (
+            await db.execute(
+                select(JournalEntry)
+                .where(JournalEntry.profile_id == profile_id)
+                .order_by(JournalEntry.entry_date)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return {
         "projects": projects,
@@ -176,6 +189,7 @@ async def load_profile_rows(db: AsyncSession, profile_id: int) -> dict:
         "trackers": trackers,
         "calendar_connections": calendar_connections,
         "integration_connections": integration_connections,
+        "journal_entries": journal_entries,
     }
 
 
@@ -190,6 +204,7 @@ def build_profile_backup(
     calendar_connections: Iterable[CalendarConnection],
     integration_connections: Iterable[IntegrationConnection],
     countdown_categories: Iterable[CountdownCategory],
+    journal_entries: Iterable[JournalEntry],
     exported_at: datetime | None = None,
 ) -> ProfileBackup:
     """Assemble the portable backup document from loaded ORM rows (pure)."""
@@ -225,6 +240,7 @@ def build_profile_backup(
         countdown_categories=[
             CountdownCategoryBackup.model_validate(c) for c in categories
         ],
+        journal_entries=[JournalEntryBackup.model_validate(j) for j in journal_entries],
     )
 
 
@@ -474,6 +490,15 @@ async def restore_profile_backup(
                 f"its access token, which can't be moved between instances."
             )
 
+    # Journal entries ---------------------------------------------------------
+    for item in backup.journal_entries:
+        db.add(
+            JournalEntry(
+                profile_id=profile.id,
+                **item.model_dump(exclude_none=True),
+            )
+        )
+
     await db.commit()
 
     return ImportSummary(
@@ -491,4 +516,5 @@ async def restore_profile_backup(
         integration_connections_imported=integrations_imported,
         warnings=warnings,
         countdown_categories_imported=len(category_ids),
+        journal_entries_imported=len(backup.journal_entries),
     )

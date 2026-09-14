@@ -1,5 +1,6 @@
 """Tests for the Markdown task export endpoint and formatter."""
 
+import itertools
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
@@ -15,6 +16,8 @@ from tests.factories import (
     UserFactory,
 )
 
+_task_id_counter = itertools.count(1)
+
 
 def _task(**overrides) -> Task:
     """Build a transient Task for pure formatter tests.
@@ -23,6 +26,7 @@ def _task(**overrides) -> Task:
     is set explicitly here.
     """
     fields = {
+        "id": next(_task_id_counter),
         "title": "A task",
         "notes": None,
         "priority": 0,

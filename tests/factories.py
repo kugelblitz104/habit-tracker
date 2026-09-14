@@ -9,7 +9,12 @@ from factory.faker import Faker
 from factory.helpers import post_generation
 from passlib.context import CryptContext
 
-from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
+from habit_tracker.constants import (
+    DayQuality,
+    TaskStatus,
+    TimeEntryKind,
+    TrackerStatus,
+)
 from habit_tracker.core.crypto import encrypt_secret
 from habit_tracker.core.slugs import slugify
 from habit_tracker.schemas.db_models import (
@@ -18,6 +23,7 @@ from habit_tracker.schemas.db_models import (
     CountdownCategory,
     Habit,
     IntegrationConnection,
+    JournalEntry,
     Profile,
     Project,
     Task,
@@ -212,6 +218,20 @@ class CountdownFactory(BaseFactory):
     created_date = LazyFunction(datetime.now)
     updated_date = None
     archived_date = None
+
+
+class JournalEntryFactory(BaseFactory):
+    """Factory for creating test journal entries."""
+
+    class Meta:
+        model = JournalEntry
+
+    entry_date = LazyFunction(date.today)
+    body = Sequence(lambda n: f"Journal body {n}")
+    gratitude = Sequence(lambda n: f"Grateful for {n}")
+    day_quality = DayQuality.GOOD.value
+    profile = SubFactory(ProfileFactory)
+    created_date = LazyFunction(datetime.now)
 
 
 class CalendarConnectionFactory(BaseFactory):

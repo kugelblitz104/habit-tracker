@@ -18,9 +18,10 @@ Layout of the exported document:
   subtask's own status/priority/dates would put it in.
 
 Ordering matches what the app shows (the tasks list endpoint): active bands
-are ordered by priority (desc), due date (asc, no due date last), then
-creation date (asc); the hidden band is ordered by closed date (most recent
-first). Subtasks under one parent use the active ordering.
+are ordered by priority (desc), due date (asc, no due date last), creation
+date (asc), then id (asc); the hidden band is ordered by closed date (most
+recent first), then id (asc). Subtasks under one parent use the active
+ordering.
 """
 
 from __future__ import annotations
@@ -66,12 +67,12 @@ def _format_when(day: date, at: time | None) -> str:
 
 
 def _active_sort_key(task: Task) -> tuple:
-    """Priority desc, due date asc with nulls last, creation date asc.
+    """Priority desc, due date asc with nulls last, creation date asc, id asc.
 
     Mirrors the SQL ordering in ``routers.tasks.list_tasks``
     (``Task.priority.desc(), Task.due_date.asc().nulls_last(),
-    Task.created_date.asc()``) in Python, since this formatter has no
-    database to order in. The two can't share code (SQL vs. Python), so
+    Task.created_date.asc(), Task.id``) in Python, since this formatter has
+    no database to order in. The two can't share code (SQL vs. Python), so
     ``tests/test_task_export.py`` pins them against each other on a fixture
     set - keep both in step by hand if either ordering changes.
     """
@@ -80,12 +81,19 @@ def _active_sort_key(task: Task) -> tuple:
         task.due_date is None,
         task.due_date or date.min,
         task.created_date,
+        task.id,
     )
 
 
-def _closed_sort_key(task: Task) -> datetime:
-    """Closed date, for a most-recent-first sort of the hidden band."""
-    return task.closed_date or datetime.min
+def _closed_sort_key(task: Task) -> tuple[datetime, int]:
+    """Closed date desc, id asc, for a most-recent-first sort of the hidden band.
+
+    Mirrors the SQL ordering in ``routers.tasks.list_tasks``
+    (``Task.closed_date.desc(), Task.id``). Used with ``sorted(...,
+    reverse=True)``, so the id term is negated: reversing a bare ascending
+    id would sort ties by id descending instead.
+    """
+    return (task.closed_date or datetime.min, -task.id)
 
 
 def _render_task(

@@ -145,6 +145,7 @@ class TaskUpdate(BaseModel):
     project_id: int | None = None
     parent_id: int | None = None
     sort_order: int | None = None
+    closed_date: datetime | None = None
 
     @field_validator("profile_id", "title", "priority", "status")
     @classmethod

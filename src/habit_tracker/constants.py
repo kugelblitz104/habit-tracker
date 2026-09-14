@@ -84,6 +84,34 @@ class DefaultLanding(str, Enum):
     HABITS = "habits"
 
 
+class DayQuality(str, Enum):
+    """How a day felt, for the daily journal's check-in.
+
+    Deliberately not a 1-5 scale: these name what a day was, so a day can
+    be productive and still tiring and the writer picks whichever they
+    would say first. Declaration order runs positive to negative and is
+    the order a picker should render them in.
+
+    The Obsidian importer maps the two non-descript words in the existing
+    history onto these: "meh" and "mid" become GOOD, "bad" and "poor"
+    become ROUGH.
+    """
+
+    GREAT = "great"
+    GOOD = "good"
+    EXCITING = "exciting"
+    PRODUCTIVE = "productive"
+    QUIET = "quiet"
+    STEADY = "steady"
+    BUSY = "busy"
+    MIXED = "mixed"
+    TIRING = "tiring"
+    DRAINING = "draining"
+    FRUSTRATING = "frustrating"
+    STRESSFUL = "stressful"
+    ROUGH = "rough"
+
+
 class CountdownRepeat(str, Enum):
     """Recurrence rule for a countdown, anchored on its target_date.
 
