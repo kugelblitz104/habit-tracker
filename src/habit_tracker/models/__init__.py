@@ -54,6 +54,7 @@ from habit_tracker.models.imports import (
     ExportResult,
     ImportedHabitSummary,
     ImportResult,
+    JournalImportResult,
 )
 from habit_tracker.models.integrations import (
     IntegrationConnectionCreate,
@@ -156,6 +157,7 @@ __all__ = [
     "JournalEntryCreate",
     "JournalEntryList",
     "JournalEntryRead",
+    "JournalImportResult",
     "MessageResponse",
     "ProfileBackup",
     "ProfileCreate",

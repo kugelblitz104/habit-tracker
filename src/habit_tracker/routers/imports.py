@@ -1,8 +1,10 @@
 import base64
+import io
 import os
 import sqlite3
 import tempfile
 import uuid
+import zipfile
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -30,8 +32,19 @@ from habit_tracker.models.imports import (
     ExportResult,
     ImportedHabitSummary,
     ImportResult,
+    JournalImportResult,
 )
-from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
+from habit_tracker.schemas.db_models import (
+    Habit,
+    JournalEntry,
+    Profile,
+    Tracker,
+    User,
+)
+from habit_tracker.services.journal_import import (
+    TEMPLATE_FILENAME,
+    parse_journal_file,
+)
 from habit_tracker.services.loop_format import map_color, reverse_map_color
 
 router = APIRouter(
@@ -554,3 +567,135 @@ async def export_to_loop_habit_tracker(
             conn.close()
         if temp_file and os.path.exists(temp_file.name):
             os.unlink(temp_file.name)
+
+
+# Guards on an uploaded vault. A real vault is 661 files of a few KB each;
+# these bound a crafted archive without rejecting a real one. The per-note
+# read cap is the one that matters, since a zip header's declared size can
+# lie about what a member actually decompresses to.
+MAX_VAULT_FILES = 2000
+MAX_VAULT_BYTES = 50 * 1024 * 1024
+MAX_NOTE_BYTES = 1 * 1024 * 1024
+
+
+@router.post(
+    "/journal",
+    status_code=status.HTTP_201_CREATED,
+    summary="Import journal entries from an Obsidian daily-notes folder",
+)
+async def import_journal_from_obsidian(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    file: UploadFile = File(..., description="Zip of the Obsidian daily-notes folder"),
+    profile_id: int = Query(description="The profile the entries belong to"),
+) -> JournalImportResult:
+    """
+    Import daily notes from a zipped Obsidian daily-notes folder.
+
+    - **file**: A zip of the folder, one `YYYY-MM-DD.md` per day
+    - **profile_id**: The profile the entries belong to (required)
+
+    The filename gives the day. `daily.md` and any note inside a
+    subdirectory are not daily notes and are ignored.
+
+    **Mapping from a daily note to a journal entry:**
+    - Prose under `**How did today go?**` -> `body`
+    - Prose under `**Something you're grateful for?**` -> `gratitude`
+    - The `[day_quality::...]` inline field -> `day_quality`, mapped onto the
+      app's vocabulary. An unrecognised value imports the entry without one.
+    - A note with neither prompt nor field is free prose and becomes `body`
+      whole.
+    - Dataview query blocks are dropped: they resolve inside Obsidian and
+      carry no data.
+
+    A day that already has an entry is left untouched, never overwritten,
+    and one unreadable file does not abort the run. Both are reported in
+    `warnings`.
+    """
+    await get_owned_profile(db, profile_id, current_user, "journal entry")
+
+    content = await file.read()
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be a .zip archive",
+        ) from None
+
+    entries_imported = 0
+    entries_skipped = 0
+    files_failed = 0
+    warnings: list[str] = []
+
+    with archive:
+        members = [info for info in archive.infolist() if not info.is_dir()]
+        if len(members) > MAX_VAULT_FILES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Archive holds more than {MAX_VAULT_FILES} files",
+            )
+        if sum(info.file_size for info in members) > MAX_VAULT_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Archive is larger than 50 MB uncompressed",
+            )
+
+        existing_result = await db.execute(
+            select(JournalEntry.entry_date).where(JournalEntry.profile_id == profile_id)
+        )
+        taken_days = set(existing_result.scalars().all())
+
+        for info in members:
+            name = info.filename
+            # Nothing is written to disk, so a crafted member name cannot
+            # escape anywhere; these are skipped because a note in a
+            # subdirectory is not a daily note.
+            if "/" in name or "\\" in name or name.lower() == TEMPLATE_FILENAME:
+                continue
+            try:
+                with archive.open(info) as member:
+                    data = member.read(MAX_NOTE_BYTES + 1)
+                if len(data) > MAX_NOTE_BYTES:
+                    raise ValueError("larger than 1 MB")
+                parsed = parse_journal_file(name, data.decode("utf-8"))
+            except Exception as e:  # noqa: BLE001 - one unreadable member of
+                # a user-uploaded archive must not abort a 900-day import;
+                # the failure is recorded and the walk continues.
+                files_failed += 1
+                warnings.append(f"{name}: could not be read ({e!s})")
+                continue
+
+            if parsed is None:
+                files_failed += 1
+                warnings.append(f"{name}: filename is not a date (YYYY-MM-DD.md)")
+                continue
+            if parsed.entry_date in taken_days:
+                entries_skipped += 1
+                warnings.append(
+                    f"{name}: {parsed.entry_date.isoformat()} already has an"
+                    " entry, left unchanged"
+                )
+                continue
+
+            taken_days.add(parsed.entry_date)
+            warnings.extend(parsed.warnings)
+            db.add(
+                JournalEntry(
+                    profile_id=profile_id,
+                    entry_date=parsed.entry_date,
+                    body=parsed.body,
+                    gratitude=parsed.gratitude,
+                    day_quality=parsed.day_quality,
+                )
+            )
+            entries_imported += 1
+
+    await db.commit()
+
+    return JournalImportResult(
+        entries_imported=entries_imported,
+        entries_skipped=entries_skipped,
+        files_failed=files_failed,
+        warnings=warnings,
+    )
