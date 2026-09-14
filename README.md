@@ -194,7 +194,7 @@ supplies it from `ZSCALER_CA_PATH` and falls back to `/dev/null` when that's uns
 src/habit_tracker/
 ├── main.py                 # FastAPI app; every router registers here
 ├── database.py             # Async engine and session
-├── constants.py            # Enums + compute_band()
+├── constants.py            # Enums + shared status tuples
 ├── core/
 │   ├── config.py           # pydantic-settings
 │   ├── dependencies.py     # Auth and ownership helpers

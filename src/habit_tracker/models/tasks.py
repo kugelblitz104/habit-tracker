@@ -5,7 +5,6 @@ from pydantic import BaseModel, ValidationInfo, field_validator
 
 from habit_tracker.constants import (
     IntegrationProvider,
-    TaskBand,
     TaskPriority,
     TaskStatus,
 )
@@ -114,7 +113,6 @@ class TaskRead(TaskBase, _FromORM):
     closed_date: datetime | None = None
     created_date: datetime
     updated_date: datetime | None = None
-    band: str = TaskBand.WHENEVER
     # Computed, never stored: how many subtasks this task has, and how many
     # of them are DONE (cancelled subtasks count toward subtask_count only)
     subtask_count: int = 0

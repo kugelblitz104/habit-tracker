@@ -1,6 +1,5 @@
 """Constants used across the application."""
 
-from datetime import date, timedelta
 from enum import Enum
 
 
@@ -46,6 +45,11 @@ class TaskStatus(int, Enum):
     DONE = 6
     CANCELLED = 7
     PENDING = 8
+
+
+# The two statuses that close a task. Shared by the list endpoint's default
+# filter, the closed-task ordering and the Markdown export's sectioning.
+CLOSED_STATUSES = (TaskStatus.DONE.value, TaskStatus.CANCELLED.value)
 
 
 class TimeEntryKind(int, Enum):
@@ -125,52 +129,3 @@ class CountdownRepeat(str, Enum):
     MONTHLY = "monthly"
     MONTHLY_WEEKDAY = "monthly_weekday"
     YEARLY = "yearly"
-
-
-class TaskBand(str, Enum):
-    """Computed urgency band for a task. Never stored - derived from
-    status + priority + due date via compute_band()."""
-
-    NOW = "now"
-    SOON = "soon"
-    WHENEVER = "whenever"
-    HIDDEN = "hidden"
-
-
-def compute_band(
-    status: int,
-    priority: int,
-    due_date: date | None,
-    scheduled_date: date | None = None,
-    today: date | None = None,
-) -> TaskBand:
-    """Compute the urgency band for a task. First match wins:
-
-    - hidden: status is DONE or CANCELLED
-    - deferred: status is DEFERRED -> whenever (still active, never hidden;
-      overrides urgency from priority / due date / scheduled date)
-    - now: effective date is today or past, or priority == 3
-    - soon: effective date within the next 7 days, or priority == 2
-    - whenever: everything else
-
-    The "effective date" is the earliest non-null of the task's due date and
-    scheduled date (None if both are unset), so a scheduled date bands a task
-    the same way a due date does.
-    """
-    if today is None:
-        today = date.today()
-
-    candidate_dates = [d for d in (due_date, scheduled_date) if d is not None]
-    effective_date = min(candidate_dates) if candidate_dates else None
-
-    if status in (TaskStatus.DONE, TaskStatus.CANCELLED):
-        return TaskBand.HIDDEN
-    if status == TaskStatus.DEFERRED:
-        return TaskBand.WHENEVER
-    if (effective_date is not None and effective_date <= today) or priority == 3:
-        return TaskBand.NOW
-    if (
-        effective_date is not None and effective_date <= today + timedelta(days=7)
-    ) or priority == 2:
-        return TaskBand.SOON
-    return TaskBand.WHENEVER

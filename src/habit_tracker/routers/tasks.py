@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TaskBand, TaskStatus, compute_band
+from habit_tracker.constants import CLOSED_STATUSES, TaskStatus
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
@@ -34,31 +34,17 @@ router = APIRouter(
     prefix="/tasks", tags=["tasks"], responses={404: {"description": "Not found"}}
 )
 
-CLOSED_STATUSES = (TaskStatus.DONE.value, TaskStatus.CANCELLED.value)
-
 
 def _task_to_read(
     task: Task,
-    today: date | None = None,
     subtask_counts: dict[int, tuple[int, int]] | None = None,
 ) -> TaskRead:
-    """Build a TaskRead with its computed urgency band and subtask counts.
-
-    Bands are computed uniformly for every task - subtasks get the natural
-    band their own status/priority/dates produce (no special-casing); the
-    frontend nests subtasks under their parent and ignores their band.
+    """Build a TaskRead with its subtask counts.
 
     ``subtask_counts`` maps parent task id -> (subtask_count, done_count);
     tasks without an entry (including all subtasks) get 0/0.
     """
     task_read = TaskRead.model_validate(task)
-    task_read.band = compute_band(
-        task.status,
-        task.priority,
-        task.due_date,
-        scheduled_date=task.scheduled_date,
-        today=today,
-    )
     if subtask_counts is not None:
         count, done_count = subtask_counts.get(task.id, (0, 0))
         task_read.subtask_count = count
@@ -140,9 +126,12 @@ async def list_tasks(
     project_id: int | None = Query(
         default=None, description="Only tasks in this project"
     ),
-    band: str | None = Query(
-        default=None,
-        description="Only tasks in this computed band (now, soon, whenever, hidden)",
+    closed_only: bool = Query(
+        default=False,
+        description=(
+            "Only done/cancelled tasks, ordered by closed date (most recent "
+            "first) instead of the default priority ordering"
+        ),
     ),
     task_status: int | None = Query(
         default=None, alias="status", description="Only tasks with this status value"
@@ -181,17 +170,17 @@ async def list_tasks(
     ),
 ) -> TaskList:
     """
-    Get a paginated list of tasks belonging to a profile. Each task carries
-    its computed urgency **band** (now/soon/whenever/hidden).
+    Get a paginated list of tasks belonging to a profile.
 
     - **profile_id**: The profile whose tasks to list (required)
     - **project_id**: Optional. Only tasks in this project
-    - **band**: Optional. Filter by computed band. Bands are date-relative,
-      so this filter is applied after fetching the profile's tasks
+    - **closed_only**: Return *only* done/cancelled tasks, ordered by closed
+      date (most recent first). This is the "Completed & closed" view; it
+      implies the closed tasks regardless of **include_closed**
     - **status**: Optional. Filter by exact task status value
-    - **include_closed**: Include done/cancelled tasks (default: false). For
-      the "Completed & closed" view pass `include_closed=true&band=hidden` -
-      that view is ordered by closed date (most recent first)
+    - **include_closed**: Include done/cancelled tasks alongside the active
+      ones (default: false). Use **closed_only** for closed tasks by
+      themselves
     - **limit**: Maximum number of tasks to return (default: 100, max: 100)
     - **offset**: Number of tasks to skip (default: 0)
     - **parent_id**: Optional. Only subtasks of this parent task. A plain
@@ -203,23 +192,15 @@ async def list_tasks(
 
     Subtasks are returned in the same response as their parents, with
     **parent_id** set, so the frontend can nest them without extra requests.
-    A subtask's **band** is the natural value its own status/priority/dates
-    would produce (no special-casing) - the frontend ignores it and groups
-    the subtask under its parent instead. Every task also carries
-    **subtask_count** / **subtask_done_count** (done = status DONE only),
-    computed in a single grouped query.
+    Every task also carries **subtask_count** / **subtask_done_count**
+    (done = status DONE only), computed in a single grouped query.
     """
     # Hand-rolled rather than an Enum-typed Query: the models/ field
     # validators only run on request bodies, never on query strings, so they
-    # can't cover band/status here. Declaring these as Enum-typed Query
-    # params instead would add an `enum` array to the OpenAPI parameter
-    # schema and change the 422 detail shape - both schema-breaking in this
-    # phase - so the check stays manual.
-    if band is not None and band not in [b.value for b in TaskBand]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Band must be one of: now, soon, whenever, hidden",
-        )
+    # can't cover status here. Declaring it as an Enum-typed Query param
+    # instead would add an `enum` array to the OpenAPI parameter schema and
+    # change the 422 detail shape - both schema-breaking in this phase - so
+    # the check stays manual.
     if task_status is not None and task_status not in [s.value for s in TaskStatus]:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -233,16 +214,18 @@ async def list_tasks(
         query = query.filter(Task.project_id == project_id)
     if parent_id is not None:
         query = query.filter(Task.parent_id == parent_id)
+    if closed_only:
+        query = query.filter(Task.status.in_(CLOSED_STATUSES))
     if task_status is not None:
         query = query.filter(Task.status == task_status)
-    elif not include_closed:
+    elif not (include_closed or closed_only):
         query = query.filter(Task.status.not_in(CLOSED_STATUSES))
     if closed_from is not None:
         query = query.filter(Task.closed_date >= closed_from)
     if closed_to is not None:
         query = query.filter(Task.closed_date < closed_to)
 
-    if include_closed and band == TaskBand.HIDDEN:
+    if closed_only:
         query = query.order_by(Task.closed_date.desc(), Task.id)
     else:
         # Mirrored in Python by services.task_export._active_sort_key (the
@@ -270,12 +253,7 @@ async def list_tasks(
         else await _get_subtask_counts(db, profile_id=profile_id)
     )
 
-    # Bands are date-relative and never stored, so band filtering happens in
-    # Python after fetching; limit/offset apply to the band-filtered list
-    today = date.today()
-    tasks_read = [_task_to_read(t, today, subtask_counts) for t in db_tasks]
-    if band is not None:
-        tasks_read = [t for t in tasks_read if t.band == band]
+    tasks_read = [_task_to_read(t, subtask_counts) for t in db_tasks]
 
     total = len(tasks_read)
     tasks_read = tasks_read[offset : offset + limit]
@@ -380,15 +358,16 @@ async def export_tasks_markdown(
 
     - **profile_id**: The profile whose tasks to export (required)
 
-    Tasks are grouped by computed urgency band (Now / Soon / Whenever, plus a
-    "Completed & cancelled" section for done/cancelled tasks); empty sections
-    are omitted. Each task is a checklist line (`- [x]` when done) with
-    indented detail bullets for the fields that are set. Subtasks never
+    Tasks are split into an "Active" section and a "Completed & cancelled"
+    section; an empty section is omitted. The document carries no urgency
+    band: a band is date-relative and resolved by the client against the
+    reader's own date, so one baked into an export is only correct on the
+    day it was written. Each task is a checklist line (`- [x]` when done)
+    with indented detail bullets for the fields that are set. Subtasks never
     appear as top-level entries - they render as indented checklist lines
-    under their parent, wherever the parent lands. Ordering matches the
-    tasks list endpoint: active bands by priority (desc), due date (asc, no
-    due date last), then creation date; the closed section by closed date
-    (most recent first).
+    under their parent. Ordering matches the tasks list endpoint: active by
+    priority (desc), due date (asc, no due date last), then creation date;
+    closed by closed date (most recent first).
     """
     profile = await get_owned_profile(db, profile_id, current_user, "task")
 
@@ -459,8 +438,7 @@ async def read_task_by_slug(
     """
     Retrieve a task by its URL **slug** instead of its numeric id, so a task
     detail URL can read as the task it opens (`/tasks/setup-utilities`). The
-    response is identical to `GET /tasks/{task_id}`, band and subtask counts
-    included.
+    response is identical to `GET /tasks/{task_id}`, subtask counts included.
 
     - **slug**: The task's slug, as returned in **slug** on any task read
     - **profile_id**: The profile the slug belongs to (required)
@@ -489,9 +467,8 @@ async def read_task(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> TaskRead:
     """
-    Retrieve a specific task by its ID, including its computed urgency band
-    and its subtask counts (subtask_count / subtask_done_count, done = status
-    DONE only).
+    Retrieve a specific task by its ID, including its subtask counts
+    (subtask_count / subtask_done_count, done = status DONE only).
 
     - **task_id**: The unique identifier of the task to retrieve
     """

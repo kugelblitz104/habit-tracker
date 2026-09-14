@@ -7,19 +7,21 @@ unit-testable without HTTP or a database.
 Layout of the exported document:
 
 - A header with the profile name and the export date.
-- One ``##`` section per non-empty urgency band, in fixed order: Now, Soon,
-  Whenever, then "Completed & cancelled" (the hidden band: done/cancelled
-  tasks). Empty bands are omitted entirely.
+- Two ``##`` sections, in fixed order: "Active", then "Completed &
+  cancelled" (done/cancelled tasks). An empty section is omitted entirely.
 - Each task is a checklist line (``- [x]`` only for DONE) followed by
   indented detail bullets for fields that are actually set.
 - Subtasks (tasks with a ``parent_id``) are never top-level entries: each
-  renders as an indented checklist line under its parent (with its detail
-  bullets indented one level further), regardless of which band the
-  subtask's own status/priority/dates would put it in.
+  renders as an indented checklist line under its parent, with its detail
+  bullets indented one level further.
 
-Ordering matches what the app shows (the tasks list endpoint): active bands
+The document carries no urgency band. A band is date-relative and resolved
+by the client against the reader's own date, so a band baked into an export
+is only correct on the day it was written.
+
+Ordering matches what the app shows (the tasks list endpoint): active tasks
 are ordered by priority (desc), due date (asc, no due date last), creation
-date (asc), then id (asc); the hidden band is ordered by closed date (most
+date (asc), then id (asc); closed tasks are ordered by closed date (most
 recent first), then id (asc). Subtasks under one parent use the active
 ordering.
 """
@@ -29,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time
 
-from habit_tracker.constants import TaskBand, TaskPriority, TaskStatus, compute_band
+from habit_tracker.constants import CLOSED_STATUSES, TaskPriority, TaskStatus
 from habit_tracker.schemas.db_models import Task
 
 _STATUS_LABELS = {
@@ -50,13 +52,8 @@ _PRIORITY_LABELS = {
     TaskPriority.HIGH.value: "High",
 }
 
-# Section order and human titles; the hidden band holds done/cancelled tasks
-_BAND_SECTIONS: list[tuple[TaskBand, str]] = [
-    (TaskBand.NOW, "Now"),
-    (TaskBand.SOON, "Soon"),
-    (TaskBand.WHENEVER, "Whenever"),
-    (TaskBand.HIDDEN, "Completed & cancelled"),
-]
+_ACTIVE_SECTION = "Active"
+_CLOSED_SECTION = "Completed & cancelled"
 
 
 def _format_when(day: date, at: time | None) -> str:
@@ -86,7 +83,7 @@ def _active_sort_key(task: Task) -> tuple:
 
 
 def _closed_sort_key(task: Task) -> tuple[datetime, int]:
-    """Closed date desc, id asc, for a most-recent-first sort of the hidden band.
+    """Closed date desc, id asc, for a most-recent-first sort of closed tasks.
 
     Mirrors the SQL ordering in ``routers.tasks.list_tasks``
     (``Task.closed_date.desc(), Task.id``). Used with ``sorted(...,
@@ -146,41 +143,33 @@ def render_tasks_markdown(
     - ``profile_name``: shown in the document header
     - ``tasks``: all of the profile's tasks (including done/cancelled)
     - ``project_names``: project id -> name, for the Project detail line
-    - ``today``: banding reference date (defaults to ``date.today()``)
+    - ``today``: export date shown in the header (defaults to ``date.today()``)
     """
     if today is None:
         today = date.today()
 
-    # Subtasks never appear as top-level entries: only parentless tasks are
-    # banded; each subtask renders indented under its parent
+    # Subtasks never appear as top-level entries: only parentless tasks open a
+    # section; each subtask renders indented under its parent
     subtasks_by_parent: dict[int, list[Task]] = {}
-    top_level: list[Task] = []
+    active: list[Task] = []
+    closed: list[Task] = []
     for task in tasks:
         if task.parent_id is not None:
             subtasks_by_parent.setdefault(task.parent_id, []).append(task)
+        elif task.status in CLOSED_STATUSES:
+            closed.append(task)
         else:
-            top_level.append(task)
+            active.append(task)
 
-    groups: dict[TaskBand, list[Task]] = {band: [] for band, _ in _BAND_SECTIONS}
-    for task in top_level:
-        band = compute_band(
-            task.status,
-            task.priority,
-            task.due_date,
-            scheduled_date=task.scheduled_date,
-            today=today,
-        )
-        groups[band].append(task)
+    sections = [
+        (_ACTIVE_SECTION, sorted(active, key=_active_sort_key)),
+        (_CLOSED_SECTION, sorted(closed, key=_closed_sort_key, reverse=True)),
+    ]
 
     lines = [f"# {profile_name} — Tasks", "", f"_Exported {today.isoformat()}_"]
-    for band, title in _BAND_SECTIONS:
-        group = groups[band]
+    for title, group in sections:
         if not group:
             continue
-        if band == TaskBand.HIDDEN:
-            group = sorted(group, key=_closed_sort_key, reverse=True)
-        else:
-            group = sorted(group, key=_active_sort_key)
         lines.extend(["", f"## {title}", ""])
         for task in group:
             lines.extend(_render_task(task, project_names))

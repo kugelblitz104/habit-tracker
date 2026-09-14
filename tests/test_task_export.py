@@ -49,7 +49,7 @@ class TestRenderTasksMarkdown:
     """Unit tests for the pure formatter (no HTTP, no database)."""
 
     def test_active_ordering_priority_then_due_then_created(self):
-        """Within a band: priority desc, due asc (nulls last), created asc."""
+        """Active section: priority desc, due asc (nulls last), created asc."""
         today = date(2026, 7, 9)
         soon_due_near = _task(title="Due near", due_date=today + timedelta(days=3))
         soon_due_far = _task(title="Due far", due_date=today + timedelta(days=5))
@@ -79,10 +79,9 @@ class TestRenderTasksMarkdown:
     def test_subtasks_nest_under_parent_not_top_level(self):
         """Subtasks render indented under their parent, never top-level."""
         today = date(2026, 7, 9)
-        parent = _task(title="Plan the offsite")  # priority 0 -> whenever
+        parent = _task(title="Plan the offsite")
         parent.id = 1
-        # Priority 3 would band the subtask "now" on its own - it must still
-        # render under its parent in the Whenever section, indented
+        # The subtask renders under its parent regardless of its own priority
         sub_open = _task(title="Book the venue", parent_id=1, priority=3)
         sub_done = _task(
             title="Pick a date",
@@ -95,11 +94,10 @@ class TestRenderTasksMarkdown:
         )
         assert "- [ ] Plan the offsite\n  - [ ] Book the venue" in doc
         assert "  - [x] Pick a date" in doc
-        # Never as a top-level checklist line, and the subtask's own
-        # priority/status never open a band section of their own
+        # Never as a top-level checklist line, and a done subtask never
+        # pulls its parent into the closed section
         assert "\n- [ ] Book the venue" not in doc
         assert "\n- [x] Pick a date" not in doc
-        assert "## Now" not in doc
         assert "## Completed & cancelled" not in doc
 
     def test_subtask_detail_bullets_indent_below_subtask(self):
@@ -140,9 +138,9 @@ class TestRenderTasksMarkdown:
         doc = render_tasks_markdown("Personal", [parent, _sub], {}, today=today)
         completed_at = doc.index("## Completed & cancelled")
         assert doc.index("  - [ ] Leftover subtask") > completed_at
-        assert "## Whenever" not in doc  # the subtask did not band on its own
+        assert "## Active" not in doc  # the open subtask opens no section
 
-    def test_hidden_ordering_most_recently_closed_first(self):
+    def test_closed_ordering_most_recently_closed_first(self):
         """The closed section is ordered by closed date, most recent first."""
         today = date(2026, 7, 9)
         old = _task(
@@ -162,8 +160,8 @@ class TestRenderTasksMarkdown:
 class TestExportTasksMarkdown:
     """Tests for GET /tasks/export endpoint."""
 
-    async def test_export_groups_tasks_by_band(self, client, db_session, login_as):
-        """Tasks land in Now/Soon/Whenever/Completed sections by band."""
+    async def test_export_splits_active_from_closed(self, client, db_session, login_as):
+        """Tasks land in Active or Completed & cancelled, by status alone."""
         user = UserFactory()
         await db_session.commit()
         profile = ProfileFactory(user=user, name="Personal")
@@ -184,17 +182,18 @@ class TestExportTasksMarkdown:
         assert response.status_code == 200
         body = response.text
 
-        # Sections appear in order, each task inside its own section
+        # Two sections in order; every active task sits in the first one,
+        # ordered by priority desc / due date asc, and no band heading exists
         assert (
-            body.index("## Now")
+            body.index("## Active")
             < body.index("- [ ] Urgent thing")
-            < body.index("## Soon")
             < body.index("- [ ] Upcoming thing")
-            < body.index("## Whenever")
             < body.index("- [ ] Someday thing")
             < body.index("## Completed & cancelled")
             < body.index("- [x] Finished thing")
         )
+        for heading in ("## Now", "## Soon", "## Whenever"):
+            assert heading not in body
 
     async def test_export_subtasks_nested_under_parent(
         self, client, db_session, login_as

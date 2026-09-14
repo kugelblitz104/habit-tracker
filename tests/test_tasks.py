@@ -40,7 +40,6 @@ class TestCreateTask:
         assert data["profile_id"] == profile.id
         assert data["status"] == TaskStatus.OPEN
         assert data["priority"] == 0
-        assert data["band"] == "whenever"
         assert data["project_id"] is None
         assert data["due_date"] is None
         assert data["closed_date"] is None
@@ -87,7 +86,6 @@ class TestCreateTask:
         assert data["external_ref"] == "ADO-2841"
         assert data["external_url"] == "https://dev.azure.com/x/2841"
         assert data["project_id"] == project.id
-        assert data["band"] == "now"  # priority 3
 
     async def test_create_task_with_scheduled_date_time(
         self, client, db_session, login_as
@@ -117,8 +115,6 @@ class TestCreateTask:
         data = response.json()
         assert data["scheduled_date"] == scheduled.isoformat()
         assert data["scheduled_time"] == "09:15:00"
-        # A scheduled date 3 days out bands the task as "soon" (no due date)
-        assert data["band"] == "soon"
 
         # Round-trips on a fresh GET too
         response = await client.get(f"/tasks/{data['id']}")
@@ -156,8 +152,6 @@ class TestCreateTask:
         assert data["status"] == TaskStatus.OPEN
         assert data["scheduled_date"] is None
         assert data["scheduled_time"] is None
-        # No due date + priority 0 + cleared scheduled date -> whenever
-        assert data["band"] == "whenever"
 
         # Confirm it was persisted as null, not just scrubbed in the response
         db_task = await db_session.get(Task, data["id"])
@@ -268,7 +262,6 @@ class TestCreateTask:
         data = response.json()
         assert data["status"] == TaskStatus.DONE
         assert data["closed_date"] is not None
-        assert data["band"] == "hidden"
 
 
 class TestListTasks:
@@ -348,74 +341,36 @@ class TestListTasks:
         data = response.json()
         assert data["total"] == 1
         assert data["tasks"][0]["id"] == done.id
-        assert data["tasks"][0]["band"] == "hidden"
 
-    async def test_list_tasks_band_membership(self, client, db_session, login_as):
-        """Band filter returns tasks whose computed band matches."""
+    async def test_list_tasks_closed_only_excludes_active(
+        self, client, db_session, login_as
+    ):
+        """closed_only returns done/cancelled tasks without include_closed."""
         user = UserFactory()
         await db_session.commit()
 
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        today = date.today()
-        overdue = TaskFactory(profile=profile, due_date=today - timedelta(days=1))
-        due_today = TaskFactory(profile=profile, due_date=today)
-        prio3 = TaskFactory(profile=profile, priority=3)
-        due_soon = TaskFactory(profile=profile, due_date=today + timedelta(days=3))
-        prio2 = TaskFactory(profile=profile, priority=2)
-        due_later = TaskFactory(profile=profile, due_date=today + timedelta(days=10))
-        prio1 = TaskFactory(profile=profile, priority=1)
-        plain = TaskFactory(profile=profile)
+        done = DoneTaskFactory(profile=profile)
+        cancelled = TaskFactory(profile=profile, status=TaskStatus.CANCELLED)
+        TaskFactory(profile=profile)
         await db_session.commit()
 
         await login_as(user)
 
         response = await client.get(
-            "/tasks/", params={"profile_id": profile.id, "band": "now"}
+            "/tasks/", params={"profile_id": profile.id, "closed_only": True}
         )
         assert response.status_code == 200
-        assert {t["id"] for t in response.json()["tasks"]} == {
-            overdue.id,
-            due_today.id,
-            prio3.id,
-        }
-
-        response = await client.get(
-            "/tasks/", params={"profile_id": profile.id, "band": "soon"}
-        )
-        assert response.status_code == 200
-        assert {t["id"] for t in response.json()["tasks"]} == {due_soon.id, prio2.id}
-
-        response = await client.get(
-            "/tasks/", params={"profile_id": profile.id, "band": "whenever"}
-        )
-        assert response.status_code == 200
-        assert {t["id"] for t in response.json()["tasks"]} == {
-            due_later.id,
-            prio1.id,
-            plain.id,
-        }
-
-    async def test_list_tasks_invalid_band(self, client, db_session, login_as):
-        """An invalid band value is rejected (422)."""
-        user = UserFactory()
-        await db_session.commit()
-
-        profile = ProfileFactory(user=user, name="Personal")
-        await db_session.commit()
-
-        await login_as(user)
-
-        response = await client.get(
-            "/tasks/", params={"profile_id": profile.id, "band": "urgent"}
-        )
-        assert response.status_code == 422
+        data = response.json()
+        assert data["total"] == 2
+        assert {t["id"] for t in data["tasks"]} == {done.id, cancelled.id}
 
     async def test_list_tasks_completed_view_ordering(
         self, client, db_session, login_as
     ):
-        """band=hidden&include_closed=true orders by closed_date descending."""
+        """closed_only=true orders by closed_date descending."""
         user = UserFactory()
         await db_session.commit()
 
@@ -433,18 +388,14 @@ class TestListTasks:
         newest = DoneTaskFactory(
             profile=profile, closed_date=datetime(2026, 1, 3, 9, 0)
         )
-        TaskFactory(profile=profile)  # open task stays out of the hidden band
+        TaskFactory(profile=profile)  # open task stays out of the closed view
         await db_session.commit()
 
         await login_as(user)
 
         response = await client.get(
             "/tasks/",
-            params={
-                "profile_id": profile.id,
-                "band": "hidden",
-                "include_closed": True,
-            },
+            params={"profile_id": profile.id, "closed_only": True},
         )
         assert response.status_code == 200
         data = response.json()
@@ -501,23 +452,22 @@ class TestListTasks:
             prio0_no_due.id,
         ]
 
-    async def test_list_tasks_pagination_after_band_filter(
+    async def test_list_tasks_pagination_after_closed_only_filter(
         self, client, db_session, login_as
     ):
-        """limit/offset apply to the band-filtered list; total matches it."""
+        """limit/offset apply to the closed_only list; total matches it."""
         user = UserFactory()
         await db_session.commit()
 
         profile = ProfileFactory(user=user, name="Personal")
         await db_session.commit()
 
-        today = date.today()
-        # Five overdue tasks - all band "now" - with ascending due dates
-        now_tasks = [
-            TaskFactory(profile=profile, due_date=today - timedelta(days=5 - i))
+        # Five closed tasks, closed oldest-first, so index 4 is most recent
+        closed = [
+            DoneTaskFactory(profile=profile, closed_date=datetime(2026, 1, 1 + i, 9, 0))
             for i in range(5)
         ]
-        # Two "whenever" tasks that must not affect the paging or the total
+        # Two active tasks that must not affect the paging or the total
         TaskFactory(profile=profile)
         TaskFactory(profile=profile, priority=1)
         await db_session.commit()
@@ -526,15 +476,20 @@ class TestListTasks:
 
         response = await client.get(
             "/tasks/",
-            params={"profile_id": profile.id, "band": "now", "limit": 2, "offset": 2},
+            params={
+                "profile_id": profile.id,
+                "closed_only": True,
+                "limit": 2,
+                "offset": 2,
+            },
         )
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 5
         assert data["limit"] == 2
         assert data["offset"] == 2
-        # Ordered by due date ascending, the slice skips the two most overdue
-        assert [t["id"] for t in data["tasks"]] == [now_tasks[2].id, now_tasks[3].id]
+        # Ordered by closed date descending, the slice skips the two newest
+        assert [t["id"] for t in data["tasks"]] == [closed[2].id, closed[1].id]
 
     async def test_list_tasks_project_filter(self, client, db_session, login_as):
         """project_id filter restricts results to that project's tasks."""
@@ -741,7 +696,7 @@ class TestGetTask:
     """Tests for GET /tasks/{task_id} endpoint."""
 
     async def test_get_own_task(self, client, db_session, login_as):
-        """User can retrieve their task, including its computed band."""
+        """User can retrieve their own task."""
         user = UserFactory()
         await db_session.commit()
 
@@ -757,7 +712,6 @@ class TestGetTask:
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == task.id
-        assert data["band"] == "now"
 
     async def test_get_task_as_admin(self, client, db_session, login_as):
         """Admin can access any task."""
@@ -918,7 +872,7 @@ class TestTaskSlugs:
         assert slugs == ["task", "task-2"]
 
     async def test_get_by_slug_returns_the_task(self, client, db_session, login_as):
-        """The by-slug response matches the by-id one, band and counts included."""
+        """The by-slug response matches the by-id one, counts included."""
         user = UserFactory()
         await db_session.commit()
 
@@ -940,7 +894,6 @@ class TestTaskSlugs:
         data = response.json()
         assert data["id"] == task_id
         assert data["slug"] == "setup-utilities"
-        assert data["band"] == "now"
 
         by_id = await client.get(f"/tasks/{task_id}")
         assert by_id.json() == data
@@ -1180,7 +1133,7 @@ class TestTaskSlugs:
 class TestPatchTask:
     """Tests for PATCH /tasks/{task_id} endpoint."""
 
-    async def test_patch_task_priority_flips_band(self, client, db_session, login_as):
+    async def test_patch_task_priority(self, client, db_session, login_as):
         """Raising priority to 3 moves the task from whenever to now."""
         user = UserFactory()
         await db_session.commit()
@@ -1197,12 +1150,9 @@ class TestPatchTask:
         assert response.status_code == 200
         data = response.json()
         assert data["priority"] == 3
-        assert data["band"] == "now"
 
-    async def test_patch_task_scheduled_date_moves_band(
-        self, client, db_session, login_as
-    ):
-        """Setting a near-future scheduled_date moves the task into 'soon'."""
+    async def test_patch_task_scheduled_date(self, client, db_session, login_as):
+        """Setting a scheduled_date alongside the SCHEDULED status persists it."""
         user = UserFactory()
         await db_session.commit()
 
@@ -1228,7 +1178,6 @@ class TestPatchTask:
         data = response.json()
         assert data["scheduled_date"] == scheduled.isoformat()
         assert data["scheduled_time"] == "13:00:00"
-        assert data["band"] == "soon"
 
     async def test_patch_task_clear_scheduled_date(self, client, db_session, login_as):
         """scheduled_date is nullable - PATCH scheduled_date=null clears it."""
@@ -1250,8 +1199,6 @@ class TestPatchTask:
         assert response.status_code == 200
         data = response.json()
         assert data["scheduled_date"] is None
-        # With no due or scheduled date and priority 0, band falls back to whenever
-        assert data["band"] == "whenever"
 
     async def test_patch_status_away_from_scheduled_clears_scheduled_data(
         self, client, db_session, login_as
@@ -1288,8 +1235,6 @@ class TestPatchTask:
         assert data["status"] == TaskStatus.OPEN
         assert data["scheduled_date"] is None
         assert data["scheduled_time"] is None
-        # Banding reflects the cleared date: soon -> whenever
-        assert data["band"] == "whenever"
 
         # Persisted as null, not just scrubbed in the response
         db_task = await db_session.get(Task, task.id)
@@ -1326,7 +1271,6 @@ class TestPatchTask:
         data = response.json()
         assert data["status"] == TaskStatus.SCHEDULED
         assert data["scheduled_date"] == new_scheduled.isoformat()
-        assert data["band"] == "soon"
 
     async def test_patch_non_scheduled_task_to_scheduled_keeps_scheduled_date(
         self, client, db_session, login_as
@@ -1357,7 +1301,6 @@ class TestPatchTask:
         assert data["status"] == TaskStatus.SCHEDULED
         assert data["scheduled_date"] == scheduled.isoformat()
         assert data["scheduled_time"] == "13:00:00"
-        assert data["band"] == "soon"
 
     async def test_patch_task_done_sets_closed_date(self, client, db_session, login_as):
         """Setting status to DONE stamps closed_date."""
@@ -1379,7 +1322,6 @@ class TestPatchTask:
         data = response.json()
         assert data["status"] == TaskStatus.DONE
         assert data["closed_date"] is not None
-        assert data["band"] == "hidden"
 
     async def test_patch_task_done_to_cancelled_preserves_closed_date(
         self, client, db_session, login_as
@@ -2428,7 +2370,7 @@ class TestEditableClosedDate:
         self, client, db_session, login_as
     ):
         """The column is nullable, so clearing it is allowed rather than a 422.
-        Such a task then sorts first in the hidden band (Postgres orders NULLs
+        Such a task then sorts first in the closed view (Postgres orders NULLs
         first under DESC) and matches no closed_from/closed_to range."""
         task = await self._open_task(db_session, login_as)
         await client.patch(f"/tasks/{task.id}", json={"status": TaskStatus.DONE})
