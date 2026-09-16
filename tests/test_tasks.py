@@ -1151,6 +1151,42 @@ class TestPatchTask:
         data = response.json()
         assert data["priority"] == 3
 
+    async def test_patch_task_with_an_empty_body_only_stamps_updated_date(
+        self, client, db_session, login_as
+    ):
+        """An empty PATCH is a deliberate no-op that touches the clock.
+
+        The reconciliation page's "Keep" sends exactly this: nothing changes
+        except updated_date, which is what moves a row out of a staleness
+        queue. Rejecting an empty body would break that silently.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        profile = ProfileFactory(user=user, name="Personal")
+        await db_session.commit()
+
+        task = TaskFactory(
+            profile=profile,
+            title="Untouched",
+            priority=2,
+            status=TaskStatus.OPEN.value,
+        )
+        await db_session.commit()
+        assert task.updated_date is None  # so a bump is visible
+
+        await login_as(user)
+
+        response = await client.patch(f"/tasks/{task.id}", json={})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated_date"] is not None
+        assert data["title"] == "Untouched"
+        assert data["priority"] == 2
+        assert data["status"] == TaskStatus.OPEN.value
+        assert data["closed_date"] is None
+
     async def test_patch_task_scheduled_date(self, client, db_session, login_as):
         """Setting a scheduled_date alongside the SCHEDULED status persists it."""
         user = UserFactory()

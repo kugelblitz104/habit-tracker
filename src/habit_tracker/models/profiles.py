@@ -57,6 +57,9 @@ class ProfileBase(BaseModel):
     journal_prompt_time: time | None = None
     journal_prompt: str | None = None
     journal_gratitude_enabled: bool = True
+    reconciliation_stale_task_days: int | None = None
+    reconciliation_stale_project_days: int | None = None
+    reconciliation_stale_habit_days: int | None = None
 
     @field_validator("name")
     @classmethod
@@ -118,6 +121,9 @@ class ProfileUpdate(BaseModel):
     journal_prompt_time: time | None = None
     journal_prompt: str | None = None
     journal_gratitude_enabled: bool | None = None
+    reconciliation_stale_task_days: int | None = None
+    reconciliation_stale_project_days: int | None = None
+    reconciliation_stale_habit_days: int | None = None
 
     @field_validator(
         "name",

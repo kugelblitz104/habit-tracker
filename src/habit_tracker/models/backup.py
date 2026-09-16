@@ -40,6 +40,10 @@ BACKUP_VERSION = 1
 class ProfileSettings(_FromORM):
     """The profile's own fields (everything except id / owner / timestamps)."""
 
+    # Add new fields at the END, in the order added, so each addition appends to
+    # the OpenAPI properties rather than reordering them. No validators here, as
+    # on every backup model: a document carrying a value a newer rule would
+    # reject should still import rather than fail as a whole.
     name: str
     color_start: str
     color_end: str
@@ -60,6 +64,9 @@ class ProfileSettings(_FromORM):
     journal_prompt_time: time | None = None
     journal_prompt: str | None = None
     journal_gratitude_enabled: bool = True
+    reconciliation_stale_task_days: int | None = None
+    reconciliation_stale_project_days: int | None = None
+    reconciliation_stale_habit_days: int | None = None
 
 
 class ProjectBackup(_FromORM):

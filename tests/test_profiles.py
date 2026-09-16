@@ -813,3 +813,86 @@ class TestProfileJournalSettings:
         )
 
         assert response.json()["journal_prompt"] is None
+
+
+class TestProfileReconciliationSettings:
+    """The three windows the reconciliation page measures staleness over.
+
+    All three are nullable with no server default: null means "use the client's
+    default", which is why - unlike the journal flags - an explicit null is
+    accepted rather than a 422.
+    """
+
+    async def test_defaults_are_null(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post("/profiles/", json={"name": "Work"})
+
+        body = response.json()
+        assert body["reconciliation_stale_task_days"] is None
+        assert body["reconciliation_stale_project_days"] is None
+        assert body["reconciliation_stale_habit_days"] is None
+
+    async def test_round_trips_through_create_and_patch(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/profiles/",
+            json={
+                "name": "Work",
+                "reconciliation_stale_task_days": 90,
+                "reconciliation_stale_project_days": 180,
+                "reconciliation_stale_habit_days": 56,
+            },
+        )
+        assert created.json()["reconciliation_stale_task_days"] == 90
+
+        patched = await client.patch(
+            f"/profiles/{created.json()['id']}",
+            json={"reconciliation_stale_task_days": 30},
+        )
+
+        body = patched.json()
+        assert body["reconciliation_stale_task_days"] == 30
+        # The other two are untouched by a patch naming only the first.
+        assert body["reconciliation_stale_project_days"] == 180
+        assert body["reconciliation_stale_habit_days"] == 56
+
+    async def test_patch_to_null_restores_the_default(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        created = await client.post(
+            "/profiles/",
+            json={"name": "Work", "reconciliation_stale_task_days": 90},
+        )
+
+        patched = await client.patch(
+            f"/profiles/{created.json()['id']}",
+            json={"reconciliation_stale_task_days": None},
+        )
+
+        assert patched.status_code == 200
+        assert patched.json()["reconciliation_stale_task_days"] is None
+
+    async def test_rejects_a_non_integer_window(self, client, db_session, login_as):
+        """The only validation is the field's own type. Pydantic supplies it, so
+        the range is deliberately unpoliced - the UI offers fixed choices."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/profiles/",
+            json={"name": "Work", "reconciliation_stale_task_days": "soon"},
+        )
+
+        assert response.status_code == 422

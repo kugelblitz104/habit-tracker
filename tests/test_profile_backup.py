@@ -916,3 +916,56 @@ class TestJournalBackup:
 
         assert restored.status_code == 201
         assert restored.json()["journal_entries_imported"] == 0
+
+
+class TestReconciliationSettingsBackup:
+    async def test_reconciliation_windows_round_trip(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        profile.reconciliation_stale_task_days = 90
+        profile.reconciliation_stale_project_days = 365
+        profile.reconciliation_stale_habit_days = 56
+        await db_session.commit()
+        await login_as(user)
+
+        exported = await client.get(f"/backup/profiles/{profile.id}")
+        document = exported.json()
+        assert document["profile"]["reconciliation_stale_task_days"] == 90
+        assert document["profile"]["reconciliation_stale_project_days"] == 365
+        assert document["profile"]["reconciliation_stale_habit_days"] == 56
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_profile = await db_session.get(Profile, restored.json()["profile_id"])
+
+        assert new_profile.reconciliation_stale_task_days == 90
+        assert new_profile.reconciliation_stale_project_days == 365
+        assert new_profile.reconciliation_stale_habit_days == 56
+
+    async def test_a_document_without_the_windows_still_imports(
+        self, client, db_session, login_as
+    ):
+        """All three default to None, which is why BACKUP_VERSION is unchanged."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        profile.reconciliation_stale_task_days = 90
+        await db_session.commit()
+        await login_as(user)
+
+        exported = await client.get(f"/backup/profiles/{profile.id}")
+        document = exported.json()
+        for field in (
+            "reconciliation_stale_task_days",
+            "reconciliation_stale_project_days",
+            "reconciliation_stale_habit_days",
+        ):
+            document["profile"].pop(field, None)
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_profile = await db_session.get(Profile, restored.json()["profile_id"])
+
+        assert restored.status_code == 201
+        assert new_profile.reconciliation_stale_task_days is None

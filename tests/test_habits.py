@@ -900,6 +900,32 @@ class TestUpdateHabitPatch:
         assert response.status_code == 200
         assert response.json()["name"] == "Patched"
 
+    async def test_patch_habit_with_an_empty_body_only_stamps_updated_date(
+        self, client, db_session, login_as
+    ):
+        """An empty PATCH is a deliberate no-op that touches the clock.
+
+        The reconciliation page's "Keep" sends exactly this: nothing changes
+        except updated_date, which is what moves a row out of a staleness
+        queue. Rejecting an empty body would break that silently.
+        """
+        user = UserFactory()
+        await db_session.commit()
+
+        habit = HabitFactory(user=user, name="Untouched", archived=False)
+        await db_session.commit()
+        assert habit.updated_date is None  # so a bump is visible
+
+        await login_as(user)
+
+        response = await client.patch(f"/habits/{habit.id}", json={})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated_date"] is not None
+        assert data["name"] == "Untouched"
+        assert data["archived"] is False
+
     async def test_update_habit_multiple_fields_patch(
         self, client, db_session, login_as
     ):

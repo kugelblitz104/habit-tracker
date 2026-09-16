@@ -104,6 +104,18 @@ class Profile(Base):
     journal_gratitude_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
+    # Reconciliation windows: how long is "too long" for each of that page's
+    # queues. Nullable with NO default on purpose - null means "use the
+    # client's default", so each default is written in exactly one place.
+    reconciliation_stale_task_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    reconciliation_stale_project_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    reconciliation_stale_habit_days: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
