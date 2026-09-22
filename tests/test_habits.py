@@ -1,6 +1,6 @@
 """Tests for habit management endpoints."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import ClassVar
 from zoneinfo import ZoneInfo
 
@@ -1762,3 +1762,294 @@ class TestListHabits:
         data = response.json()
         assert data["habits"] == []
         assert data["total"] == 1
+
+
+class TestListHabitsTrackersLite:
+    """Tests for GET /habits/trackers-lite (profile-wide batch read)."""
+
+    async def test_matches_the_per_habit_endpoint_for_every_habit(
+        self, client, db_session, login_as
+    ):
+        """The batch output must equal N singular calls with the same args.
+
+        This is what stops the two code paths drifting: a later change to
+        is_auto_skipped or the lite projection has to move both or fail here.
+        """
+        user = UserFactory()
+        profile = user.profiles[0]
+        habits = [
+            HabitFactory(profile=profile, frequency=1, range=1, sort_order=0),
+            HabitFactory(profile=profile, frequency=2, range=7, sort_order=1),
+            HabitFactory(profile=profile, frequency=3, range=5, sort_order=2),
+        ]
+        for habit in habits:
+            for offset in range(0, 10, 2):
+                TrackerFactory(
+                    habit=habit,
+                    dated=date(2026, 9, 21) - timedelta(days=offset),
+                    status=TrackerStatus.COMPLETED,
+                )
+        await db_session.commit()
+        await login_as(user)
+
+        batch = await client.get(
+            "/habits/trackers-lite",
+            params={"profile_id": profile.id, "end_date": "2026-09-21", "days": 14},
+        )
+        assert batch.status_code == 200
+        by_habit = {item["habit_id"]: item for item in batch.json()["items"]}
+
+        for habit in habits:
+            single = await client.get(
+                f"/habits/{habit.id}/trackers/lite",
+                params={"end_date": "2026-09-21", "days": 14},
+            )
+            assert single.status_code == 200
+            expected = single.json()
+            actual = by_habit[habit.id]
+            assert actual["auto_skipped_dates"] == expected["auto_skipped_dates"]
+            assert actual["has_previous"] == expected["has_previous"]
+            assert actual["end_date"] == expected["end_date"]
+            assert actual["days"] == expected["days"]
+            assert sorted(actual["trackers"], key=lambda t: t["id"]) == sorted(
+                expected["trackers"], key=lambda t: t["id"]
+            )
+
+    async def test_excludes_other_profiles(self, client, db_session, login_as):
+        """The Habit join is the only scoping there is; omitting it leaks
+        every profile's trackers silently."""
+        user = UserFactory()
+        mine = user.profiles[0]
+        theirs = ProfileFactory(user=UserFactory())
+        HabitFactory(profile=mine)
+        HabitFactory(profile=theirs)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/trackers-lite", params={"profile_id": mine.id}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+
+    async def test_total_is_the_match_count_not_the_page_length(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        for index in range(4):
+            HabitFactory(profile=profile, sort_order=index)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/trackers-lite", params={"profile_id": profile.id, "limit": 2}
+        )
+
+        body = response.json()
+        assert len(body["items"]) == 2
+        assert body["total"] == 4
+
+    async def test_paging_is_total_across_a_shared_sort_order(
+        self, client, db_session, login_as
+    ):
+        """Every habit has sort_order 0 by default, so id is what makes the
+        order total. Without it a page boundary duplicates one row and drops
+        another."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        for _ in range(6):
+            HabitFactory(profile=profile, sort_order=0)
+        await db_session.commit()
+        await login_as(user)
+
+        seen = []
+        for offset in (0, 2, 4):
+            response = await client.get(
+                "/habits/trackers-lite",
+                params={"profile_id": profile.id, "limit": 2, "offset": offset},
+            )
+            seen.extend(item["habit_id"] for item in response.json()["items"])
+
+        assert len(seen) == 6
+        assert len(set(seen)) == 6
+
+    async def test_archived_filter(self, client, db_session, login_as):
+        user = UserFactory()
+        profile = user.profiles[0]
+        HabitFactory(profile=profile, archived=False)
+        HabitFactory(profile=profile, archived=True)
+        await db_session.commit()
+        await login_as(user)
+
+        both = await client.get(
+            "/habits/trackers-lite", params={"profile_id": profile.id}
+        )
+        active = await client.get(
+            "/habits/trackers-lite",
+            params={"profile_id": profile.id, "archived": False},
+        )
+        archived = await client.get(
+            "/habits/trackers-lite",
+            params={"profile_id": profile.id, "archived": True},
+        )
+
+        assert both.json()["total"] == 2
+        assert active.json()["total"] == 1
+        assert archived.json()["total"] == 1
+
+    async def test_empty_profile_returns_no_items(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/trackers-lite", params={"profile_id": user.profiles[0].id}
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "items": [],
+            "total": 0,
+            "limit": 100,
+            "offset": 0,
+        }
+
+    async def test_rejects_a_profile_the_caller_does_not_own(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        other = ProfileFactory(user=UserFactory())
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/trackers-lite", params={"profile_id": other.id}
+        )
+
+        assert response.status_code == 403
+
+
+class TestListHabitsKpis:
+    """Tests for GET /habits/kpis (profile-wide batch read)."""
+
+    async def test_matches_the_per_habit_endpoint_for_every_habit(
+        self, client, db_session, login_as
+    ):
+        """Pins the batch to calculate_kpis exactly as the singular does."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        habits = [
+            HabitFactory(profile=profile, frequency=1, range=1, sort_order=0),
+            HabitFactory(profile=profile, frequency=2, range=7, sort_order=1),
+        ]
+        for habit in habits:
+            for offset in range(0, 12, 3):
+                TrackerFactory(
+                    habit=habit,
+                    dated=date(2026, 9, 21) - timedelta(days=offset),
+                    status=TrackerStatus.COMPLETED,
+                )
+        await db_session.commit()
+        await login_as(user)
+
+        batch = await client.get(
+            "/habits/kpis",
+            params={"profile_id": profile.id, "tz": "America/New_York"},
+        )
+        assert batch.status_code == 200
+        by_habit = {item["habit_id"]: item["kpis"] for item in batch.json()["items"]}
+
+        for habit in habits:
+            single = await client.get(
+                f"/habits/{habit.id}/kpis", params={"tz": "America/New_York"}
+            )
+            assert single.status_code == 200
+            assert by_habit[habit.id] == single.json()
+
+    async def test_excludes_other_profiles(self, client, db_session, login_as):
+        user = UserFactory()
+        mine = user.profiles[0]
+        theirs = ProfileFactory(user=UserFactory())
+        HabitFactory(profile=mine)
+        HabitFactory(profile=theirs)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/habits/kpis", params={"profile_id": mine.id})
+
+        assert response.status_code == 200
+        assert response.json()["total"] == 1
+
+    async def test_total_is_the_match_count_not_the_page_length(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        for index in range(4):
+            HabitFactory(profile=profile, sort_order=index)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/kpis", params={"profile_id": profile.id, "limit": 2}
+        )
+
+        body = response.json()
+        assert len(body["items"]) == 2
+        assert body["total"] == 4
+
+    async def test_archived_filter(self, client, db_session, login_as):
+        user = UserFactory()
+        profile = user.profiles[0]
+        HabitFactory(profile=profile, archived=False)
+        HabitFactory(profile=profile, archived=True)
+        await db_session.commit()
+        await login_as(user)
+
+        active = await client.get(
+            "/habits/kpis", params={"profile_id": profile.id, "archived": False}
+        )
+
+        assert active.json()["total"] == 1
+
+    async def test_habit_with_no_trackers_gets_zeroed_kpis_not_an_error(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        profile = user.profiles[0]
+        HabitFactory(profile=profile)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/habits/kpis", params={"profile_id": profile.id})
+
+        assert response.status_code == 200
+        kpis = response.json()["items"][0]["kpis"]
+        assert kpis["total_completions"] == 0
+        assert kpis["current_streak"] == 0
+
+    async def test_rejects_a_profile_the_caller_does_not_own(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        other = ProfileFactory(user=UserFactory())
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/habits/kpis", params={"profile_id": other.id})
+
+        assert response.status_code == 403
+
+    async def test_rejects_an_invalid_timezone(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(
+            "/habits/kpis",
+            params={"profile_id": user.profiles[0].id, "tz": "Not/AZone"},
+        )
+
+        assert response.status_code == 422

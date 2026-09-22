@@ -45,6 +45,8 @@ from habit_tracker.models.countdowns import (
 from habit_tracker.models.habits import (
     HabitCreate,
     HabitKPIs,
+    HabitKPIsEntry,
+    HabitKPIsList,
     HabitList,
     HabitRead,
     HabitStreak,
@@ -98,6 +100,8 @@ from habit_tracker.models.time_entries import (
     TimeEntryUpdate,
 )
 from habit_tracker.models.trackers import (
+    HabitTrackersLite,
+    HabitTrackersLiteList,
     TrackerCreate,
     TrackerList,
     TrackerLite,
@@ -141,9 +145,13 @@ __all__ = [
     "HabitBackup",
     "HabitCreate",
     "HabitKPIs",
+    "HabitKPIsEntry",
+    "HabitKPIsList",
     "HabitList",
     "HabitRead",
     "HabitStreak",
+    "HabitTrackersLite",
+    "HabitTrackersLiteList",
     "HabitUpdate",
     "ImportResult",
     "ImportSummary",

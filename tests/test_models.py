@@ -382,3 +382,42 @@ def test_models_barrel_never_reexports_orm():
         obj = getattr(m, name)
         if isinstance(obj, type):
             assert issubclass(obj, BaseModel), f"{name} is not a Pydantic model"
+
+
+class TestBatchReadModels:
+    """The batch read envelopes reuse the singular components verbatim."""
+
+    def test_habit_trackers_lite_entry_carries_the_window_fields(self):
+        from habit_tracker.models import HabitTrackersLite
+
+        entry = HabitTrackersLite(
+            habit_id=7,
+            trackers=[],
+            end_date=date(2026, 9, 21),
+            days=42,
+        )
+        assert entry.habit_id == 7
+        assert entry.has_previous is False
+        assert entry.auto_skipped_dates == []
+
+    def test_habit_kpis_entry_nests_the_singular_component(self):
+        from habit_tracker.models import HabitKPIs, HabitKPIsEntry
+
+        kpis = HabitKPIs(
+            total_completions=3,
+            current_streak=1,
+            longest_streak=2,
+            longest_streak_end_date=None,
+            thirty_day_completion_rate=0.5,
+            overall_completion_rate=0.25,
+            last_completed_date=None,
+            weekday_completion_rates=[0.0] * 7,
+        )
+        entry = HabitKPIsEntry(habit_id=7, kpis=kpis)
+        assert entry.kpis.total_completions == 3
+
+    def test_lists_default_to_empty_items(self):
+        from habit_tracker.models import HabitKPIsList, HabitTrackersLiteList
+
+        assert HabitTrackersLiteList(total=0, limit=100, offset=0).items == []
+        assert HabitKPIsList(total=0, limit=100, offset=0).items == []

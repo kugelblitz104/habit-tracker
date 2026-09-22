@@ -84,3 +84,32 @@ class TrackerLiteList(BaseModel):
     )
     limit: int = 1000
     offset: int = 0
+
+
+class HabitTrackersLite(BaseModel):
+    """One habit's slice of a profile-wide lightweight tracker read.
+
+    Carries the same window fields as TrackerLiteList so a caller can treat
+    each entry exactly as it treats the per-habit response.
+    """
+
+    habit_id: int
+    trackers: list[TrackerLite] = []
+    end_date: date
+    days: int
+    has_previous: bool = False
+    auto_skipped_dates: list[date] = Field(default_factory=list)
+
+
+class HabitTrackersLiteList(BaseModel):
+    """Lightweight trackers for a page of a profile's habits.
+
+    Paging is over HABITS, not trackers: each entry holds every tracker in
+    the window for its habit, which is what lets a caller treat an entry as
+    self-contained. `total` is the habit match count.
+    """
+
+    items: list[HabitTrackersLite] = []
+    total: int
+    limit: int
+    offset: int

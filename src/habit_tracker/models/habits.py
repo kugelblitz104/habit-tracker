@@ -171,3 +171,22 @@ class HabitKPIs(BaseModel):
         "indexed by Python date.weekday(): index 0 = Monday ... 6 = Sunday. "
         "The frontend reorders these for display.",
     )
+
+
+class HabitKPIsEntry(BaseModel):
+    """One habit's KPIs in a profile-wide read."""
+
+    habit_id: int
+    kpis: HabitKPIs
+
+
+class HabitKPIsList(BaseModel):
+    """Computed KPIs for a page of a profile's habits.
+
+    Paging is over habits; `total` is the habit match count.
+    """
+
+    items: list[HabitKPIsEntry] = []
+    total: int
+    limit: int
+    offset: int
