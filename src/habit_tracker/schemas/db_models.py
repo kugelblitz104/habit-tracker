@@ -191,6 +191,12 @@ class Habit(Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, index=True
     )
+    # Wall-clock reminder time. `reminder` stays the on/off switch.
+    reminder_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    # Weekday mask, bit 0 = Monday ... bit 6 = Sunday (date.weekday()).
+    reminder_days: Mapped[int] = mapped_column(
+        Integer, default=127, server_default="127", nullable=False
+    )
 
     # Relationships
     profile: Mapped["Profile"] = relationship(

@@ -2053,3 +2053,133 @@ class TestListHabitsKpis:
         )
 
         assert response.status_code == 422
+
+
+class TestHabitReminderSchedule:
+    """reminder_time / reminder_days on create, read and update."""
+
+    PAYLOAD: ClassVar[dict] = {
+        "name": "Stretch",
+        "question": "Did you stretch?",
+        "color": "#00FF00",
+        "frequency": 1,
+        "range": 1,
+    }
+    # Every field that existed before the reminder schedule, as a PUT client
+    # written then would send.
+    PUT_BODY: ClassVar[dict] = {
+        **PAYLOAD,
+        "reminder": True,
+        "archived": False,
+        "sort_order": 0,
+    }
+
+    async def _create(self, client, user, **fields):
+        return await client.post(
+            "/habits/",
+            json={**self.PAYLOAD, "profile_id": user.profiles[0].id, **fields},
+        )
+
+    async def test_defaults_to_no_time_and_every_day(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await self._create(client, user)
+
+        assert response.status_code == 201
+        assert response.json()["reminder_time"] is None
+        assert response.json()["reminder_days"] == 127
+
+    async def test_create_stores_time_and_mask(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        # Mon, Wed, Fri: bits 0, 2, 4.
+        response = await self._create(
+            client, user, reminder=True, reminder_time="08:30", reminder_days=21
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["reminder_time"] == "08:30:00"
+        assert data["reminder_days"] == 21
+        fetched = await client.get(f"/habits/{data['id']}")
+        assert fetched.json()["reminder_time"] == "08:30:00"
+        assert fetched.json()["reminder_days"] == 21
+
+    async def test_create_rejects_out_of_range_masks(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        for mask in (0, 128, -1):
+            response = await self._create(client, user, reminder_days=mask)
+            assert response.status_code == 422, mask
+
+    async def test_patch_sets_and_clears_time(self, client, db_session, login_as):
+        user = UserFactory()
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        set_response = await client.patch(
+            f"/habits/{habit.id}", json={"reminder_time": "21:15", "reminder_days": 96}
+        )
+        assert set_response.status_code == 200
+        assert set_response.json()["reminder_time"] == "21:15:00"
+        assert set_response.json()["reminder_days"] == 96
+
+        clear_response = await client.patch(
+            f"/habits/{habit.id}", json={"reminder_time": None}
+        )
+        assert clear_response.status_code == 200
+        assert clear_response.json()["reminder_time"] is None
+        assert clear_response.json()["reminder_days"] == 96
+
+    async def test_patch_rejects_null_and_out_of_range_masks(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        for mask in (None, 0, 128):
+            response = await client.patch(
+                f"/habits/{habit.id}", json={"reminder_days": mask}
+            )
+            assert response.status_code == 422, mask
+
+    async def test_put_writes_both_fields(self, client, db_session, login_as):
+        user = UserFactory()
+        habit = HabitFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.put(
+            f"/habits/{habit.id}",
+            json={**self.PUT_BODY, "reminder_time": "07:00", "reminder_days": 31},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["reminder_time"] == "07:00:00"
+        assert response.json()["reminder_days"] == 31
+
+    async def test_put_omitting_the_mask_keeps_it(self, client, db_session, login_as):
+        """PUT dumps every field, so an omitted mask arrives as None; it keeps the
+        stored value instead of nulling a NOT NULL column."""
+        user = UserFactory()
+        habit = HabitFactory(user=user, reminder_days=21)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.put(f"/habits/{habit.id}", json=self.PUT_BODY)
+
+        assert response.status_code == 200
+        assert response.json()["reminder_days"] == 21

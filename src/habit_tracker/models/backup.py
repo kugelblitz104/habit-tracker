@@ -164,6 +164,8 @@ class HabitBackup(_FromORM):
     sort_order: int = 0
     created_date: datetime | None = None
     updated_date: datetime | None = None
+    reminder_time: time | None = None
+    reminder_days: int = 127
 
 
 class TrackerBackup(_FromORM):

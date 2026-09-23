@@ -4,11 +4,12 @@ import base64
 import os
 import sqlite3
 import tempfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy import select
 
 from habit_tracker.constants import TrackerStatus
+from habit_tracker.routers.imports import mask_from_loop, mask_to_loop
 from habit_tracker.schemas.db_models import Habit, Tracker
 from tests.factories import (
     HabitFactory,
@@ -48,7 +49,8 @@ def build_loop_db(habits: list[dict], repetitions: list[dict]) -> bytes:
     """Build a minimal Loop Habit Tracker SQLite database as raw bytes.
 
     habits: dicts with id/name (+ optional archived, color, description,
-    freq_den, freq_num, position, question).
+    freq_den, freq_num, position, question, reminder_hour, reminder_min,
+    reminder_days).
     repetitions: dicts with habit/timestamp/value (+ optional notes).
     """
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -67,7 +69,10 @@ def build_loop_db(habits: list[dict], repetitions: list[dict]) -> bytes:
                 freq_num INTEGER,
                 name TEXT,
                 position INTEGER,
-                question TEXT
+                question TEXT,
+                reminder_hour INTEGER,
+                reminder_min INTEGER,
+                reminder_days INTEGER NOT NULL DEFAULT 127
             )
             """
         )
@@ -85,8 +90,9 @@ def build_loop_db(habits: list[dict], repetitions: list[dict]) -> bytes:
         for h in habits:
             cursor.execute(
                 "INSERT INTO Habits (id, archived, color, description, freq_den,"
-                " freq_num, name, position, question)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " freq_num, name, position, question, reminder_hour, reminder_min,"
+                " reminder_days)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     h["id"],
                     h.get("archived", 0),
@@ -97,6 +103,9 @@ def build_loop_db(habits: list[dict], repetitions: list[dict]) -> bytes:
                     h["name"],
                     h.get("position", 0),
                     h.get("question", ""),
+                    h.get("reminder_hour"),
+                    h.get("reminder_min"),
+                    h.get("reminder_days", 127),
                 ),
             )
         for r in repetitions:
@@ -422,3 +431,135 @@ class TestExportToLoopHabitTracker:
             (date(2023, 11, 5), TrackerStatus.COMPLETED),
             (date(2024, 8, 20), TrackerStatus.SKIPPED),
         ]
+
+
+# Loop's bit order: 0 = Saturday, 1 = Sunday, 2 = Monday ... 6 = Friday.
+# Ours: 0 = Monday ... 6 = Sunday.
+LOOP_BIT_TO_OURS = {0: 5, 1: 6, 2: 0, 3: 1, 4: 2, 5: 3, 6: 4}
+
+
+class TestLoopWeekdayMask:
+    def test_each_single_day_maps_both_ways(self):
+        for loop_bit, our_bit in LOOP_BIT_TO_OURS.items():
+            assert mask_from_loop(1 << loop_bit) == 1 << our_bit
+            assert mask_to_loop(1 << our_bit) == 1 << loop_bit
+
+    def test_every_day_is_every_day(self):
+        assert mask_from_loop(127) == 127
+        assert mask_to_loop(127) == 127
+
+    def test_empty_loop_mask_means_every_day(self):
+        """Loop coerces an empty day set to every day."""
+        assert mask_from_loop(0) == 127
+
+    def test_round_trips_every_mask(self):
+        for mask in range(1, 128):
+            assert mask_from_loop(mask_to_loop(mask)) == mask
+
+
+class TestLoopReminders:
+    async def _import(self, client, db_session, login_as, habit: dict) -> Habit:
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        content = build_loop_db(
+            habits=[{"id": 1, "name": "Read", **habit}], repetitions=[]
+        )
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
+        assert response.status_code == 201
+        return await db_session.get(
+            Habit, response.json()["details"][0]["new_habit_id"]
+        )
+
+    async def test_import_carries_the_reminder(self, client, db_session, login_as):
+        # Loop Mon + Wed = bits 2 and 4.
+        habit = await self._import(
+            client,
+            db_session,
+            login_as,
+            {"reminder_hour": 7, "reminder_min": 45, "reminder_days": 0b10100},
+        )
+
+        assert habit.reminder is True
+        assert habit.reminder_time == time(7, 45)
+        assert habit.reminder_days == 0b101  # Mon + Wed
+
+    async def test_import_without_a_reminder(self, client, db_session, login_as):
+        habit = await self._import(client, db_session, login_as, {})
+
+        assert habit.reminder is False
+        assert habit.reminder_time is None
+        assert habit.reminder_days == 127
+
+    async def test_import_treats_an_out_of_range_hour_as_off(
+        self, client, db_session, login_as
+    ):
+        habit = await self._import(
+            client, db_session, login_as, {"reminder_hour": 25, "reminder_min": 0}
+        )
+
+        assert habit.reminder is False
+        assert habit.reminder_time is None
+
+    async def test_export_writes_the_reminder(self, client, db_session, login_as):
+        user = UserFactory()
+        HabitFactory(
+            user=user, reminder=True, reminder_time=time(21, 5), reminder_days=0b1
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/import/loop-habit-tracker")
+
+        row = read_export_rows(
+            response.json(),
+            "SELECT reminder_hour, reminder_min, reminder_days FROM Habits",
+        )[0]
+        assert (row["reminder_hour"], row["reminder_min"]) == (21, 5)
+        assert row["reminder_days"] == 1 << 2  # Monday, in Loop's order
+
+    async def test_export_writes_null_when_off(self, client, db_session, login_as):
+        """Loop reads a non-null hour as "on", so an off reminder must be NULL,
+        not the midnight-on-no-days 0/0/0 the export used to write."""
+        user = UserFactory()
+        HabitFactory(user=user, reminder=False, reminder_time=time(9, 0))
+        HabitFactory(user=user, reminder=True, reminder_time=None)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get("/import/loop-habit-tracker")
+
+        rows = read_export_rows(
+            response.json(),
+            "SELECT reminder_hour, reminder_min, reminder_days FROM Habits",
+        )
+        assert len(rows) == 2
+        for row in rows:
+            assert row["reminder_hour"] is None
+            assert row["reminder_min"] is None
+            assert row["reminder_days"] == 127
+
+    async def test_reminder_round_trips(self, client, db_session, login_as):
+        user = UserFactory()
+        target = ProfileFactory(user=user)
+        HabitFactory(
+            user=user, reminder=True, reminder_time=time(6, 0), reminder_days=0b1100000
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        exported = await client.get("/import/loop-habit-tracker")
+        imported = await client.post(
+            "/import/loop-habit-tracker",
+            params={"profile_id": target.id},
+            files=upload(base64.b64decode(exported.json()["data"])),
+        )
+        habit = await db_session.get(
+            Habit, imported.json()["details"][0]["new_habit_id"]
+        )
+
+        assert habit.reminder is True
+        assert habit.reminder_time == time(6, 0)
+        assert habit.reminder_days == 0b1100000  # Sat + Sun

@@ -63,6 +63,9 @@ async def create_habit(
     - **frequency**: How many times the habit should be completed within the range
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
+    - **reminder_time**: Optional wall-clock reminder time (HH:MM)
+    - **reminder_days**: Weekday mask for the reminder, bit 0 = Monday ...
+      bit 6 = Sunday, 1-127 (127 = every day)
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
     - **sort_order**: The order in which the habit appears in lists (ascending)
@@ -875,6 +878,10 @@ async def _apply_habit_update(
         habit_data["profile_id"] = await resolve_habit_profile_id(
             db, profile.user_id, habit_data["profile_id"]
         )
+    # PUT dumps every field, so an omitted mask arrives as None; keep the stored
+    # one (PATCH already rejects an explicit null).
+    if habit_data.get("reminder_days") is None:
+        habit_data.pop("reminder_days", None)
     previous_name = db_habit.name
     previous_profile_id = db_habit.profile_id
 
@@ -942,6 +949,9 @@ async def patch_habit(
     - **frequency**: How many times the habit should be completed within the range
     - **range**: The number of days within which the frequency should be met
     - **reminder**: Whether to enable reminders for this habit
+    - **reminder_time**: Optional wall-clock reminder time (HH:MM)
+    - **reminder_days**: Weekday mask for the reminder, bit 0 = Monday ...
+      bit 6 = Sunday, 1-127 (127 = every day)
     - **notes**: Optional additional notes about the habit
     - **archived**: Whether the habit is archived
     - **sort_order**: The order in which the habit appears in lists (ascending)

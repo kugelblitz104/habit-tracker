@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import overload
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -21,6 +21,17 @@ def _validate_positive(v: int | None) -> int | None:
     return v
 
 
+@overload
+def _validate_weekday_mask(v: int) -> int: ...
+@overload
+def _validate_weekday_mask(v: None) -> None: ...
+def _validate_weekday_mask(v: int | None) -> int | None:
+    """A 7-bit weekday mask with at least one day; bit 0 = Monday."""
+    if v is not None and not 1 <= v <= 127:
+        raise ValueError("reminder_days must be a weekday mask between 1 and 127")
+    return v
+
+
 # Habit Schemas
 class HabitBase(BaseModel):
     name: str
@@ -36,6 +47,10 @@ class HabitBase(BaseModel):
     # Required: a habit's profile is always explicit. HabitUpdate declares its
     # own optional profile_id (omitted = keep the habit's current profile).
     profile_id: int
+    # Wall-clock time; `reminder` stays the on/off switch.
+    reminder_time: time | None = None
+    # Weekday mask, bit 0 = Monday ... bit 6 = Sunday.
+    reminder_days: int = 127
 
     @field_validator("color")
     @classmethod
@@ -46,6 +61,11 @@ class HabitBase(BaseModel):
     @classmethod
     def validate_frequency_and_range(cls, v: int) -> int:
         return _validate_positive(v)
+
+    @field_validator("reminder_days")
+    @classmethod
+    def validate_reminder_days(cls, v: int) -> int:
+        return _validate_weekday_mask(v)
 
     @field_validator("name")
     @classmethod
@@ -80,6 +100,8 @@ class HabitUpdate(BaseModel):
     category: str | None = None
     profile_id: int | None = None
     updated_date: datetime = Field(default_factory=datetime.now)
+    reminder_time: time | None = None
+    reminder_days: int | None = None
 
     @field_validator(
         "profile_id",
@@ -91,10 +113,12 @@ class HabitUpdate(BaseModel):
         "reminder",
         "archived",
         "sort_order",
+        "reminder_days",
     )
     @classmethod
     def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
-        # (notes and category ARE nullable, so an explicit null clears them.)
+        # (notes, category and reminder_time ARE nullable, so an explicit null
+        # clears them.)
         return reject_null(v, info)
 
     @field_validator("name")
@@ -111,6 +135,11 @@ class HabitUpdate(BaseModel):
     @classmethod
     def validate_frequency_and_range(cls, v: int | None) -> int | None:
         return _validate_positive(v)
+
+    @field_validator("reminder_days")
+    @classmethod
+    def validate_reminder_days(cls, v: int | None) -> int | None:
+        return _validate_weekday_mask(v)
 
 
 class HabitList(BaseModel):

@@ -969,3 +969,55 @@ class TestReconciliationSettingsBackup:
 
         assert restored.status_code == 201
         assert new_profile.reconciliation_stale_task_days is None
+
+
+class TestHabitReminderBackup:
+    async def test_reminder_schedule_round_trips(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        HabitFactory(
+            profile=profile, reminder=True, reminder_time=time(6, 45), reminder_days=65
+        )
+        await db_session.commit()
+        await login_as(user)
+
+        document = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        assert document["habits"][0]["reminder_time"] == "06:45:00"
+        assert document["habits"][0]["reminder_days"] == 65
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_habit = (
+            await db_session.execute(
+                select(Habit).where(Habit.profile_id == restored.json()["profile_id"])
+            )
+        ).scalar_one()
+
+        assert new_habit.reminder_time == time(6, 45)
+        assert new_habit.reminder_days == 65
+
+    async def test_a_document_without_the_schedule_still_imports(
+        self, client, db_session, login_as
+    ):
+        """Both fields are defaulted, which is why BACKUP_VERSION is unchanged."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        HabitFactory(profile=profile, reminder_time=time(6, 45), reminder_days=65)
+        await db_session.commit()
+        await login_as(user)
+
+        document = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        document["habits"][0].pop("reminder_time")
+        document["habits"][0].pop("reminder_days")
+
+        restored = await client.post("/backup/profiles", json=document)
+        assert restored.status_code == 201
+        new_habit = (
+            await db_session.execute(
+                select(Habit).where(Habit.profile_id == restored.json()["profile_id"])
+            )
+        ).scalar_one()
+
+        assert new_habit.reminder_time is None
+        assert new_habit.reminder_days == 127

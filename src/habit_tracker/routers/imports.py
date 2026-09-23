@@ -5,7 +5,7 @@ import sqlite3
 import tempfile
 import uuid
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Annotated
 
 from fastapi import (
@@ -93,6 +93,28 @@ def map_repetition_value(value: int) -> TrackerStatus | None:
     if value in (1, 3):
         return TrackerStatus.SKIPPED
     return TrackerStatus.COMPLETED
+
+
+# Loop packs its weekdays Saturday-first (bit 0 = Saturday ... bit 6 = Friday);
+# Habit.reminder_days is Monday-first, so Loop bit i is our bit (i + 5) % 7.
+def mask_from_loop(loop_mask: int) -> int:
+    """Convert a Loop reminder_days mask to Habit.reminder_days."""
+    if not loop_mask & 127:
+        return 127  # Loop treats an empty day set as every day
+    return sum(1 << ((i + 5) % 7) for i in range(7) if loop_mask >> i & 1)
+
+
+def mask_to_loop(mask: int) -> int:
+    """Convert Habit.reminder_days to a Loop reminder_days mask."""
+    return sum(1 << ((j + 2) % 7) for j in range(7) if mask >> j & 1)
+
+
+def loop_reminder_time(hour: int | None, minute: int | None) -> time | None:
+    """Loop's reminder_hour/reminder_min as a time, or None when Loop's reminder
+    is off (a null hour) or the values are out of range."""
+    if hour is None or not 0 <= hour <= 23 or not 0 <= (minute or 0) <= 59:
+        return None
+    return time(hour, minute or 0)
 
 
 @router.post(
@@ -193,8 +215,9 @@ async def import_from_loop_habit_tracker(
         # Read habits from the imported database
         cursor.execute(
             """
-            SELECT id, archived, color, description, freq_den, freq_num, 
-                   name, position, question
+            SELECT id, archived, color, description, freq_den, freq_num,
+                   name, position, question, reminder_hour, reminder_min,
+                   reminder_days
             FROM Habits
             ORDER BY position
         """
@@ -217,6 +240,9 @@ async def import_from_loop_habit_tracker(
                 frequency = habit_row["freq_num"] or 1
                 range_val = habit_row["freq_den"] or 1
                 archived = bool(habit_row["archived"])
+                reminder_time = loop_reminder_time(
+                    habit_row["reminder_hour"], habit_row["reminder_min"]
+                )
 
                 # Create new habit
                 current_max_sort_order += 1
@@ -230,7 +256,13 @@ async def import_from_loop_habit_tracker(
                     color=color,
                     frequency=frequency,
                     range=range_val,
-                    reminder=False,  # Loop Habit Tracker reminders not imported
+                    reminder=reminder_time is not None,
+                    reminder_time=reminder_time,
+                    reminder_days=(
+                        mask_from_loop(habit_row["reminder_days"])
+                        if reminder_time is not None
+                        else 127
+                    ),
                     notes=habit_row["description"],
                     archived=archived,
                     sort_order=current_max_sort_order,
@@ -462,6 +494,9 @@ async def export_to_loop_habit_tracker(
         for position, habit in enumerate(habits):
             # Generate a UUID for the habit
             habit_uuid = str(uuid.uuid4())
+            # Loop reads a non-null hour as "reminder on", so an off reminder,
+            # or one with no time, is written as NULL.
+            reminder_time = habit.reminder_time if habit.reminder else None
 
             # Insert habit into export database
             cursor.execute(
@@ -482,9 +517,9 @@ async def export_to_loop_habit_tracker(
                     0,  # highlight
                     habit.name,
                     position,
-                    0,  # default reminder hour
-                    0,  # default reminder minute
-                    0,  # reminder_days
+                    reminder_time.hour if reminder_time else None,
+                    reminder_time.minute if reminder_time else None,
+                    mask_to_loop(habit.reminder_days) if reminder_time else 127,
                     0,  # type (boolean habit)
                     0,  # target_type
                     0.0,  # target_value
