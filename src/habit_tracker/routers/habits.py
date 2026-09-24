@@ -38,13 +38,22 @@ from habit_tracker.models import (
 from habit_tracker.schemas.db_models import Habit, Profile, Tracker, User
 from habit_tracker.services.habit_stats import (
     auto_skip_lookback_start,
+    auto_skipped_dates,
     calculate_kpis,
     calculate_streaks,
-    is_auto_skipped,
 )
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
+)
+
+# The columns a TrackerLite reads, so the lite reads skip whole ORM rows and
+# never fetch note bodies. has_note: the note holds any non-whitespace character.
+_LITE_COLUMNS = (
+    Tracker.id,
+    Tracker.dated,
+    Tracker.status,
+    func.coalesce(Tracker.note.regexp_match(r"\S"), False).label("has_note"),
 )
 
 
@@ -402,17 +411,15 @@ async def list_habits_trackers_lite(
         Tracker.dated <= end_date,
     )
     window_rows = (
-        (
-            await db.execute(
-                select(Tracker).filter(*in_window).order_by(Tracker.dated.desc())
-            )
+        await db.execute(
+            select(Tracker.habit_id, *_LITE_COLUMNS)
+            .filter(*in_window)
+            .order_by(Tracker.dated.desc())
         )
-        .scalars()
-        .all()
-    )
-    trackers_by_habit: dict[int, list[Tracker]] = {hid: [] for hid in habit_ids}
-    for tracker in window_rows:
-        trackers_by_habit[tracker.habit_id].append(tracker)
+    ).all()
+    trackers_by_habit: dict[int, list[TrackerLite]] = {hid: [] for hid in habit_ids}
+    for row in window_rows:
+        trackers_by_habit[row.habit_id].append(TrackerLite.model_validate(row))
 
     habits_with_older = set(
         (
@@ -428,7 +435,7 @@ async def list_habits_trackers_lite(
 
     # One lookback query for the page, widened to the largest range on it.
     # Pulling extra completions for narrow-range habits is harmless:
-    # is_auto_skipped only ever reads [day - range + 1, day) for its own
+    # auto_skipped_dates only ever reads [day - range + 1, day) for its own
     # habit, so the surplus is never counted.
     widest_range = max(h.range for h in habits)
     lookback_start = auto_skip_lookback_start(start_date, widest_range)
@@ -446,35 +453,20 @@ async def list_habits_trackers_lite(
     for habit_id, dated in completed_rows:
         completed_by_habit[habit_id].add(dated)
 
-    window_days = [
-        start_date + timedelta(days=n) for n in range((end_date - start_date).days + 1)
-    ]
-
     items = [
         HabitTrackersLite(
             habit_id=habit.id,
-            trackers=[
-                TrackerLite(
-                    id=t.id,
-                    dated=t.dated,
-                    status=t.status,
-                    has_note=t.note is not None and t.note.strip() != "",
-                )
-                for t in trackers_by_habit[habit.id]
-            ],
+            trackers=trackers_by_habit[habit.id],
             end_date=end_date,
             days=days,
             has_previous=habit.id in habits_with_older,
-            auto_skipped_dates=[
-                day
-                for day in window_days
-                if is_auto_skipped(
-                    day,
-                    completed_by_habit[habit.id],
-                    habit.frequency,
-                    habit.range,
-                )
-            ],
+            auto_skipped_dates=auto_skipped_dates(
+                start_date,
+                end_date,
+                completed_by_habit[habit.id],
+                habit.frequency,
+                habit.range,
+            ),
         )
         for habit in habits
     ]
@@ -648,7 +640,9 @@ async def list_habit_trackers(
     )
 
 
-@router.get("/{habit_id}/trackers/lite", summary="List trackers in lightweight format")
+@router.get(
+    "/{habit_id}/trackers/lite", summary="List lightweight trackers for one habit"
+)
 async def list_habit_trackers_lite(
     habit_id: int,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -680,7 +674,9 @@ async def list_habit_trackers_lite(
     offset: int = Query(default=0, ge=0, description="Number of trackers to skip"),
 ) -> TrackerLiteList:
     """
-    Get tracker entries in a lightweight format with date-based pagination.
+    Get one habit's tracker entries in a lightweight format with date-based
+    pagination. For every habit in a profile in one request, use
+    GET /habits/trackers-lite.
 
     This endpoint returns only the essential fields:
     - id: Tracker ID (for fetching full details if needed)
@@ -724,13 +720,13 @@ async def list_habit_trackers_lite(
 
     # Query trackers within the date range
     result = await db.execute(
-        select(Tracker)
+        select(*_LITE_COLUMNS)
         .filter(*in_window)
         .order_by(Tracker.dated.desc())
         .limit(limit)
         .offset(offset)
     )
-    db_trackers = result.scalars().all()
+    trackers_lite = [TrackerLite.model_validate(row) for row in result.all()]
 
     count_result = await db.execute(
         select(func.count()).select_from(Tracker).filter(*in_window)
@@ -760,33 +756,15 @@ async def list_habit_trackers_lite(
     )
     completed_dates = set(completed_result.scalars().all())
 
-    auto_skipped_dates = [
-        day
-        for day in (
-            start_date + timedelta(days=offset)
-            for offset in range((end_date - start_date).days + 1)
-        )
-        if is_auto_skipped(day, completed_dates, habit.frequency, habit.range)
-    ]
-
-    # Convert to lite format with has_note flag
-    trackers_lite = [
-        TrackerLite(
-            id=t.id,
-            dated=t.dated,
-            status=t.status,
-            has_note=t.note is not None and t.note.strip() != "",
-        )
-        for t in db_trackers
-    ]
-
     return TrackerLiteList(
         trackers=trackers_lite,
         total=total,
         end_date=end_date,
         days=days,
         has_previous=has_previous,
-        auto_skipped_dates=auto_skipped_dates,
+        auto_skipped_dates=auto_skipped_dates(
+            start_date, end_date, completed_dates, habit.frequency, habit.range
+        ),
         limit=limit,
         offset=offset,
     )

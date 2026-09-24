@@ -50,36 +50,46 @@ def get_effective_start_date(
     return first if first is not None and first < created else created
 
 
-def is_auto_skipped(
-    day: date, completed_dates: set[date], frequency: int, range_: int
-) -> bool:
-    """Whether ``day`` is auto-skipped for a habit with this frequency/range.
+def auto_skipped_dates(
+    start: date,
+    end: date,
+    completed_dates: set[date],
+    frequency: int,
+    range_: int,
+) -> list[date]:
+    """Every auto-skipped day in ``[start, end]``, oldest first.
 
     Auto-skip means the frequency goal was already met within the range
-    window, so the user does not need to act on ``day`` to keep the streak.
-    The window is ``[day - range + 1, day)`` and counts completions strictly
-    before ``day`` (mirrors ``isAutoSkipped`` in the frontend).
+    window, so the user does not need to act on a day to keep the streak.
+    A day's window is ``[day - range + 1, day)`` and counts completions
+    strictly before it (mirrors ``isAutoSkipped`` in the frontend).
 
     Daily habits (``frequency >= range``) are never auto-skipped.
+
+    One pass with a rolling count, O(days + range): ``range`` is unbounded,
+    so rescanning each day's window is O(days x range).
     """
     if frequency >= range_:
-        return False
+        return []
 
-    window_start = day - timedelta(days=range_ - 1)
-    completions = 0
-    cursor = window_start
-    while cursor < day:
-        if cursor in completed_dates:
-            completions += 1
-        cursor += timedelta(days=1)
-    return completions >= frequency
+    count = sum(start - timedelta(days=n) in completed_dates for n in range(1, range_))
+    skipped: list[date] = []
+    day = start
+    while day <= end:
+        if count >= frequency:
+            skipped.append(day)
+        # Slide to day + 1: ``day`` enters the window, ``day - range + 1`` leaves.
+        count += day in completed_dates
+        count -= day - timedelta(days=range_ - 1) in completed_dates
+        day += timedelta(days=1)
+    return skipped
 
 
 def auto_skip_lookback_start(start_date: date, range_: int) -> date:
     """Earliest date whose completions can affect auto-skip within a range
     starting at ``start_date``.
 
-    ``is_auto_skipped`` looks back over ``[day - range + 1, day)`` for a given
+    ``auto_skipped_dates`` looks back over ``[day - range + 1, day)`` for a given
     day, so the oldest day in a rendered range needs completions from up to
     ``range - 1`` days before ``start_date``.
     """
@@ -111,17 +121,17 @@ def calculate_streaks(
         for t in trackers
         if t.status == TrackerStatus.SKIPPED and t.dated is not None
     }
+    continuing = (
+        completed_dates
+        | skipped_dates
+        | set(auto_skipped_dates(start, today, completed_dates, frequency, range_))
+    )
 
     streaks: list[HabitStreak] = []
     current: dict | None = None
     day = start
     while day <= today:
-        if day in completed_dates or day in skipped_dates:
-            continues = True
-        else:
-            continues = is_auto_skipped(day, completed_dates, frequency, range_)
-
-        if continues:
+        if day in continuing:
             if current is None:
                 current = {"start": day, "end": day, "length": 1}
             else:

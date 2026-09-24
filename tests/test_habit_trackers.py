@@ -413,6 +413,12 @@ class TestListHabitTrackersLite:
         TrackerFactory(habit=habit, dated=date.today(), note="Has a note")
         TrackerFactory(habit=habit, dated=date.today() - timedelta(days=1), note="")
         TrackerFactory(habit=habit, dated=date.today() - timedelta(days=2), note=None)
+        TrackerFactory(
+            habit=habit, dated=date.today() - timedelta(days=3), note=" \t\r\n "
+        )
+        TrackerFactory(
+            habit=habit, dated=date.today() - timedelta(days=4), note="\n x "
+        )
         await db_session.commit()
 
         await login_as(user)
@@ -421,11 +427,8 @@ class TestListHabitTrackersLite:
         assert response.status_code == 200
         data = response.json()
         trackers = data["trackers"]
-        assert len(trackers) == 3
         # Ordered by date descending
-        assert trackers[0]["has_note"] is True  # today - has note
-        assert trackers[1]["has_note"] is False  # yesterday - empty string
-        assert trackers[2]["has_note"] is False  # 2 days ago - None
+        assert [t["has_note"] for t in trackers] == [True, False, False, False, True]
 
     async def test_list_trackers_lite_large_days_value(
         self, client, db_session, login_as

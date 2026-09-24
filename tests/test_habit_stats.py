@@ -6,7 +6,8 @@ arithmetic can be pinned down exactly.
 
 import json
 import os
-from datetime import date, datetime
+import time
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ import pytest
 from habit_tracker.constants import TrackerStatus
 from habit_tracker.schemas.db_models import Habit, Tracker
 from habit_tracker.services.habit_stats import (
+    auto_skipped_dates,
     calculate_kpis,
     calculate_streaks,
     get_effective_start_date,
@@ -110,6 +112,67 @@ def test_daily_habit_weekday_rates_are_plain_completion_share():
 
     assert rates[MON] == 0.5  # 2 of 4 Mondays
     assert rates[TUE] == 0.0
+
+
+def _auto_skipped_brute_force(
+    start: date, end: date, completed: set[date], frequency: int, range_: int
+) -> list[date]:
+    """Reference oracle: rescan ``[day - range + 1, day)`` for every day."""
+    if frequency >= range_:
+        return []
+    out = []
+    for n in range((end - start).days + 1):
+        day = start + timedelta(days=n)
+        window = (day - timedelta(days=k) for k in range(1, range_))
+        if sum(d in completed for d in window) >= frequency:
+            out.append(day)
+    return out
+
+
+@pytest.mark.parametrize(
+    ("frequency", "range_"),
+    [(1, 1), (2, 2), (3, 2), (1, 2), (1, 7), (2, 7), (3, 5), (6, 7), (1, 30)],
+)
+@pytest.mark.parametrize("step", [1, 2, 3, 5, 9])
+def test_auto_skipped_dates_matches_per_day_rescan(frequency, range_, step):
+    """The rolling count must agree with rescanning each day's window, including
+    completions before ``start`` (the lookback) and at both window edges."""
+    start, end = date(2026, 3, 1), date(2026, 5, 31)
+    completed = {
+        start - timedelta(days=40) + timedelta(days=n) for n in range(0, 140, step)
+    }
+
+    assert auto_skipped_dates(
+        start, end, completed, frequency, range_
+    ) == _auto_skipped_brute_force(start, end, completed, frequency, range_)
+
+
+def test_auto_skipped_dates_counts_strictly_before_the_day():
+    """A completion on the day itself never auto-skips that day; one the day
+    before does, and it stops counting once it falls out of the range."""
+    done = date(2026, 3, 10)
+
+    assert auto_skipped_dates(date(2026, 3, 8), date(2026, 3, 18), {done}, 1, 7) == [
+        date(2026, 3, 11) + timedelta(days=n) for n in range(6)
+    ]
+
+
+def test_auto_skipped_dates_empty_window():
+    assert auto_skipped_dates(date(2026, 3, 2), date(2026, 3, 1), set(), 1, 7) == []
+
+
+def test_auto_skipped_dates_is_linear_in_range():
+    """``range`` has no upper bound, so a once-a-year habit over the ten-year
+    maximum window must not cost days x range. The per-day rescan takes
+    seconds per call here; the linear sweep takes milliseconds."""
+    end = date(2026, 9, 24)
+    start = end - timedelta(days=3659)
+    completed = {start + timedelta(days=n) for n in range(0, 3660, 400)}
+
+    began = time.perf_counter()
+    for _ in range(20):
+        auto_skipped_dates(start, end, completed, 1, 365)
+    assert time.perf_counter() - began < 2.0
 
 
 # --------------------------------------------------------------------------- #
