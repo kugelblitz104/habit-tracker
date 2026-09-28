@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import ClassVar
 from zoneinfo import ZoneInfo
 
+import pytest
 from sqlalchemy import select
 
 from habit_tracker.constants import TrackerStatus
@@ -1929,6 +1930,26 @@ class TestListHabitsTrackersLite:
         )
 
         assert response.status_code == 403
+
+    @pytest.mark.parametrize("end_date", [None, "2026-09-21"])
+    async def test_invalid_tz_is_rejected_even_with_an_explicit_end_date(
+        self, client, db_session, login_as, end_date
+    ):
+        """Same deliberate choice as the per-habit endpoint: a bad zone is a
+        422 whether or not end_date makes it unused."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        HabitFactory(profile=profile)
+        await db_session.commit()
+        await login_as(user)
+
+        params = {"profile_id": profile.id, "tz": "Not/AZone"}
+        if end_date is not None:
+            params["end_date"] = end_date
+        response = await client.get("/habits/trackers-lite", params=params)
+
+        assert response.status_code == 422
+        assert "Invalid timezone" in response.json()["detail"]
 
 
 class TestListHabitsKpis:

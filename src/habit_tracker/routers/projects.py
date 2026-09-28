@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TaskStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -291,7 +291,7 @@ async def patch_project(
             exclude_id=project_id,
         )
 
-    db_project.updated_date = datetime.now()  # server-stamped, never client-set
+    db_project.updated_date = utc_now()  # server-stamped, never client-set
     try:
         await db.commit()
     except IntegrityError:

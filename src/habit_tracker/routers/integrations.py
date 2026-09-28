@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TaskStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.crypto import decrypt_secret, encrypt_secret
 from habit_tracker.core.dependencies import (
     get_current_user,
@@ -144,7 +144,7 @@ async def patch_integration_connection(
 
     for key, value in update_data.items():
         setattr(db_connection, key, value)
-    db_connection.updated_date = datetime.now()
+    db_connection.updated_date = utc_now()
     try:
         await db.commit()
     except IntegrityError:
@@ -245,7 +245,7 @@ async def sync_integration_connection(
             # failure is recorded per-item and the loop continues.
             errors.append(f"{item.external_ref}: {exc}")
 
-    connection.last_synced_at = datetime.now()
+    connection.last_synced_at = utc_now()
     connection.last_error = None
     await db.commit()
 
@@ -301,7 +301,7 @@ async def publish_task(
     task.source = connection.provider
     task.external_ref = item.external_ref
     task.external_url = item.external_url
-    task.updated_date = datetime.now()
+    task.updated_date = utc_now()
     await db.commit()
 
     return PublishResult(

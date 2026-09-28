@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
@@ -186,7 +187,7 @@ async def update_tracker(
     tracker_data = tracker_update.model_dump()
     for key, value in tracker_data.items():
         setattr(db_tracker, key, value)
-    db_tracker.updated_date = datetime.now()  # server-stamped, never client-set
+    db_tracker.updated_date = utc_now()  # server-stamped, never client-set
     await db.commit()
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)
@@ -217,7 +218,7 @@ async def patch_tracker(
     tracker_data = tracker_update.model_dump(exclude_unset=True)
     for key, value in tracker_data.items():
         setattr(db_tracker, key, value)
-    db_tracker.updated_date = datetime.now()  # server-stamped, never client-set
+    db_tracker.updated_date = utc_now()  # server-stamped, never client-set
     await db.commit()
     await db.refresh(db_tracker)
     return TrackerRead.model_validate(db_tracker)

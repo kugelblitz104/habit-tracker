@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TrackerStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -572,7 +573,7 @@ async def export_to_loop_habit_tracker(
         conn = None
 
         # Generate filename with timestamp
-        export_filename = f"habits_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        export_filename = f"habits_export_{utc_now().strftime('%Y%m%d_%H%M%S')}.db"
 
         # Read the file and encode as base64 for JSON transport. Blocking
         # open() (ASYNC230): this reads back the small SQLite export file

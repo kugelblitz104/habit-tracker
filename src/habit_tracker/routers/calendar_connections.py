@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -283,7 +284,7 @@ async def patch_calendar_connection(
 
     for key, value in connection_data.items():
         setattr(db_connection, key, value)
-    db_connection.updated_date = datetime.now()  # server-stamped, never client-set
+    db_connection.updated_date = utc_now()  # server-stamped, never client-set
     try:
         await db.commit()
     except IntegrityError:

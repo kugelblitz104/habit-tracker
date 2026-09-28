@@ -3,6 +3,7 @@ from typing import overload
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.models._base import _StampedRead
 from habit_tracker.models._validators import (
     non_blank_string,
@@ -99,7 +100,7 @@ class HabitUpdate(BaseModel):
     sort_order: int | None = None
     category: str | None = None
     profile_id: int | None = None
-    updated_date: datetime = Field(default_factory=datetime.now)
+    updated_date: datetime = Field(default_factory=utc_now)
     reminder_time: time | None = None
     reminder_days: int | None = None
 
@@ -179,7 +180,7 @@ class HabitKPIs(BaseModel):
         ..., description="Length of the longest streak on record"
     )
     longest_streak_end_date: date | None = Field(
-        None,
+        default=None,
         description="End date of the longest streak (for a 'days · Mon' sublabel); "
         "None if there is no streak",
     )
@@ -192,7 +193,7 @@ class HabitKPIs(BaseModel):
         description="Completion rate (0.0-1.0) since the habit's effective start date",
     )
     last_completed_date: date | None = Field(
-        None, description="Date of the most recent completion, or None"
+        default=None, description="Date of the most recent completion, or None"
     )
     weekday_completion_rates: list[float] = Field(
         ...,

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -7,6 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -140,7 +140,7 @@ async def patch_countdown_category(
     data = category_update.model_dump(exclude_unset=True)
     for key, value in data.items():
         setattr(db_category, key, value)
-    db_category.updated_date = datetime.now()  # server-stamped, never client-set
+    db_category.updated_date = utc_now()  # server-stamped, never client-set
 
     try:
         await db.commit()

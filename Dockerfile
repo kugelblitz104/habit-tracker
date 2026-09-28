@@ -27,4 +27,9 @@ COPY ./src /code/src
 COPY ./alembic.ini /code/alembic.ini
 COPY ./alembic /code/alembic
 
+# urlopen raises on a non-2xx, so a 503 from /health fails the check. Railway
+# ignores HEALTHCHECK and probes railway.toml's healthcheckPath instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=4)"
+
 CMD uv run alembic upgrade head && uv run uvicorn src.habit_tracker.main:app --host 0.0.0.0 --port 8080

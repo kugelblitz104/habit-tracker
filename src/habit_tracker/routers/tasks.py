@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import CLOSED_STATUSES, TaskStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
@@ -347,7 +348,7 @@ async def create_task(
         db, Task, profile_id=task.profile_id, source=task.title
     )
     if db_task.status in CLOSED_STATUSES:
-        db_task.closed_date = datetime.now()
+        db_task.closed_date = utc_now()
     # Scheduled data only lives on SCHEDULED tasks; any other status forces the
     # scheduled fields null (prevents orphaned scheduled data)
     if db_task.status != TaskStatus.SCHEDULED:
@@ -651,7 +652,7 @@ async def patch_task(
             if supplied_closed_date:
                 db_task.closed_date = task_data["closed_date"]
             elif not was_closed:
-                db_task.closed_date = datetime.now()
+                db_task.closed_date = utc_now()
         else:
             db_task.closed_date = None
     elif supplied_closed_date:
@@ -688,7 +689,7 @@ async def patch_task(
         db_task.scheduled_date = None
         db_task.scheduled_time = None
 
-    db_task.updated_date = datetime.now()  # server-stamped, never client-set
+    db_task.updated_date = utc_now()  # server-stamped, never client-set
     try:
         await db.commit()
     except IntegrityError:

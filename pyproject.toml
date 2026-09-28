@@ -58,7 +58,9 @@ ignore = [
     # format and break the client. Timezone handling is done explicitly
     # where it matters, via core/dependencies.py's `resolve_timezone` /
     # `resolve_today` and the `tz` query param - not by making every stored
-    # timestamp aware.
+    # timestamp aware. Stored timestamps come from `core/clock.utc_now()`,
+    # the one server clock read, and tests/test_clock.py fails on any bare
+    # `datetime.now()` elsewhere in src/.
     "DTZ011",
     "DTZ005",
     "DTZ001",

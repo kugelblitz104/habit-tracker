@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -187,7 +187,7 @@ async def patch_countdown(
         if not archived:
             data["archived_date"] = None
         elif db_countdown.archived_date is None:
-            data["archived_date"] = datetime.now()
+            data["archived_date"] = utc_now()
 
     new_profile_id = data.get("profile_id")
     if new_profile_id is not None and new_profile_id != db_countdown.profile_id:
@@ -237,7 +237,7 @@ async def patch_countdown(
 
         for key, value in data.items():
             setattr(db_countdown, key, value)
-        db_countdown.updated_date = datetime.now()  # server-stamped, never client-set
+        db_countdown.updated_date = utc_now()  # server-stamped, never client-set
         await db.commit()
     except IntegrityError:
         await db.rollback()

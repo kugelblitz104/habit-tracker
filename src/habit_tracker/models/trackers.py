@@ -4,6 +4,7 @@ from typing import overload
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from habit_tracker.constants import TrackerStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.models._base import _FromORM, _StampedRead
 from habit_tracker.models._validators import reject_null, validate_membership
 
@@ -49,7 +50,7 @@ class TrackerUpdate(BaseModel):
     dated: date | None = None
     status: int | None = None  # 0=not completed, 1=skipped, 2=completed
     note: str | None = None
-    updated_date: datetime = Field(default_factory=datetime.now)
+    updated_date: datetime = Field(default_factory=utc_now)
 
     @field_validator("dated", "status")
     @classmethod

@@ -904,6 +904,31 @@ class TestTimeEntryProjectAndLabel:
         assert body["task_id"] is None
         assert body["label"] == "Roadmap planning"
 
+    async def test_aware_timestamps_are_stored_as_utc(
+        self, client, db_session, login_as
+    ):
+        """An offset-carrying value is converted to UTC, not to the host's zone.
+        Only meaningful on a non-UTC host, which the dev machine is."""
+        user = UserFactory()
+        profile = user.profiles[0]
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/time-entries/",
+            json={
+                "profile_id": profile.id,
+                "label": "Standup",
+                "started_at": "2026-09-28T09:00:00-04:00",
+                "ended_at": "2026-09-28T09:15:00-04:00",
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert body["started_at"] == "2026-09-28T13:00:00"
+        assert body["ended_at"] == "2026-09-28T13:15:00"
+        assert body["duration_seconds"] == 900
+
     async def test_task_wins_over_project(self, client, db_session, login_as):
         """When both are supplied, the task attaches and project is dropped."""
         user = UserFactory()

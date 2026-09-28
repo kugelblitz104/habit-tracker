@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -180,7 +181,7 @@ async def upsert_journal_entry(
         existing.body = entry.body
         existing.gratitude = entry.gratitude
         existing.day_quality = entry.day_quality
-        existing.updated_date = datetime.now()
+        existing.updated_date = utc_now()
         row = existing
 
     try:
@@ -196,7 +197,7 @@ async def upsert_journal_entry(
         row.body = entry.body
         row.gratitude = entry.gratitude
         row.day_quality = entry.day_quality
-        row.updated_date = datetime.now()
+        row.updated_date = utc_now()
         response.status_code = status.HTTP_200_OK
         await db.commit()
 

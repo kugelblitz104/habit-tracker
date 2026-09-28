@@ -1,10 +1,15 @@
 import logging
 import os
+from typing import Annotated
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.cors import CORSMiddleware
 
+from habit_tracker.core.dependencies import get_db
 from habit_tracker.routers import (
     auth,
     backup,
@@ -64,3 +69,18 @@ app.include_router(countdown_categories.router)
 app.include_router(countdowns.router)
 app.include_router(backup.router)
 app.include_router(journal.router)
+
+
+# Kept out of /openapi.json: the front-end generates its client from the schema,
+# and a readiness probe is for the orchestrator, not the client.
+@app.get("/health", include_in_schema=False)
+async def health(db: Annotated[AsyncSession, Depends(get_db)]) -> dict[str, str]:
+    try:
+        await db.execute(text("SELECT 1"))
+    except SQLAlchemyError as e:
+        logger.warning(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from e
+    return {"status": "ok"}

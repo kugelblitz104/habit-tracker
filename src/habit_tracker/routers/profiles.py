@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     authorize_resource_access,
     get_current_user,
@@ -164,7 +164,7 @@ async def patch_profile(
     profile_data = profile_update.model_dump(exclude_unset=True)
     for key, value in profile_data.items():
         setattr(db_profile, key, value)
-    db_profile.updated_date = datetime.now()  # server-stamped, never client-set
+    db_profile.updated_date = utc_now()  # server-stamped, never client-set
     try:
         await db.commit()
     except IntegrityError as exc:

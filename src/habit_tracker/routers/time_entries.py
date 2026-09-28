@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from habit_tracker.constants import TimeEntryKind
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
@@ -57,15 +58,15 @@ def _join_task_parent(stmt: Select[Any]) -> Select[Any]:
 
 
 def _naive(dt: datetime | None) -> datetime | None:
-    """Coerce a datetime to naive server-local time.
+    """Coerce a datetime to naive UTC.
 
-    Every timestamp in this app is stored naive (like ``datetime.now()``), so
-    a client that sends a timezone-aware value is converted to the server's
-    local zone and stripped - keeps ended_at/started_at arithmetic from
-    raising on aware-vs-naive subtraction.
+    Every timestamp in this app is stored naive UTC (see ``core.clock.utc_now``),
+    so a client that sends a timezone-aware value is converted to UTC and
+    stripped - keeps ended_at/started_at arithmetic from raising on
+    aware-vs-naive subtraction.
     """
     if dt is not None and dt.tzinfo is not None:
-        dt = dt.astimezone().replace(tzinfo=None)
+        dt = dt.astimezone(UTC).replace(tzinfo=None)
     return dt
 
 
@@ -328,7 +329,7 @@ async def create_time_entry(
         db, entry.profile_id, entry.task_id, entry.project_id
     )
 
-    started = _naive(entry.started_at) or datetime.now()
+    started = _naive(entry.started_at) or utc_now()
     ended = _naive(entry.ended_at)
 
     if ended is not None:
@@ -477,7 +478,7 @@ async def stop_time_entry(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Time entry is already stopped",
         )
-    now = datetime.now()
+    now = utc_now()
     entry.ended_at = now
     # Clamp against clock skew so a stop can never record negative time
     entry.duration_seconds = max(0, int((now - entry.started_at).total_seconds()))
@@ -580,7 +581,7 @@ async def patch_time_entry(
             )
         entry.duration_seconds = None
 
-    entry.updated_date = datetime.now()  # server-stamped, never client-set
+    entry.updated_date = utc_now()  # server-stamped, never client-set
     try:
         await db.commit()
     except IntegrityError:

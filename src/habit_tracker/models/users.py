@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.models._base import _StampedRead
 from habit_tracker.models._validators import non_blank_string
 
@@ -33,7 +34,7 @@ class UserUpdate(BaseModel):
     last_name: str | None = None
     email: EmailStr | None = None
     plaintext_password: str | None = None
-    updated_date: datetime = Field(default_factory=datetime.now)
+    updated_date: datetime = Field(default_factory=utc_now)
 
 
 class UserList(BaseModel):

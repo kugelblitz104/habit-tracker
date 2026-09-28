@@ -19,6 +19,7 @@ import httpx
 import icalendar
 import recurring_ical_events
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.models.calendar_connections import CalendarEventRead
 from habit_tracker.schemas.db_models import CalendarConnection
 
@@ -195,7 +196,7 @@ async def refresh_connection(
     Mutates the connection's cache columns in place (caller commits).
     Returns a human-readable error string when the fetch failed, else None.
     """
-    now = datetime.now()
+    now = utc_now()
     if cache_is_fresh(connection, now):
         return None
 

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -6,6 +5,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
 from habit_tracker.core.email import send_password_reset_email
@@ -217,7 +217,7 @@ async def reset_password(
         )
 
     user.password_hash = get_password_hash(request.new_password)
-    user.updated_date = datetime.now()
+    user.updated_date = utc_now()
     await db.commit()
 
     return {"message": "Your password has been reset. You can now sign in."}

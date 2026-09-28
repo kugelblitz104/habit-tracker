@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import TrackerStatus
+from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
@@ -880,7 +881,7 @@ async def _apply_habit_update(
             exclude_id=db_habit.id,
         )
 
-    db_habit.updated_date = datetime.now()  # server-stamped, never client-set
+    db_habit.updated_date = utc_now()  # server-stamped, never client-set
 
 
 @router.put("/{habit_id}", summary="Replace a habit (full update)")

@@ -15,6 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from habit_tracker.constants import TaskStatus, TimeEntryKind, TrackerStatus
+from habit_tracker.core.clock import utc_now
 
 
 class Base(DeclarativeBase):
@@ -34,7 +35,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -117,7 +118,7 @@ class Profile(Base):
         Integer, nullable=True
     )
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -184,7 +185,7 @@ class Habit(Base):
     reminder: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -224,7 +225,7 @@ class Project(Base):
     notes: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -265,7 +266,7 @@ class CalendarConnection(Base):
     etag: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -313,7 +314,7 @@ class IntegrationConnection(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -383,7 +384,7 @@ class Task(Base):
     estimated_effort: Mapped[int | None] = mapped_column(Integer, nullable=True)
     closed_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Manual display order among siblings (ascending). Used for drag-to-reorder
@@ -468,7 +469,7 @@ class TimeEntry(Base):
     # recent entries in the UI.
     label: Mapped[str | None] = mapped_column(String, default=None, nullable=True)
     started_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     # Null while the timer is running; set when stopped.
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -476,7 +477,7 @@ class TimeEntry(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, default=None, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -505,7 +506,7 @@ class Tracker(Base):
     )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -573,7 +574,7 @@ class Countdown(Base):
     # from the default list. NULL means live.
     archived_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -601,7 +602,7 @@ class CountdownCategory(Base):
     # Optional accent for the group; unset renders as the faint default.
     color: Mapped[str | None] = mapped_column(String, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -634,7 +635,7 @@ class JournalEntry(Base):
     # not carry one.
     day_quality: Mapped[str | None] = mapped_column(String, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, nullable=False
+        DateTime, default=utc_now, nullable=False
     )
     updated_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
