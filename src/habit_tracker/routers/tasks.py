@@ -246,6 +246,8 @@ async def list_tasks(
     if created_to is not None:
         query = query.filter(Task.created_date < created_to)
 
+    total = await db.scalar(select(func.count()).select_from(query.subquery()))
+
     if closed_only:
         query = query.order_by(Task.closed_date.desc(), Task.id)
     else:
@@ -261,7 +263,7 @@ async def list_tasks(
             Task.id,
         )
 
-    result = await db.execute(query)
+    result = await db.execute(query.limit(limit).offset(offset))
     db_tasks = result.scalars().all()
 
     # One aggregate query for the whole profile's subtask counts (no N+1).
@@ -276,12 +278,9 @@ async def list_tasks(
 
     tasks_read = [_task_to_read(t, subtask_counts) for t in db_tasks]
 
-    total = len(tasks_read)
-    tasks_read = tasks_read[offset : offset + limit]
-
     return TaskList(
         tasks=tasks_read,
-        total=total,
+        total=total or 0,
         limit=limit,
         offset=offset,
     )
