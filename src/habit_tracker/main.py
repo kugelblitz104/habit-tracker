@@ -16,6 +16,9 @@ from habit_tracker.routers import (
     calendar_connections,
     countdown_categories,
     countdowns,
+    habit_detail,
+    habit_profile_reads,
+    habit_reads,
     habits,
     imports,
     integrations,
@@ -59,7 +62,12 @@ app.include_router(profiles.router)
 app.include_router(projects.router)
 app.include_router(tasks.router)
 app.include_router(time_entries.router)
+# Route precedence and OpenAPI path order both follow include order: the static
+# /habits paths must be registered before /habits/{habit_id}.
 app.include_router(habits.router)
+app.include_router(habit_profile_reads.router)
+app.include_router(habit_detail.router)
+app.include_router(habit_reads.router)
 app.include_router(trackers.router)
 app.include_router(auth.router)
 app.include_router(imports.router)

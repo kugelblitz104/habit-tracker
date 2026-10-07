@@ -433,7 +433,7 @@ class TestHabitSlugs:
 
     The slugify/numbering rules themselves are pinned DB-free in test_slugs.py;
     this class covers the habits router's own wiring - including that PUT and
-    PATCH both re-slug, since they share `_apply_habit_update`.
+    PATCH both re-slug, since they share `apply_habit_update`.
     """
 
     # A COMPLETE body: PUT is a full replace, so an omitted optional field is
@@ -485,7 +485,7 @@ class TestHabitSlugs:
         self, client, db_session, login_as
     ):
         """Including today's completed/skipped flags - both routes go through
-        the same `_habit_to_read`."""
+        the same `habit_to_read`."""
         user = UserFactory()
         await db_session.commit()
         profile = ProfileFactory(user=user, name="Personal")
