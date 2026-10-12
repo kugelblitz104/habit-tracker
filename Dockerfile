@@ -26,8 +26,11 @@ WORKDIR /code
 # locked versions (reproducible builds) instead of re-resolving at build time.
 COPY ./pyproject.toml ./uv.lock /code/
 
-RUN uv sync --frozen --no-dev
+# Dependencies first (cached layer), then the project itself once src/ exists:
+# an editable install built before src/ is copied maps no packages.
+RUN uv sync --frozen --no-dev --no-install-project
 COPY ./src /code/src
+RUN uv sync --frozen --no-dev
 
 COPY ./alembic.ini /code/alembic.ini
 COPY ./alembic /code/alembic
