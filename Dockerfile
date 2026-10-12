@@ -15,13 +15,18 @@ USER root
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV UV_SYSTEM_CERTS=true
 
+# glibc otherwise creates up to 8 malloc arenas per host CPU (not per container
+# limit), and the threadpool behind sync dependencies fragments across them.
+ENV MALLOC_ARENA_MAX=2
+ENV PATH="/code/.venv/bin:$PATH"
+
 WORKDIR /code
 
 # uv.lock is copied alongside pyproject so `uv sync --frozen` installs the exact
 # locked versions (reproducible builds) instead of re-resolving at build time.
 COPY ./pyproject.toml ./uv.lock /code/
 
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 COPY ./src /code/src
 
 COPY ./alembic.ini /code/alembic.ini
@@ -32,4 +37,6 @@ COPY ./alembic /code/alembic
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=4)"
 
-CMD uv run alembic upgrade head && uv run uvicorn src.habit_tracker.main:app --host 0.0.0.0 --port 8080
+# Venv binaries directly, not `uv run`, so no uv process stays resident; exec
+# makes uvicorn PID 1 instead of a child of sh.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn src.habit_tracker.main:app --host 0.0.0.0 --port 8080"]
