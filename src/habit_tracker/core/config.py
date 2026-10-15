@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
@@ -8,8 +9,9 @@ class Settings(BaseSettings):
     database_url: str = ""
     sqlalchemy_echo: bool = False
 
-    # for local development only
-    secret_key: str = "secretsecretsecret"
+    # JWT signing key. Required: there is no default, so a missing or blank
+    # SECRET_KEY in environment fails at startup.
+    secret_key: str = Field(min_length=1)
 
     # cors_origins lived here but was never read; main.py reads CORS_ORIGINS
     # from the environment directly via os.getenv(). Don't re-add it here.
@@ -39,6 +41,16 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "Habit Tracker <noreply@localhost>"
 
+    # When false, /auth/register returns 403 unless the user table is empty
+    # (so a fresh instance can still create its first account).
+    registration_enabled: bool = True
+
+    # Header holding the client IP, for a proxy that sets it on every request
+    # and overwrites any client-sent copy (Railway: X-Real-IP). Blank uses the
+    # socket peer, which uvicorn rewrites from X-Forwarded-For per
+    # FORWARDED_ALLOW_IPS.
+    client_ip_header: str = ""
+
     # Frontend page the reset link points at; the emailed URL is
     # f"{reset_url_base}?token=...". Set to the deployed frontend in prod.
     reset_url_base: str = "http://localhost:3000/reset-password"
@@ -51,4 +63,4 @@ class Settings(BaseSettings):
     integration_encryption_key: str = ""
 
 
-settings = Settings()
+settings = Settings()  # pyright: ignore[reportCallIssue]  # fields come from the environment

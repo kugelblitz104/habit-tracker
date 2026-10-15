@@ -81,12 +81,16 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 | Variable | Default | Purpose |
 |---|---|---|
 | `DATABASE_URL` | — | PostgreSQL connection string (asyncpg driver) |
-| `SECRET_KEY` | dev placeholder | JWT signing key |
+| `SECRET_KEY` | required | JWT signing key. The API refuses to start without it |
 | `ALGORITHM` | `HS256` | JWT algorithm |
 | `ACCESS_TOKEN_EXPIRY_MINUTES` | `30` | Access-token lifetime |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | `7` | Refresh-token lifetime |
 | `RESET_TOKEN_EXPIRY_MINUTES` | `30` | Password-reset link lifetime |
+| Auth rate limits | `src/habit_tracker/core/rate_limits.toml` | Not env vars: requests per window for each auth route, read at startup |
 | `CORS_ORIGINS` | empty | Comma-separated allowed origins. Any localhost port is allowed regardless, for the Vite dev server |
+| `REGISTRATION_ENABLED` | `true` | Set `false` to close `/auth/register` (403). Registration still works while the `user` table is empty, so a fresh instance can create its first account |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` (uvicorn's default) | Peers uvicorn trusts for `X-Forwarded-For`. Auth rate limits key on the client IP, so behind a reverse proxy this must include the proxy or every client shares one limit. Only use `*` when the proxy is the sole route to the API; otherwise clients can forge their IP |
+| `CLIENT_IP_HEADER` | empty | Header the auth rate limits read the client IP from, for a proxy that always overwrites it. On Railway set `X-Real-IP`. Never set it when clients can reach the API without that proxy |
 | `SQLALCHEMY_ECHO` | `false` | Log emitted SQL |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | blank / `587` | Password-reset email delivery. With `SMTP_HOST` blank the reset link is logged instead of sent, so the flow works offline |
 | `RESET_URL_BASE` | `http://localhost:3000/reset-password` | Front-end page the emailed reset link points at |

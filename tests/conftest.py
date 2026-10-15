@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.schema import CreateSchema
 
+from habit_tracker.core import rate_limit
 from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
 from habit_tracker.main import app
@@ -78,6 +79,12 @@ def fast_password_hashing():
     pwd_context.update(
         schemes=["md5_crypt", "bcrypt"], default="md5_crypt", deprecated="auto"
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Auth limiter state is process-global; start every test from empty."""
+    rate_limit.reset()
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
