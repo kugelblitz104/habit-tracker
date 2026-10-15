@@ -1,10 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    status,
+)
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from habit_tracker.core import rate_limit
 from habit_tracker.core.clock import utc_now
 from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
@@ -30,8 +38,21 @@ from habit_tracker.schemas.db_models import Profile, User
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
-@router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register",
+    response_model=Token,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit.limit_by_ip("register"))],
+)
 async def register(user_data: UserCreate, db: Annotated[AsyncSession, Depends(get_db)]):
+    if not settings.registration_enabled:
+        any_user = await db.execute(select(User.id).limit(1))
+        if any_user.first() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Registration is disabled on this server",
+            )
+
     # Check if user exists
     preexisting_user_ = await db.execute(
         select(User).filter(User.email == user_data.email)
@@ -83,8 +104,13 @@ async def register(user_data: UserCreate, db: Annotated[AsyncSession, Depends(ge
     }
 
 
-@router.post("/login", response_model=Token)
+@router.post(
+    "/login",
+    dependencies=[Depends(rate_limit.limit_by_ip("login"))],
+    response_model=Token,
+)
 async def login(
+    request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -97,18 +123,29 @@ async def login(
     # The OAuth2 "username" field accepts either the username or the email —
     # both columns are unique, so a single OR lookup resolves the account.
     identifier = form_data.username
+    # Only failed logins count toward this limit: recorded on a wrong password,
+    # cleared on success. Keyed on the IP too, so an attacker who trips it
+    # blocks only their own address, not the account owner.
+    account_key = (
+        f"login-account:{identifier.strip().lower()}:{rate_limit.client_ip(request)}"
+    )
+    wait = rate_limit.retry_after(account_key, rate_limit.LIMITS["login_failures"])
+    if wait:
+        raise rate_limit.too_many(wait)
     user = await db.execute(
         select(User).filter((User.username == identifier) | (User.email == identifier))
     )
     user = user.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.password_hash):
+        rate_limit.record(account_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username/email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    rate_limit.clear(account_key)
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
 
@@ -119,7 +156,11 @@ async def login(
     }
 
 
-@router.post("/refresh", response_model=Token)
+@router.post(
+    "/refresh",
+    dependencies=[Depends(rate_limit.limit_by_ip("refresh"))],
+    response_model=Token,
+)
 async def refresh_token(
     request: RefreshTokenRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ):
@@ -154,7 +195,11 @@ async def refresh_token(
     }
 
 
-@router.post("/forgot-password", response_model=MessageResponse)
+@router.post(
+    "/forgot-password",
+    dependencies=[Depends(rate_limit.limit_by_ip("forgot_password"))],
+    response_model=MessageResponse,
+)
 async def forgot_password(
     request: ForgotPasswordRequest,
     background_tasks: BackgroundTasks,
@@ -182,7 +227,11 @@ async def forgot_password(
     }
 
 
-@router.post("/reset-password", response_model=MessageResponse)
+@router.post(
+    "/reset-password",
+    dependencies=[Depends(rate_limit.limit_by_ip("reset_password"))],
+    response_model=MessageResponse,
+)
 async def reset_password(
     request: ResetPasswordRequest, db: Annotated[AsyncSession, Depends(get_db)]
 ):

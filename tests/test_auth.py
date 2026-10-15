@@ -2,9 +2,14 @@
 
 from datetime import UTC
 
+import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from habit_tracker.core.config import settings
+from habit_tracker.core.rate_limit import LIMITS
 from habit_tracker.core.security import verify_password
+from habit_tracker.main import app
 from habit_tracker.schemas.db_models import User
 from tests.factories import UserFactory
 
@@ -467,3 +472,162 @@ class TestResetPassword:
             json={"token": token, "new_password": "short"},
         )
         assert response.status_code == 422
+
+
+REGISTER_BODY = {
+    "username": "newuser",
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "newuser@example.com",
+    "plaintext_password": "securepassword123",
+}
+
+
+class TestRegistrationSwitch:
+    """REGISTRATION_ENABLED closes /auth/register except for the first account."""
+
+    async def test_closed_registration_returns_403(
+        self, client, db_session, monkeypatch
+    ):
+        UserFactory()
+        await db_session.commit()
+        monkeypatch.setattr(settings, "registration_enabled", False)
+
+        response = await client.post("/auth/register", json=REGISTER_BODY)
+        assert response.status_code == 403
+        assert "disabled" in response.json()["detail"]
+
+    async def test_closed_registration_allows_first_user(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "registration_enabled", False)
+
+        first = await client.post("/auth/register", json=REGISTER_BODY)
+        assert first.status_code == 201
+
+        second = await client.post(
+            "/auth/register",
+            json={**REGISTER_BODY, "username": "second", "email": "s@example.com"},
+        )
+        assert second.status_code == 403
+
+    async def test_open_registration_is_default(self, client, db_session):
+        UserFactory()
+        await db_session.commit()
+        assert settings.registration_enabled is True
+        response = await client.post("/auth/register", json=REGISTER_BODY)
+        assert response.status_code == 201
+
+
+class TestAuthRateLimits:
+    """429 + Retry-After on the auth endpoints, per client IP and per account."""
+
+    async def test_login_is_limited_per_ip(self, client):
+        limit, _ = LIMITS["login"]
+        for i in range(limit):
+            r = await client.post(
+                "/auth/login", data={"username": f"u{i}", "password": "x"}
+            )
+            assert r.status_code == 401
+
+        blocked = await client.post(
+            "/auth/login", data={"username": "other", "password": "x"}
+        )
+        assert blocked.status_code == 429
+        assert int(blocked.headers["Retry-After"]) > 0
+
+    async def test_client_ip_header_keys_the_limit(self, client, monkeypatch):
+        monkeypatch.setattr(settings, "client_ip_header", "X-Real-IP")
+        limit, _ = LIMITS["login"]
+
+        # A fresh username per attempt, so only the per-IP limit can trip.
+        async def attempt(ip, i):
+            return await client.post(
+                "/auth/login",
+                data={"username": f"nobody{i}", "password": "x"},
+                headers={"X-Real-IP": ip},
+            )
+
+        for i in range(limit):
+            assert (await attempt("203.0.113.1", i)).status_code == 401
+        assert (await attempt("203.0.113.1", limit)).status_code == 429
+        assert (await attempt("203.0.113.2", limit)).status_code == 401
+
+    async def test_register_is_limited_per_ip(self, client):
+        limit, _ = LIMITS["register"]
+        for _ in range(limit):
+            r = await client.post("/auth/register", json={})
+            assert r.status_code == 422
+
+        blocked = await client.post("/auth/register", json={})
+        assert blocked.status_code == 429
+        assert int(blocked.headers["Retry-After"]) > 0
+
+    @pytest.mark.parametrize(
+        ("path", "body"),
+        [
+            ("/auth/refresh", {"refresh_token": "bad"}),
+            ("/auth/forgot-password", {"email": "nobody@example.com"}),
+            ("/auth/reset-password", {"token": "bad", "new_password": "newpassword1"}),
+        ],
+    )
+    async def test_other_auth_endpoints_are_limited(self, client, path, body):
+        status_codes = [
+            (await client.post(path, json=body)).status_code for _ in range(70)
+        ]
+        assert 429 in status_codes
+        assert status_codes[0] != 429
+
+    async def test_failed_logins_throttle_the_account(self, client, db_session):
+        user = UserFactory()
+        await db_session.commit()
+        failures, _ = LIMITS["login_failures"]
+
+        for _ in range(failures):
+            r = await client.post(
+                "/auth/login", data={"username": user.username, "password": "wrong"}
+            )
+            assert r.status_code == 401
+
+        # Throttled even with the right password, and case-insensitively.
+        blocked = await client.post(
+            "/auth/login",
+            data={"username": user.username.upper(), "password": "password123"},
+        )
+        assert blocked.status_code == 429
+        assert int(blocked.headers["Retry-After"]) > 0
+
+        # The owner on another IP is unaffected, so the throttle cannot lock them out.
+        async with AsyncClient(
+            transport=ASGITransport(app=app, client=("10.0.0.2", 123)),
+            base_url="http://test",
+        ) as elsewhere:
+            owner = await elsewhere.post(
+                "/auth/login",
+                data={"username": user.username, "password": "password123"},
+            )
+        assert owner.status_code == 200
+
+        other = UserFactory()
+        await db_session.commit()
+        ok = await client.post(
+            "/auth/login", data={"username": other.username, "password": "password123"}
+        )
+        assert ok.status_code == 200
+
+    async def test_successful_login_clears_the_account_throttle(
+        self, client, db_session
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        failures, _ = LIMITS["login_failures"]
+
+        async def attempt(password):
+            return await client.post(
+                "/auth/login", data={"username": user.username, "password": password}
+            )
+
+        for _ in range(failures - 1):
+            assert (await attempt("wrong")).status_code == 401
+        assert (await attempt("password123")).status_code == 200
+
+        for _ in range(failures - 1):
+            assert (await attempt("wrong")).status_code == 401

@@ -1,0 +1,27 @@
+# Auth rate limits: at most `limit` requests per `window_seconds`, counted per
+# client IP. `login_failures` counts failed logins per account and client IP.
+# Read once at startup, so a change needs a restart.
+
+[login]
+limit = 10
+window_seconds = 60
+
+[register]
+limit = 5
+window_seconds = 3600 # 1 hour
+
+[refresh]
+limit = 60
+window_seconds = 60
+
+[forgot_password]
+limit = 5
+window_seconds = 3600 # 1 hour
+
+[reset_password]
+limit = 10
+window_seconds = 3600 # 1 hour
+
+[login_failures]
+limit = 5
+window_seconds = 900
