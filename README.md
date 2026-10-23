@@ -91,6 +91,7 @@ CORS_ORIGINS=http://localhost:5173,http://localhost:3000
 | `REGISTRATION_ENABLED` | `true` | Set `false` to close `/auth/register` (403). Registration still works while the `user` table is empty, so a fresh instance can create its first account |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` (uvicorn's default) | Peers uvicorn trusts for `X-Forwarded-For`. Auth rate limits key on the client IP, so behind a reverse proxy this must include the proxy or every client shares one limit. Only use `*` when the proxy is the sole route to the API; otherwise clients can forge their IP |
 | `CLIENT_IP_HEADER` | empty | Header the auth rate limits read the client IP from, for a proxy that always overwrites it. On Railway set `X-Real-IP`. Never set it when clients can reach the API without that proxy |
+| `RATE_LIMIT_EXTRA` | `0` | Added to every limit in `rate_limits.toml`. The local compose file sets it high so the e2e suite, which registers an account per test, is not rate limited |
 | `SQLALCHEMY_ECHO` | `false` | Log emitted SQL |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | blank / `587` | Password-reset email delivery. With `SMTP_HOST` blank the reset link is logged instead of sent, so the flow works offline |
 | `RESET_URL_BASE` | `http://localhost:3000/reset-password` | Front-end page the emailed reset link points at |
