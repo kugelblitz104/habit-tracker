@@ -264,4 +264,5 @@ def calculate_kpis(habit: Habit, trackers: Iterable[Tracker], today: date) -> Ha
         overall_completion_rate=overall_rate,
         last_completed_date=last_completed_date,
         weekday_completion_rates=weekday_rates,
+        habit_id=habit.id,
     )

@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # FORWARDED_ALLOW_IPS.
     client_ip_header: str = ""
 
+    # Added to every limit in rate_limits.toml; the e2e suite registers an account
+    # per test and needs far more than 5 an hour.
+    rate_limit_extra: int = 0
+
     # Frontend page the reset link points at; the emailed URL is
     # f"{reset_url_base}?token=...". Set to the deployed frontend in prod.
     reset_url_base: str = "http://localhost:3000/reset-password"

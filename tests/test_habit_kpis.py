@@ -41,6 +41,7 @@ class TestGetHabitKPIs:
         response = await client.get(f"/habits/{habit.id}/kpis")
         assert response.status_code == 200
         data = response.json()
+        assert data["habit_id"] == habit.id
         assert data["total_completions"] == 0
         assert data["current_streak"] == 0
         assert data["longest_streak"] == 0

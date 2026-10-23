@@ -400,21 +400,25 @@ class TestBatchReadModels:
         assert entry.has_previous is False
         assert entry.auto_skipped_dates == []
 
-    def test_habit_kpis_entry_nests_the_singular_component(self):
-        from habit_tracker.models import HabitKPIs, HabitKPIsEntry
+    def test_habit_kpis_requires_habit_id(self):
+        from pydantic import ValidationError
 
-        kpis = HabitKPIs(
-            total_completions=3,
-            current_streak=1,
-            longest_streak=2,
-            longest_streak_end_date=None,
-            thirty_day_completion_rate=0.5,
-            overall_completion_rate=0.25,
-            last_completed_date=None,
-            weekday_completion_rates=[0.0] * 7,
-        )
-        entry = HabitKPIsEntry(habit_id=7, kpis=kpis)
-        assert entry.kpis.total_completions == 3
+        from habit_tracker.models import HabitKPIs
+
+        def build(**extra):
+            return HabitKPIs(
+                total_completions=3,
+                current_streak=1,
+                longest_streak=2,
+                thirty_day_completion_rate=0.5,
+                overall_completion_rate=0.25,
+                weekday_completion_rates=[0.0] * 7,
+                **extra,
+            )
+
+        assert build(habit_id=7).habit_id == 7
+        with pytest.raises(ValidationError):
+            build()
 
     def test_lists_default_to_empty_items(self):
         from habit_tracker.models import HabitKPIsList, HabitTrackersLiteList

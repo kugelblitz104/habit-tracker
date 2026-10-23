@@ -107,7 +107,7 @@ async def allocate_slug(
 
     `model` is any ORM class with `slug`, `profile_id` and `id` columns (Task,
     Project, Habit). Typed `type` rather than a union, matching
-    `core/http.bulk_delete_in_profile` - the alternative is a growing union that
+    `core/route_helpers.bulk_delete_in_profile` - the alternative is a growing union that
     every new slugged entity has to be added to.
 
     Slugs are unique per profile **per entity**: a project and a task may both

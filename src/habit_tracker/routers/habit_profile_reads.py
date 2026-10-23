@@ -14,7 +14,6 @@ from habit_tracker.core.dependencies import (
     resolve_today,
 )
 from habit_tracker.models import (
-    HabitKPIsEntry,
     HabitKPIsList,
     HabitTrackersLite,
     HabitTrackersLiteList,
@@ -279,11 +278,7 @@ async def list_habits_kpis(
         trackers_by_habit[tracker.habit_id].append(tracker)
 
     items = [
-        HabitKPIsEntry(
-            habit_id=habit.id,
-            kpis=calculate_kpis(habit, trackers_by_habit[habit.id], today),
-        )
-        for habit in habits
+        calculate_kpis(habit, trackers_by_habit[habit.id], today) for habit in habits
     ]
 
     return HabitKPIsList(items=items, total=total, limit=limit, offset=offset)

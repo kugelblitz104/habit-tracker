@@ -631,3 +631,22 @@ class TestAuthRateLimits:
 
         for _ in range(failures - 1):
             assert (await attempt("wrong")).status_code == 401
+
+
+def test_rate_limit_extra_raises_every_limit():
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "from habit_tracker.core.rate_limit import LIMITS;"
+        "print(LIMITS['register'].limit)"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "RATE_LIMIT_EXTRA": "10"},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert int(out) == 10 + LIMITS["register"].limit

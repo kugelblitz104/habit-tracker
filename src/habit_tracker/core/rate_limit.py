@@ -34,7 +34,7 @@ class Limit(NamedTuple):
 # {"login": Limit(10, 60), ...}, one entry per [section] of rate_limits.toml.
 with (Path(__file__).with_name("rate_limits.toml")).open("rb") as f:
     LIMITS = {
-        name: Limit(cfg["limit"], cfg["window_seconds"])
+        name: Limit(cfg["limit"] + settings.rate_limit_extra, cfg["window_seconds"])
         for name, cfg in tomllib.load(f).items()
     }
 
