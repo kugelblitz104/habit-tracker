@@ -21,6 +21,25 @@ from habit_tracker.models import (
     ProfileUpdate,
 )
 from habit_tracker.schemas.db_models import Profile, User
+from habit_tracker.services.notifications import reschedule_profile
+
+# Profile settings the reminder schedule is computed from; a PATCH touching
+# none of them (a rename, the front-end's colour pick) leaves it alone.
+SCHEDULE_FIELDS = frozenset(
+    {
+        "notify_task_due",
+        "notify_task_scheduled",
+        "notify_habits",
+        "notify_countdowns",
+        "notify_journal",
+        "task_due_reminder_offsets",
+        "task_scheduled_reminder_offsets",
+        "task_reminder_default_time",
+        "timezone",
+        "journal_enabled",
+        "journal_prompt_time",
+    }
+)
 
 router = APIRouter(
     prefix="/profiles", tags=["profiles"], responses={404: {"description": "Not found"}}
@@ -113,6 +132,7 @@ async def create_profile(
     db_profile = Profile(**profile.model_dump(), user_id=current_user.id)
     db.add(db_profile)
     try:
+        await reschedule_profile(db, db_profile)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -166,6 +186,8 @@ async def patch_profile(
         setattr(db_profile, key, value)
     db_profile.updated_date = utc_now()  # server-stamped, never client-set
     try:
+        if profile_data.keys() & SCHEDULE_FIELDS:
+            await reschedule_profile(db, db_profile)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()

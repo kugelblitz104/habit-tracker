@@ -7,6 +7,7 @@ from habit_tracker.core.dependencies import resolve_habit_profile_id, resolve_to
 from habit_tracker.core.slugs import allocate_slug
 from habit_tracker.models import HabitRead
 from habit_tracker.schemas.db_models import Habit, Profile, Tracker
+from habit_tracker.services.notifications import HABIT, reschedule
 
 # The columns a TrackerLite reads, so the lite reads skip whole ORM rows and
 # never fetch note bodies. has_note: the note holds any non-whitespace character.
@@ -85,3 +86,4 @@ async def apply_habit_update(
         )
 
     db_habit.updated_date = utc_now()  # server-stamped, never client-set
+    await reschedule(db, HABIT, db_habit)

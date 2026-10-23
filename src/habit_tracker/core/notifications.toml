@@ -1,0 +1,56 @@
+# Web Push reminders (services/notifications.py). Read once at startup, so a
+# change needs a restart.
+
+[offsets]
+# Most reminder offsets one task date may carry, and the furthest ahead one may
+# be, in minutes. Enforced on both the profile defaults and per-task lists.
+max_count = 5
+max_minutes = 40320 # 4 weeks
+
+[scheduler]
+# Longest the loop sleeps without re-reading the schedule. A row changed
+# outside the API (a backup restore, a manual fix, a missed wake-up) is picked
+# up within this.
+max_sleep_seconds = 900 # 15 minutes
+# Rows claimed per transaction; a busier minute takes several claims.
+claim_batch = 100
+# Rows written per INSERT when a profile's schedule is rebuilt (asyncpg caps a
+# statement at 32767 bind parameters; a row binds four).
+upsert_chunk = 1000
+# Shortest sleep between loop passes.
+min_sleep_seconds = 1
+# Sleep after a pass that raised, so a database outage is retried at this pace
+# instead of the (longer) normal one.
+error_backoff_seconds = 60
+# A due row more than this far past its fire time (the process was down) moves
+# on without sending: "Due in 15 min" hours late is wrong.
+late_grace_seconds = 3600 # 1 hour
+
+[push]
+# Hosts a subscription endpoint may point at. The server POSTs to the endpoint
+# a client registers, so an arbitrary one would be server-side request forgery.
+# A leading "*." matches any subdomain. Chrome and Edge use FCM, Firefox
+# Mozilla's autopush, Safari Apple's web push, legacy Edge Windows Notification
+# Service.
+allowed_hosts = [
+  "fcm.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "web.push.apple.com",
+  "*.push.apple.com",
+  "*.notify.windows.com",
+]
+# Browsers one profile may register; each reminder is sent to every one.
+max_subscriptions_per_profile = 20
+# How long the push service keeps trying to deliver to an offline browser.
+ttl_seconds = 86400 # 1 day
+request_timeout_seconds = 10
+# Sends in flight at once while a claimed batch holds its row locks, so a
+# stalled push service delays the batch by about one request_timeout.
+max_concurrent_sends = 10
+# Lifetime of the VAPID JWT. Push services reject one that expires more than
+# 24 hours ahead by their own clock, so the 24 hour default is too close.
+vapid_token_hours = 12
+# A web push record is capped at 4096 bytes; these keep the encrypted payload
+# well inside it.
+max_title_chars = 100
+max_body_chars = 200

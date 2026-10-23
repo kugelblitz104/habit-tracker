@@ -84,6 +84,12 @@ from habit_tracker.models.projects import (
     ProjectRead,
     ProjectUpdate,
 )
+from habit_tracker.models.push import (
+    PushSubscriptionCreate,
+    PushSubscriptionDelete,
+    PushTest,
+    VapidPublicKey,
+)
 from habit_tracker.models.tasks import (
     TaskCreate,
     TaskList,
@@ -135,7 +141,6 @@ __all__ = [
     "CountdownCategoryList",
     "CountdownCategoryRead",
     "CountdownCategoryUpdate",
-    # Pydantic Schemas
     "CountdownCreate",
     "CountdownList",
     "CountdownRead",
@@ -181,6 +186,9 @@ __all__ = [
     "ProjectUpdate",
     "PublishRequest",
     "PublishResult",
+    "PushSubscriptionCreate",
+    "PushSubscriptionDelete",
+    "PushTest",
     "RefreshTokenRequest",
     "ResetPasswordRequest",
     "TaskBackup",
@@ -207,5 +215,6 @@ __all__ = [
     "UserList",
     "UserRead",
     "UserUpdate",
+    "VapidPublicKey",
     "normalize_ics_url",
 ]

@@ -1,8 +1,6 @@
-# Production / CI image — clean, with no corporate CA and no build secrets, so
-# it builds on any Docker builder (Railway's Metal builder only supports
-# type=cache mounts, not type=secret). Local builds behind the corporate
-# (Zscaler) TLS proxy use Dockerfile.zscaler instead (see docker-compose.yml),
-# which layers the CA in via a build secret.
+# Image for local compose, deployment and CI. No build secrets, so it builds
+# on any Docker builder (Railway's Metal builder only supports type=cache
+# mounts, not type=secret).
 FROM python:3.11-slim-bullseye
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

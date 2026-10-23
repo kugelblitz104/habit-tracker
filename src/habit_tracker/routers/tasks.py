@@ -29,6 +29,7 @@ from habit_tracker.models import (
     TaskUpdate,
 )
 from habit_tracker.schemas.db_models import Profile, Project, Task, User
+from habit_tracker.services.notifications import TASK, forget, reschedule
 from habit_tracker.services.task_export import render_tasks_markdown
 
 router = APIRouter(
@@ -354,6 +355,7 @@ async def create_task(
         db_task.scheduled_date = None
         db_task.scheduled_time = None
     db.add(db_task)
+    await reschedule(db, TASK, db_task)
     await db.commit()
     await db.refresh(db_task)
     return _task_to_read(db_task)
@@ -690,6 +692,7 @@ async def patch_task(
 
     db_task.updated_date = utc_now()  # server-stamped, never client-set
     try:
+        await reschedule(db, TASK, db_task)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -741,5 +744,6 @@ async def delete_task(
     db_task, _ = await _get_task_and_profile(db, task_id, current_user)
 
     await db.delete(db_task)
+    await forget(db, TASK, task_id)
     await db.commit()
     return JSONResponse(content={"detail": "Task deleted successfully"})

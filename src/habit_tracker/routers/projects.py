@@ -24,6 +24,7 @@ from habit_tracker.models import (
     ProjectUpdate,
 )
 from habit_tracker.schemas.db_models import Profile, Project, Task, User
+from habit_tracker.services.notifications import reschedule_profile
 
 router = APIRouter(
     prefix="/projects", tags=["projects"], responses={404: {"description": "Not found"}}
@@ -271,6 +272,7 @@ async def patch_project(
             .where(Task.project_id == db_project.id)
             .values(profile_id=new_profile_id)
         )
+        await reschedule_profile(db, new_profile)
 
     previous_name = db_project.name
     previous_profile_id = db_project.profile_id

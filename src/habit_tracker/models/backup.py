@@ -26,7 +26,7 @@ Two things are deliberately NOT round-tripped:
 
 from datetime import date, datetime, time
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from habit_tracker.models._base import _FromORM
 from habit_tracker.models.tasks import _validate_status
@@ -67,6 +67,15 @@ class ProfileSettings(_FromORM):
     reconciliation_stale_task_days: int | None = None
     reconciliation_stale_project_days: int | None = None
     reconciliation_stale_habit_days: int | None = None
+    notify_task_due: bool = False
+    notify_task_scheduled: bool = False
+    notify_habits: bool = False
+    notify_countdowns: bool = False
+    notify_journal: bool = False
+    task_due_reminder_offsets: list[int] = Field(default_factory=lambda: [60, 15])
+    task_scheduled_reminder_offsets: list[int] = Field(default_factory=list)
+    task_reminder_default_time: time = time(9, 0)
+    timezone: str | None = None
 
 
 class ProjectBackup(_FromORM):
@@ -100,6 +109,8 @@ class TaskBackup(_FromORM):
     created_date: datetime | None = None
     updated_date: datetime | None = None
     sort_order: int = 0
+    due_reminder_offsets: list[int] | None = None
+    scheduled_reminder_offsets: list[int] | None = None
 
     # The only validated field on this model. Everything else stays permissive
     # so a document predating a rule still imports, but an unknown status would

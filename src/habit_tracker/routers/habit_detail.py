@@ -12,6 +12,7 @@ from habit_tracker.core.dependencies import (
 from habit_tracker.models import HabitRead, HabitUpdate
 from habit_tracker.schemas.db_models import User
 from habit_tracker.services.habits import apply_habit_update, habit_to_read
+from habit_tracker.services.notifications import HABIT, forget
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -125,5 +126,6 @@ async def delete_habit(
     """
     db_habit, _ = await get_owned_habit(db, habit_id, current_user)
     await db.delete(db_habit)
+    await forget(db, HABIT, habit_id)
     await db.commit()
     return JSONResponse(content={"detail": "Habit deleted successfully"})

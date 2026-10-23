@@ -1,13 +1,16 @@
 """Test data factories."""
 
 import random
-from datetime import date, datetime
+from datetime import date, datetime, time
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from factory.alchemy import SQLAlchemyModelFactory
 from factory.declarations import LazyAttribute, LazyFunction, Sequence, SubFactory
 from factory.faker import Faker
 from factory.helpers import post_generation
 from passlib.context import CryptContext
+from py_vapid import b64urlencode
 
 from habit_tracker.constants import (
     DayQuality,
@@ -131,6 +134,15 @@ class ProfileFactory(BaseFactory):
     pomodoro_break_minutes = 5
     pomodoro_long_break_minutes = 15
     pomodoro_cycles = 4
+    notify_task_due = False
+    notify_task_scheduled = False
+    notify_habits = False
+    notify_countdowns = False
+    notify_journal = False
+    task_due_reminder_offsets = LazyFunction(lambda: [60, 15])
+    task_scheduled_reminder_offsets = LazyFunction(list)
+    task_reminder_default_time = time(9, 0)
+    timezone = None
     user = SubFactory(UserFactory)
     created_date = LazyFunction(datetime.now)
     updated_date = None
@@ -335,3 +347,12 @@ class TrackerFactory(BaseFactory):
     status = TrackerStatus.COMPLETED
     note = Faker("sentence")
     created_date = LazyFunction(datetime.now)
+
+
+def push_keys(seed: int = 1) -> tuple[str, str]:
+    """A real-shaped (p256dh, auth) pair: an uncompressed P-256 point and 16 bytes."""
+    private = ec.derive_private_key(seed, ec.SECP256R1())
+    point = private.public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    return b64urlencode(point), b64urlencode(bytes([seed]) * 16)

@@ -23,16 +23,11 @@ services:
     api:
         build:
             context: .
-            # Local dev uses the Zscaler variant so builds work behind the
-            # corporate TLS proxy. Deployment/CI build the plain `Dockerfile`
-            # (no build secrets), which any builder can handle.
-            dockerfile: Dockerfile.zscaler
-            # Corporate CA for building behind the Zscaler proxy. Supplied only
-            # when ZSCALER_CA_PATH is set (local dev); omitted in deployment.
-            secrets:
-                - zscaler_ca
+            dockerfile: Dockerfile
         image: localhost/habit-tracker-api:latest
         container_name: habit_tracker_api
+        env_file:
+            - .env
         environment:
             DATABASE_URL: postgresql+asyncpg://habit_tracker:dev_password@postgres:5432/habit_tracker_dev
             CORS_ORIGINS: http://localhost:5173
@@ -46,16 +41,8 @@ services:
             - ./alembic:/code/alembic
             - ./alembic.ini:/code/alembic.ini
         command: >
-            sh -c "uv run alembic upgrade head && 
-            uv run uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080 --reload"
-
-secrets:
-    # Local dev behind Zscaler: set ZSCALER_CA_PATH to your CA bundle, e.g.
-    #   $env:ZSCALER_CA_PATH = 'C:\Users\you\code\certs\zscaler-ca.pem'
-    # Left unset (deployment/CI), it points at an empty file so the build runs
-    # with no corporate CA and produces a clean image.
-    zscaler_ca:
-        file: ${ZSCALER_CA_PATH:-/dev/null}
+            sh -c "alembic upgrade head &&
+            exec uvicorn habit_tracker.main:app --host 0.0.0.0 --port 8080 --reload"
 
 volumes:
     postgres_data:

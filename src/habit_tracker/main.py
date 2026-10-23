@@ -1,5 +1,8 @@
+import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -9,7 +12,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.cors import CORSMiddleware
 
+from habit_tracker.core.config import settings
 from habit_tracker.core.dependencies import get_db
+from habit_tracker.database import SessionLocal
 from habit_tracker.routers import (
     auth,
     backup,
@@ -25,11 +30,13 @@ from habit_tracker.routers import (
     journal,
     profiles,
     projects,
+    push,
     tasks,
     time_entries,
     trackers,
     users,
 )
+from habit_tracker.services import notifications, web_push
 
 load_dotenv()
 
@@ -43,7 +50,28 @@ CORS_ORIGINS = [
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Run the reminder loop for the life of the process, when VAPID is configured.
+
+    httpx's ASGITransport does not run lifespan, so tests never start it.
+    """
+    scheduler = None
+    if settings.vapid_private_key and not settings.vapid_subject:
+        logger.warning(
+            "VAPID_PRIVATE_KEY is set without VAPID_SUBJECT; reminders are off"
+        )
+    if web_push.is_configured():
+        scheduler = asyncio.create_task(notifications.run(SessionLocal, web_push.send))
+    yield
+    if scheduler:
+        scheduler.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,6 +105,7 @@ app.include_router(countdown_categories.router)
 app.include_router(countdowns.router)
 app.include_router(backup.router)
 app.include_router(journal.router)
+app.include_router(push.router)
 
 
 # Kept out of /openapi.json: the front-end generates its client from the schema,

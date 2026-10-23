@@ -19,6 +19,7 @@ from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import HabitCreate, HabitList, HabitRead
 from habit_tracker.schemas.db_models import Habit, Tracker, User
 from habit_tracker.services.habits import habit_to_read
+from habit_tracker.services.notifications import HABIT, reschedule
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -64,6 +65,7 @@ async def create_habit(
         db, Habit, profile_id=profile_id, source=habit.name
     )
     db.add(db_habit)
+    await reschedule(db, HABIT, db_habit)
     await db.commit()
     await db.refresh(db_habit)
     return HabitRead.model_validate(db_habit)

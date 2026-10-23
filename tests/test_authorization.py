@@ -4,11 +4,16 @@ Exercises admin/owner access rules through the API. Unit tests of the
 underlying callables (core/dependencies.py) live in test_dependencies.py.
 """
 
+import pytest
+
+from habit_tracker.core.config import settings
 from tests.factories import (
     AdminUserFactory,
     HabitFactory,
+    ProfileFactory,
     TrackerFactory,
     UserFactory,
+    push_keys,
 )
 
 
@@ -310,3 +315,48 @@ class TestOwnerDependency:
 
         response = await client.get(f"/habits/{habit_id}")
         assert response.status_code == 200
+
+
+PUSH_ENDPOINT = "https://fcm.googleapis.com/fcm/send/1"
+PUSH_KEY, PUSH_AUTH = push_keys()
+PUSH_REQUESTS = (
+    (
+        "POST",
+        "/push/subscriptions",
+        {"endpoint": PUSH_ENDPOINT, "p256dh": PUSH_KEY, "auth": PUSH_AUTH},
+    ),
+    ("DELETE", "/push/subscriptions", {"endpoint": PUSH_ENDPOINT}),
+    ("POST", "/push/test", {}),
+)
+
+
+class TestPushAuthorization:
+    """Every push endpoint that takes a profile checks its owner."""
+
+    @pytest.fixture(autouse=True)
+    def _vapid(self, monkeypatch):
+        # /push/test answers 404 before the ownership check when VAPID is unset.
+        monkeypatch.setattr(settings, "vapid_private_key", "configured")
+        monkeypatch.setattr(settings, "vapid_subject", "mailto:ops@example.com")
+
+    @pytest.mark.parametrize(("method", "path", "extra"), PUSH_REQUESTS)
+    async def test_foreign_profile_forbidden(
+        self, client, db_session, login_as, method, path, extra
+    ):
+        user = UserFactory()
+        other = UserFactory()
+        await db_session.commit()
+        foreign = ProfileFactory(user=other)
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.request(
+            method, path, json={"profile_id": foreign.id, **extra}
+        )
+
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize(("method", "path", "extra"), PUSH_REQUESTS)
+    async def test_unauthenticated_is_401(self, client, method, path, extra):
+        response = await client.request(method, path, json={"profile_id": 1, **extra})
+        assert response.status_code == 401
