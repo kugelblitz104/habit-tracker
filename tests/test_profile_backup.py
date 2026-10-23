@@ -74,6 +74,14 @@ class TestBuildProfileBackup:
             pomodoro_cycles=3,
             journal_enabled=False,
             journal_gratitude_enabled=True,
+            notify_task_due=False,
+            notify_task_scheduled=False,
+            notify_habits=False,
+            notify_countdowns=False,
+            notify_journal=False,
+            task_due_reminder_offsets=[60, 15],
+            task_scheduled_reminder_offsets=[],
+            task_reminder_default_time=time(9, 0),
         )
         task = Task(
             title="Ship it",
@@ -971,6 +979,32 @@ class TestReconciliationSettingsBackup:
         assert new_profile.reconciliation_stale_task_days is None
 
 
+class TestReminderOffsetsBackup:
+    async def test_out_of_range_offsets_are_fitted_not_rejected(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        TaskFactory(profile=profile, title="Pay rent")
+        await db_session.commit()
+        await login_as(user)
+
+        document = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        document["profile"]["task_due_reminder_offsets"] = [15, 15, -5, 10**9, 60, 30]
+        document["tasks"][0]["due_reminder_offsets"] = list(range(-2, 40)) + [10**9]
+
+        restored = await client.post("/backup/profiles", json=document)
+
+        assert restored.status_code == 201
+        new_profile = await db_session.get(Profile, restored.json()["profile_id"])
+        assert new_profile.task_due_reminder_offsets == [60, 30, 15]
+        task = await db_session.scalar(
+            select(Task).where(Task.profile_id == new_profile.id)
+        )
+        assert task.due_reminder_offsets == [39, 38, 37, 36, 35]
+
+
 class TestHabitReminderBackup:
     async def test_reminder_schedule_round_trips(self, client, db_session, login_as):
         user = UserFactory()
@@ -1021,3 +1055,79 @@ class TestHabitReminderBackup:
 
         assert new_habit.reminder_time is None
         assert new_habit.reminder_days == 127
+
+
+class TestNotificationSettingsBackup:
+    async def test_profile_and_task_fields_round_trip(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        profile.notify_task_due = True
+        profile.notify_journal = True
+        profile.task_due_reminder_offsets = [120, 5]
+        profile.task_scheduled_reminder_offsets = [30]
+        profile.task_reminder_default_time = time(7, 45)
+        profile.timezone = "Asia/Tokyo"
+        await db_session.commit()
+        task = TaskFactory(profile=profile, title="Custom")
+        task.due_reminder_offsets = [10]
+        task.scheduled_reminder_offsets = []
+        await db_session.commit()
+        await login_as(user)
+
+        document = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        assert document["profile"]["task_due_reminder_offsets"] == [120, 5]
+        assert document["profile"]["timezone"] == "Asia/Tokyo"
+        assert document["tasks"][0]["due_reminder_offsets"] == [10]
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_profile = await db_session.get(Profile, restored.json()["profile_id"])
+        new_task = (
+            await db_session.execute(
+                select(Task).where(Task.profile_id == new_profile.id)
+            )
+        ).scalar_one()
+
+        assert new_profile.notify_task_due is True
+        assert new_profile.notify_journal is True
+        assert new_profile.notify_habits is False
+        assert new_profile.task_due_reminder_offsets == [120, 5]
+        assert new_profile.task_scheduled_reminder_offsets == [30]
+        assert new_profile.task_reminder_default_time == time(7, 45)
+        assert new_profile.timezone == "Asia/Tokyo"
+        assert new_task.due_reminder_offsets == [10]
+        assert new_task.scheduled_reminder_offsets == []
+
+    async def test_a_document_without_the_fields_still_imports(
+        self, client, db_session, login_as
+    ):
+        """Every new field is defaulted, which is why BACKUP_VERSION is unchanged."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        TaskFactory(profile=profile)
+        await db_session.commit()
+        await login_as(user)
+
+        document = (await client.get(f"/backup/profiles/{profile.id}")).json()
+        for field in list(document["profile"]):
+            if field.startswith("notify_") or field in (
+                "task_due_reminder_offsets",
+                "task_scheduled_reminder_offsets",
+                "task_reminder_default_time",
+                "timezone",
+            ):
+                del document["profile"][field]
+        for task in document["tasks"]:
+            task.pop("due_reminder_offsets", None)
+            task.pop("scheduled_reminder_offsets", None)
+
+        restored = await client.post("/backup/profiles", json=document)
+        new_profile = await db_session.get(Profile, restored.json()["profile_id"])
+
+        assert restored.status_code == 201
+        assert new_profile.task_due_reminder_offsets == [60, 15]
+        assert new_profile.notify_habits is False

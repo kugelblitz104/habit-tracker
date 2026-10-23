@@ -1,8 +1,8 @@
 [project]
 name = "habit_tracker"
-version = "0.1.0"
+version = ""
 description = "habit tracker api"
-authors = [{name = "Justin Jones", email = "kugelblitz104@gmail.com"}]
+authors = [{name = "Justin Jones", email = "kugelblitz404@proton.me"}]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -23,6 +23,8 @@ dependencies = [
     "recurring-ical-events>=3.8.2",
     "aiosmtplib>=5.1.2",
     "cryptography>=49.0.0",
+    "http-ece>=1.2.1",
+    "py-vapid>=1.9.6",
 ]
 
 [tool.uv]

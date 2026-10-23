@@ -28,6 +28,7 @@ from habit_tracker.schemas.db_models import (
     User,
 )
 from habit_tracker.services.countdown_categories import find_or_create, get_in_profile
+from habit_tracker.services.notifications import COUNTDOWN, forget, reschedule
 
 router = APIRouter(
     prefix="/countdowns",
@@ -146,6 +147,7 @@ async def create_countdown(
         db, profile_id=countdown.profile_id, category_id=countdown.category_id
     )
     db.add(db_countdown)
+    await reschedule(db, COUNTDOWN, db_countdown)
     await db.commit()
     await db.refresh(db_countdown)
     return CountdownRead.model_validate(db_countdown)
@@ -180,8 +182,12 @@ async def patch_countdown(
 
     data = countdown_update.model_dump(exclude_unset=True)
 
-    # `archived` is a flag over a server-owned timestamp, so it never reaches the
-    # setattr loop under its own name.
+    # The client sends `archived: true/false`, but the table has no `archived`
+    # column, only the server-stamped `archived_date`. Left in `data`, the
+    # setattr loop below would set `archived` as a plain Python attribute that is
+    # silently thrown away, so it is popped and translated: false clears
+    # `archived_date`; true stamps utc_now(), but only when the countdown is not
+    # already archived, so archiving again keeps the original date.
     if "archived" in data:
         archived = data.pop("archived")
         if not archived:
@@ -238,6 +244,7 @@ async def patch_countdown(
         for key, value in data.items():
             setattr(db_countdown, key, value)
         db_countdown.updated_date = utc_now()  # server-stamped, never client-set
+        await reschedule(db, COUNTDOWN, db_countdown)
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -279,5 +286,6 @@ async def delete_countdown(
 ) -> JSONResponse:
     db_countdown, _ = await _get_countdown_and_profile(db, countdown_id, current_user)
     await db.delete(db_countdown)
+    await forget(db, COUNTDOWN, countdown_id)
     await db.commit()
     return JSONResponse(content={"detail": "Countdown deleted successfully"})

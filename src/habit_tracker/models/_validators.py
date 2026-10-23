@@ -16,11 +16,17 @@ guarantees a `*Base` field can never actually observe `None` here, since type
 validation rejects it before the field validator runs).
 """
 
+import base64
+import binascii
 import re
 from collections.abc import Container
 from typing import TypeVar, overload
+from urllib.parse import urlsplit
+from zoneinfo import available_timezones
 
 from pydantic import ValidationInfo
+
+from habit_tracker.services.notifications import CONFIG
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -168,3 +174,89 @@ def non_empty_token(v: str | None) -> str | None:
     if v is not None and not v.strip():
         raise ValueError("token (PAT) cannot be empty")
     return v.strip() if v is not None else v
+
+
+def validate_reminder_offsets(v: list[int] | None) -> list[int] | None:
+    """Minutes-before offsets: each 0..max_minutes, unique, at most max_count.
+
+    Returned largest first, so the stored order does not depend on how the
+    client built the list. The limits come from notifications.toml.
+    """
+    if v is None:
+        return None
+    limits = CONFIG["offsets"]
+    if len(v) > limits["max_count"]:
+        raise ValueError(f"At most {limits['max_count']} reminder offsets")
+    if len(set(v)) != len(v):
+        raise ValueError("Reminder offsets must be unique")
+    if any(m < 0 or m > limits["max_minutes"] for m in v):
+        raise ValueError(
+            f"Reminder offsets must be between 0 and {limits['max_minutes']} minutes"
+        )
+    return sorted(v, reverse=True)
+
+
+@overload
+def validate_timezone(v: str) -> str: ...
+@overload
+def validate_timezone(v: None) -> None: ...
+def validate_timezone(v: str | None) -> str | None:
+    if v is None:
+        return None
+    # Exact-case match: Windows' tzdata lookup is case-insensitive, so ZoneInfo
+    # alone accepts "europe/paris" there but not on Linux.
+    if v not in available_timezones():
+        raise ValueError("timezone must be an IANA zone name, e.g. Europe/Paris")
+    return v
+
+
+_PUSH_HOSTNAME = re.compile(r"[a-z0-9-]+(\.[a-z0-9-]+)+")
+_PUSH_ENDPOINT_MAX_CHARS = 2048
+
+
+def validate_push_endpoint(v: str) -> str:
+    """Require an https URL of at most 2048 characters on a known push service
+    host, port 443, with no credentials. Hosts come from notifications.toml."""
+    error = ValueError("Endpoint must be an https URL of a browser push service")
+    if len(v) > _PUSH_ENDPOINT_MAX_CHARS:
+        raise error
+    try:
+        parts = urlsplit(v)
+        port = parts.port
+    except ValueError:
+        raise error from None
+    host = parts.hostname
+    if (
+        parts.scheme != "https"
+        or not host
+        or not _PUSH_HOSTNAME.fullmatch(host)
+        or "@" in parts.netloc
+        or port not in (None, 443)
+    ):
+        raise error
+    if not any(
+        host.endswith(allowed[1:]) if allowed.startswith("*.") else host == allowed
+        for allowed in CONFIG["push"]["allowed_hosts"]
+    ):
+        raise error
+    return v
+
+
+def _b64url_bytes(v: str) -> bytes:
+    try:
+        return base64.urlsafe_b64decode(v + "=" * (-len(v) % 4))
+    except (binascii.Error, ValueError):
+        raise ValueError("Key must be base64url") from None
+
+
+def validate_push_p256dh(v: str) -> str:
+    raw = _b64url_bytes(v)
+    if len(raw) != 65 or raw[0] != 4:
+        raise ValueError("p256dh must be an uncompressed P-256 public key")
+    return v
+
+
+def validate_push_auth(v: str) -> str:
+    if len(_b64url_bytes(v)) != 16:
+        raise ValueError("auth must be a 16 byte secret")
+    return v

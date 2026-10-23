@@ -16,9 +16,8 @@ class Settings(BaseSettings):
     # cors_origins lived here but was never read; main.py reads CORS_ORIGINS
     # from the environment directly via os.getenv(). Don't re-add it here.
 
-    # extra="ignore": the shared .env also holds tooling vars that aren't app
-    # settings (e.g. ZSCALER_CA_PATH for the Docker build/compose), so ignore
-    # unknown keys instead of failing to start.
+    # extra="ignore": the shared .env may hold tooling vars that aren't app
+    # settings, so ignore unknown keys instead of failing to start.
     model_config = SettingsConfigDict(
         env_file=".env", case_sensitive=False, extra="ignore"
     )
@@ -61,6 +60,13 @@ class Settings(BaseSettings):
     # so users would re-enter them). Generate a dedicated key with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     integration_encryption_key: str = ""
+
+    # --- Web Push (VAPID) ----------------------------------------------------
+    # Blank disables reminders entirely: the scheduler does not start and
+    # GET /push/vapid-public-key returns 404, so the front-end hides the
+    # feature.
+    vapid_private_key: str = ""
+    vapid_subject: str = ""
 
 
 settings = Settings()  # pyright: ignore[reportCallIssue]  # fields come from the environment

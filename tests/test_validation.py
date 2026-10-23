@@ -1005,3 +1005,122 @@ class TestRetiredTaskStatus:
             json={"status": 9},
         )
         assert response.status_code == 422
+
+
+class TestReminderValidation:
+    """Offsets: 0..40320 minutes, no duplicates, at most 5. Timezone: an IANA
+    name. The same rules apply to the profile defaults and per-task lists."""
+
+    BAD_OFFSETS = (
+        [-1],
+        [40321],
+        [15, 15],
+        [1, 2, 3, 4, 5, 6],
+    )
+
+    async def test_profile_rejects_bad_offsets(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        for offsets in self.BAD_OFFSETS:
+            for field in (
+                "task_due_reminder_offsets",
+                "task_scheduled_reminder_offsets",
+            ):
+                response = await client.post(
+                    "/profiles/", json={"name": "Work", field: offsets}
+                )
+                assert response.status_code == 422, (field, offsets)
+
+    async def test_profile_accepts_the_limits(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/profiles/",
+            json={"name": "Work", "task_due_reminder_offsets": [0, 40320, 1, 2, 3]},
+        )
+        assert response.status_code == 201
+
+    async def test_profile_rejects_unknown_timezone(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        for bad in ("Mars/Olympus", ""):
+            response = await client.post(
+                "/profiles/", json={"name": "Work", "timezone": bad}
+            )
+            assert response.status_code == 422, bad
+
+    async def test_task_rejects_bad_offsets(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        task = TaskFactory(profile=user.profiles[0])
+        await db_session.commit()
+        await login_as(user)
+
+        for offsets in self.BAD_OFFSETS:
+            for field in ("due_reminder_offsets", "scheduled_reminder_offsets"):
+                created = await client.post(
+                    "/tasks/",
+                    json={
+                        "profile_id": user.profiles[0].id,
+                        "title": "T",
+                        field: offsets,
+                    },
+                )
+                assert created.status_code == 422, (field, offsets)
+                patched = await client.patch(f"/tasks/{task.id}", json={field: offsets})
+                assert patched.status_code == 422, (field, offsets)
+
+    async def test_profile_patch_rejects_bad_offsets(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile_id = user.profiles[0].id
+        await login_as(user)
+
+        for offsets in self.BAD_OFFSETS:
+            for field in (
+                "task_due_reminder_offsets",
+                "task_scheduled_reminder_offsets",
+            ):
+                response = await client.patch(
+                    f"/profiles/{profile_id}", json={field: offsets}
+                )
+                assert response.status_code == 422, (field, offsets)
+
+    async def test_profile_patch_rejects_bad_timezone(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile_id = user.profiles[0].id
+        await login_as(user)
+
+        for bad in ("Mars/Olympus", "", "europe/paris"):
+            response = await client.patch(
+                f"/profiles/{profile_id}", json={"timezone": bad}
+            )
+            assert response.status_code == 422, bad
+
+    async def test_profile_with_stored_invalid_reminder_settings_still_reads(
+        self, client, db_session, login_as
+    ):
+        """A restored backup can store values the API would reject; reads must
+        not re-validate them."""
+        user = UserFactory()
+        await db_session.commit()
+        profile = user.profiles[0]
+        profile.task_due_reminder_offsets = [-1]
+        profile.task_scheduled_reminder_offsets = [15, 15]
+        profile.timezone = "Mars/Olympus"
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.get(f"/profiles/{profile.id}")
+        assert response.status_code == 200

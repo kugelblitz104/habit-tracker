@@ -57,6 +57,7 @@ from habit_tracker.schemas.db_models import (
     User,
 )
 from habit_tracker.services.countdown_categories import resolve_for_countdown
+from habit_tracker.services.notifications import CONFIG, reschedule_profile
 
 
 class BackupError(Exception):
@@ -263,6 +264,29 @@ async def _unique_profile_name(db: AsyncSession, user_id: int, desired: str) -> 
     return candidate
 
 
+def _restorable_offsets(offsets: list[int] | None) -> list[int] | None:
+    """Fit a backup's reminder offsets to the current limits instead of rejecting
+    the document: drop out-of-range and repeated values, keep the largest few."""
+    if offsets is None:
+        return None
+    limits = CONFIG["offsets"]
+    in_range = {m for m in offsets if 0 <= m <= limits["max_minutes"]}
+    return sorted(in_range, reverse=True)[: limits["max_count"]]
+
+
+def _restorable_fields(model: ProfileSettings | TaskBackup, **dump) -> dict:
+    fields = model.model_dump(**dump)
+    for key in (
+        "task_due_reminder_offsets",
+        "task_scheduled_reminder_offsets",
+        "due_reminder_offsets",
+        "scheduled_reminder_offsets",
+    ):
+        if key in fields:
+            fields[key] = _restorable_offsets(fields[key])
+    return fields
+
+
 async def restore_profile_backup(
     db: AsyncSession, user: User, backup: ProfileBackup
 ) -> ImportSummary:
@@ -293,7 +317,7 @@ async def restore_profile_backup(
     profile = Profile(
         user_id=user.id,
         name=name,
-        **backup.profile.model_dump(exclude={"name"}),
+        **_restorable_fields(backup.profile, exclude={"name"}),
     )
     db.add(profile)
     await db.flush()
@@ -335,8 +359,8 @@ async def restore_profile_backup(
             slug=await allocate_slug(
                 db, Task, profile_id=profile.id, source=item.title
             ),
-            **item.model_dump(
-                exclude={"id", "project_id", "parent_id"}, exclude_none=True
+            **_restorable_fields(
+                item, exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),
         )
         db.add(row)
@@ -369,8 +393,8 @@ async def restore_profile_backup(
             slug=await allocate_slug(
                 db, Task, profile_id=profile.id, source=item.title
             ),
-            **item.model_dump(
-                exclude={"id", "project_id", "parent_id"}, exclude_none=True
+            **_restorable_fields(
+                item, exclude={"id", "project_id", "parent_id"}, exclude_none=True
             ),
         )
         db.add(row)
@@ -499,6 +523,7 @@ async def restore_profile_backup(
             )
         )
 
+    await reschedule_profile(db, profile)
     await db.commit()
 
     return ImportSummary(

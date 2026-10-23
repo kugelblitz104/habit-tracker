@@ -188,9 +188,7 @@ docker run -p 8080:8080 \
   habit-tracker-api:latest
 ```
 
-Two Dockerfiles: the plain `Dockerfile` for deployment and CI, and `Dockerfile.zscaler` for
-local builds behind a corporate TLS proxy. The latter takes the CA as a build secret; compose
-supplies it from `ZSCALER_CA_PATH` and falls back to `/dev/null` when that's unset.
+The `Dockerfile` is used for local compose builds, deployment and CI.
 
 ## Project Structure
 

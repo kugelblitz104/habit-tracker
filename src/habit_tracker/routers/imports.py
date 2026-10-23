@@ -47,6 +47,7 @@ from habit_tracker.services.journal_import import (
     parse_journal_file,
 )
 from habit_tracker.services.loop_format import map_color, reverse_map_color
+from habit_tracker.services.notifications import HABIT, reschedule
 
 router = APIRouter(
     prefix="/import",
@@ -269,7 +270,7 @@ async def import_from_loop_habit_tracker(
                     sort_order=current_max_sort_order,
                 )
                 db.add(new_habit)
-                await db.flush()  # Get the new ID
+                await reschedule(db, HABIT, new_habit)  # also flushes: gets the ID
 
                 # Import repetitions (trackers) for this habit
                 cursor.execute(

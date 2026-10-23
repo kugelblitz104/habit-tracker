@@ -2561,3 +2561,84 @@ class TestEditableClosedDate:
         )
 
         assert response.status_code == 200
+
+
+class TestTaskReminderOffsets:
+    """null = profile default, [] = none for this task, a list = its own."""
+
+    async def test_create_with_offsets(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        response = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "Pay rent",
+                "due_reminder_offsets": [15, 1440],
+                "scheduled_reminder_offsets": [],
+            },
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["due_reminder_offsets"] == [1440, 15]
+        assert body["scheduled_reminder_offsets"] == []
+
+    async def test_default_is_null(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        body = (
+            await client.post(
+                "/tasks/", json={"profile_id": user.profiles[0].id, "title": "T"}
+            )
+        ).json()
+
+        assert body["due_reminder_offsets"] is None
+        assert body["scheduled_reminder_offsets"] is None
+
+    async def test_patch_explicit_null_returns_to_default(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        created = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "T",
+                "due_reminder_offsets": [30],
+            },
+        )
+
+        patched = await client.patch(
+            f"/tasks/{created.json()['id']}", json={"due_reminder_offsets": None}
+        )
+
+        assert patched.status_code == 200
+        assert patched.json()["due_reminder_offsets"] is None
+
+    async def test_patch_omitting_the_field_keeps_the_list(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        created = await client.post(
+            "/tasks/",
+            json={
+                "profile_id": user.profiles[0].id,
+                "title": "T",
+                "due_reminder_offsets": [30],
+            },
+        )
+
+        patched = await client.patch(
+            f"/tasks/{created.json()['id']}", json={"title": "Renamed"}
+        )
+
+        assert patched.json()["due_reminder_offsets"] == [30]

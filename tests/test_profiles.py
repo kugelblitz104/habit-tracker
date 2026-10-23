@@ -896,3 +896,88 @@ class TestProfileReconciliationSettings:
         )
 
         assert response.status_code == 422
+
+
+class TestProfileNotificationSettings:
+    """The nine Web Push settings: five opt-in toggles, two default offset
+    lists, the default time of day and the client-reported timezone."""
+
+    TOGGLES = (
+        "notify_task_due",
+        "notify_task_scheduled",
+        "notify_habits",
+        "notify_countdowns",
+        "notify_journal",
+    )
+
+    async def test_defaults(self, client, db_session, login_as):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        body = (await client.post("/profiles/", json={"name": "Work"})).json()
+
+        for toggle in self.TOGGLES:
+            assert body[toggle] is False
+        assert body["task_due_reminder_offsets"] == [60, 15]
+        assert body["task_scheduled_reminder_offsets"] == []
+        assert body["task_reminder_default_time"] == "09:00:00"
+        assert body["timezone"] is None
+
+    async def test_round_trips_through_create_and_patch(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+
+        created = await client.post(
+            "/profiles/",
+            json={
+                "name": "Work",
+                "notify_habits": True,
+                "task_due_reminder_offsets": [15, 1440, 60],
+                "task_reminder_default_time": "08:30:00",
+                "timezone": "Europe/Paris",
+            },
+        )
+        body = created.json()
+        assert body["notify_habits"] is True
+        # Stored largest first.
+        assert body["task_due_reminder_offsets"] == [1440, 60, 15]
+        assert body["task_reminder_default_time"] == "08:30:00"
+        assert body["timezone"] == "Europe/Paris"
+
+        patched = await client.patch(
+            f"/profiles/{body['id']}",
+            json={"notify_journal": True, "task_scheduled_reminder_offsets": [10]},
+        )
+        patched_body = patched.json()
+        assert patched_body["notify_journal"] is True
+        assert patched_body["task_scheduled_reminder_offsets"] == [10]
+        assert patched_body["notify_habits"] is True
+        assert patched_body["timezone"] == "Europe/Paris"
+
+    async def test_explicit_null_is_rejected_except_for_timezone(
+        self, client, db_session, login_as
+    ):
+        user = UserFactory()
+        await db_session.commit()
+        profile = ProfileFactory(user=user)
+        await db_session.commit()
+        await login_as(user)
+
+        for field in (
+            *self.TOGGLES,
+            "task_due_reminder_offsets",
+            "task_scheduled_reminder_offsets",
+            "task_reminder_default_time",
+        ):
+            response = await client.patch(f"/profiles/{profile.id}", json={field: None})
+            assert response.status_code == 422, field
+
+        response = await client.patch(
+            f"/profiles/{profile.id}", json={"timezone": None}
+        )
+        assert response.status_code == 200
+        assert response.json()["timezone"] is None

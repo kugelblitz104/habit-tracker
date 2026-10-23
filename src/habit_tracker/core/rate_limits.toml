@@ -25,3 +25,7 @@ window_seconds = 3600 # 1 hour
 [login_failures]
 limit = 5
 window_seconds = 900
+
+[push_test]
+limit = 5
+window_seconds = 60

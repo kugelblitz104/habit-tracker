@@ -1,6 +1,7 @@
 from datetime import date, datetime, time
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     Date,
     DateTime,
@@ -117,6 +118,42 @@ class Profile(Base):
     reconciliation_stale_habit_days: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
+    # Web Push reminders (services/notifications.py). One opt-in switch per
+    # trigger; off overrides every per-entity setting of that trigger.
+    notify_task_due: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    notify_task_scheduled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    notify_habits: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    notify_countdowns: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    notify_journal: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # Minutes before a task's due / scheduled instant to remind, for tasks
+    # that do not carry their own list (Task.due_reminder_offsets).
+    task_due_reminder_offsets: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer),
+        default=lambda: [60, 15],
+        server_default="{60,15}",
+        nullable=False,
+    )
+    task_scheduled_reminder_offsets: Mapped[list[int]] = mapped_column(
+        ARRAY(Integer), default=list, server_default="{}", nullable=False
+    )
+    # The time of day a date-only task (or countdown) is treated as due. NOT
+    # NULL, unlike the reconciliation windows: the server computes from it.
+    task_reminder_default_time: Mapped[time] = mapped_column(
+        Time, default=time(9, 0), server_default="09:00:00", nullable=False
+    )
+    # IANA zone the reminders are computed in, reported by the client. Null
+    # until the client first reports one, and nothing fires until then.
+    timezone: Mapped[str | None] = mapped_column(String, nullable=True)
     created_date: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, nullable=False
     )
@@ -392,6 +429,14 @@ class Task(Base):
     sort_order: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False, index=True
     )
+    # Per-task reminder offsets (minutes before). Null = the profile's default
+    # list, [] = no reminders for that date on this task.
+    due_reminder_offsets: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
+    scheduled_reminder_offsets: Mapped[list[int] | None] = mapped_column(
+        ARRAY(Integer), nullable=True
+    )
 
     # Relationships
     profile: Mapped["Profile"] = relationship(
@@ -641,3 +686,68 @@ class JournalEntry(Base):
 
     # Relationships
     profile: Mapped["Profile"] = relationship("Profile", lazy="select")
+
+
+class ScheduledNotification(Base):
+    """The next Web Push reminder one entity is due to send.
+
+    One row per entity (a task's row covers both its due and its scheduled
+    date), holding only the next instant. services/notifications.py is the only
+    writer: it recomputes the row from the entity on every relevant write and
+    after every send, and deletes it when nothing is left to fire, so no column
+    is ever null. `entity_id` is polymorphic and so cannot be a foreign key;
+    only `profile_id` cascades, and a row whose entity is gone is removed the
+    next time it comes due.
+    """
+
+    __tablename__ = "scheduled_notification"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", name="uq_scheduled_notification_entity"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # "task" | "habit" | "countdown" | "profile" (the journal reminder). Plain
+    # text, so a new entity type needs no migration.
+    entity_type: Mapped[str] = mapped_column(String, nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Naive UTC, like every stored instant.
+    fire_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+
+class PushSubscription(Base):
+    """One browser's Web Push endpoint for one profile.
+
+    `endpoint` is the push service URL the browser handed out; `p256dh` and
+    `auth` are its public key and auth secret (base64url), used to encrypt the
+    payload so the push service cannot read it. A browser used with two
+    profiles holds one row per profile.
+    """
+
+    __tablename__ = "push_subscription"
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id", "endpoint", name="uq_push_subscription_profile_endpoint"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("profile.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    p256dh: Mapped[str] = mapped_column(String, nullable=False)
+    auth: Mapped[str] = mapped_column(String, nullable=False)
+    created_date: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, nullable=False
+    )

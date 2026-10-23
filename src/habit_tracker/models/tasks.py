@@ -16,6 +16,7 @@ from habit_tracker.models._validators import (
     reject_null,
     trimmed_or_none,
     validate_membership,
+    validate_reminder_offsets,
 )
 
 _PRIORITY_VALUES = tuple(p.value for p in TaskPriority)
@@ -105,7 +106,16 @@ class TaskBase(BaseModel):
 
 
 class TaskCreate(TaskBase):
-    pass
+    # Minutes before the date to remind. null = the profile default, [] = none
+    # for this task. Declared here rather than on TaskBase so TaskRead can
+    # declare its own copy last.
+    due_reminder_offsets: list[int] | None = None
+    scheduled_reminder_offsets: list[int] | None = None
+
+    @field_validator("due_reminder_offsets", "scheduled_reminder_offsets")
+    @classmethod
+    def validate_reminder_offsets(cls, v: list[int] | None) -> list[int] | None:
+        return validate_reminder_offsets(v)
 
 
 class TaskRead(TaskBase, _FromORM):
@@ -123,6 +133,8 @@ class TaskRead(TaskBase, _FromORM):
     # Declared last so adding it appends to the OpenAPI properties rather than
     # reordering them.
     slug: str
+    due_reminder_offsets: list[int] | None = None
+    scheduled_reminder_offsets: list[int] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -144,6 +156,8 @@ class TaskUpdate(BaseModel):
     parent_id: int | None = None
     sort_order: int | None = None
     closed_date: datetime | None = None
+    due_reminder_offsets: list[int] | None = None
+    scheduled_reminder_offsets: list[int] | None = None
 
     @field_validator("profile_id", "title", "priority", "status")
     @classmethod
@@ -186,6 +200,13 @@ class TaskUpdate(BaseModel):
     @classmethod
     def validate_external_url(cls, v: str | None) -> str | None:
         return normalize_external_url(v)
+
+    # Not in `reject_null`: an explicit null returns the task to the profile
+    # default.
+    @field_validator("due_reminder_offsets", "scheduled_reminder_offsets")
+    @classmethod
+    def validate_reminder_offsets(cls, v: list[int] | None) -> list[int] | None:
+        return validate_reminder_offsets(v)
 
 
 class TaskList(BaseModel):

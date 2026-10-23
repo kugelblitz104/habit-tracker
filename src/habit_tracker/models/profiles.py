@@ -12,6 +12,8 @@ from habit_tracker.models._validators import (
     trimmed_or_none,
     validate_hex_color,
     validate_membership,
+    validate_reminder_offsets,
+    validate_timezone,
 )
 
 _DEFAULT_LANDING_VALUES = tuple(d.value for d in DefaultLanding)
@@ -60,6 +62,15 @@ class ProfileBase(BaseModel):
     reconciliation_stale_task_days: int | None = None
     reconciliation_stale_project_days: int | None = None
     reconciliation_stale_habit_days: int | None = None
+    notify_task_due: bool = False
+    notify_task_scheduled: bool = False
+    notify_habits: bool = False
+    notify_countdowns: bool = False
+    notify_journal: bool = False
+    task_due_reminder_offsets: list[int] = [60, 15]
+    task_scheduled_reminder_offsets: list[int] = []
+    task_reminder_default_time: time = time(9, 0)
+    timezone: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -93,7 +104,15 @@ class ProfileBase(BaseModel):
 
 
 class ProfileCreate(ProfileBase):
-    pass
+    @field_validator("task_due_reminder_offsets", "task_scheduled_reminder_offsets")
+    @classmethod
+    def validate_reminder_offsets(cls, v: list[int]) -> list[int]:
+        return validate_reminder_offsets(v) or []
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str | None) -> str | None:
+        return validate_timezone(v)
 
 
 class ProfileRead(_StampedRead, ProfileBase):
@@ -124,6 +143,15 @@ class ProfileUpdate(BaseModel):
     reconciliation_stale_task_days: int | None = None
     reconciliation_stale_project_days: int | None = None
     reconciliation_stale_habit_days: int | None = None
+    notify_task_due: bool | None = None
+    notify_task_scheduled: bool | None = None
+    notify_habits: bool | None = None
+    notify_countdowns: bool | None = None
+    notify_journal: bool | None = None
+    task_due_reminder_offsets: list[int] | None = None
+    task_scheduled_reminder_offsets: list[int] | None = None
+    task_reminder_default_time: time | None = None
+    timezone: str | None = None
 
     @field_validator(
         "name",
@@ -144,6 +172,14 @@ class ProfileUpdate(BaseModel):
         "pomodoro_cycles",
         "journal_enabled",
         "journal_gratitude_enabled",
+        "notify_task_due",
+        "notify_task_scheduled",
+        "notify_habits",
+        "notify_countdowns",
+        "notify_journal",
+        "task_due_reminder_offsets",
+        "task_scheduled_reminder_offsets",
+        "task_reminder_default_time",
     )
     @classmethod
     def validate_reject_null(cls, v: object, info: ValidationInfo) -> object:
@@ -178,6 +214,16 @@ class ProfileUpdate(BaseModel):
     @classmethod
     def validate_default_landing(cls, v: str | None) -> str | None:
         return _validate_default_landing(v)
+
+    @field_validator("task_due_reminder_offsets", "task_scheduled_reminder_offsets")
+    @classmethod
+    def validate_reminder_offsets(cls, v: list[int] | None) -> list[int] | None:
+        return validate_reminder_offsets(v)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str | None) -> str | None:
+        return validate_timezone(v)
 
 
 class ProfileList(BaseModel):
