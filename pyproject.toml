@@ -1,6 +1,6 @@
 [project]
 name = "habit_tracker"
-version = ""
+version = "0.1.0"
 description = "habit tracker api"
 authors = [{name = "Justin Jones", email = "kugelblitz404@proton.me"}]
 readme = "README.md"
