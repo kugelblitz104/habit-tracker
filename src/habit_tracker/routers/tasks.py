@@ -16,7 +16,7 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.http import (
+from habit_tracker.core.route_helpers import (
     bulk_delete_in_profile,
     integrity_conflict,
     validate_sort_ids,

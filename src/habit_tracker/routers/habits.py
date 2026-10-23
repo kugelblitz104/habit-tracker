@@ -14,7 +14,7 @@ from habit_tracker.core.dependencies import (
     resolve_habit_profile_id,
     resolve_today,
 )
-from habit_tracker.core.http import bulk_delete_in_profile, validate_sort_ids
+from habit_tracker.core.route_helpers import bulk_delete_in_profile, validate_sort_ids
 from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import HabitCreate, HabitList, HabitRead
 from habit_tracker.schemas.db_models import Habit, Tracker, User

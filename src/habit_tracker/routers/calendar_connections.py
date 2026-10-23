@@ -15,7 +15,7 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
     resolve_timezone,
 )
-from habit_tracker.core.http import integrity_conflict
+from habit_tracker.core.route_helpers import integrity_conflict
 from habit_tracker.models import (
     CalendarConnectionCreate,
     CalendarConnectionList,
