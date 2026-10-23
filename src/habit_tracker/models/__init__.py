@@ -45,7 +45,6 @@ from habit_tracker.models.countdowns import (
 from habit_tracker.models.habits import (
     HabitCreate,
     HabitKPIs,
-    HabitKPIsEntry,
     HabitKPIsList,
     HabitList,
     HabitRead,
@@ -150,7 +149,6 @@ __all__ = [
     "HabitBackup",
     "HabitCreate",
     "HabitKPIs",
-    "HabitKPIsEntry",
     "HabitKPIsList",
     "HabitList",
     "HabitRead",

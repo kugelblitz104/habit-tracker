@@ -1980,7 +1980,7 @@ class TestListHabitsKpis:
             params={"profile_id": profile.id, "tz": "America/New_York"},
         )
         assert batch.status_code == 200
-        by_habit = {item["habit_id"]: item["kpis"] for item in batch.json()["items"]}
+        by_habit = {item["habit_id"]: item for item in batch.json()["items"]}
 
         for habit in habits:
             single = await client.get(
@@ -2047,9 +2047,10 @@ class TestListHabitsKpis:
         response = await client.get("/habits/kpis", params={"profile_id": profile.id})
 
         assert response.status_code == 200
-        kpis = response.json()["items"][0]["kpis"]
-        assert kpis["total_completions"] == 0
-        assert kpis["current_streak"] == 0
+        item = response.json()["items"][0]
+        assert item["total_completions"] == 0
+        assert item["current_streak"] == 0
+        assert "kpis" not in item
 
     async def test_rejects_a_profile_the_caller_does_not_own(
         self, client, db_session, login_as

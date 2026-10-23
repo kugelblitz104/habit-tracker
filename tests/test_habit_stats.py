@@ -52,6 +52,10 @@ def _weekday_rates(habit: Habit, trackers: list[Tracker]) -> list[float]:
     return calculate_kpis(habit, trackers, TODAY).weekday_completion_rates
 
 
+def test_calculate_kpis_carries_the_habit_id():
+    assert calculate_kpis(_habit(1, 1), [], TODAY).habit_id == 1
+
+
 def test_weekday_rate_is_completed_share_not_goal_normalized():
     """A weekday's rate is completed/occurrences, NOT completed/expected.
 
