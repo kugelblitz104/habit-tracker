@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from habit_tracker.core import rate_limit
 from habit_tracker.core.clock import utc_now
 from habit_tracker.core.config import settings
-from habit_tracker.core.dependencies import get_db
+from habit_tracker.core.dependencies import get_current_user, get_db
 from habit_tracker.core.email import send_password_reset_email
 from habit_tracker.core.security import (
     create_access_token,
@@ -23,6 +23,7 @@ from habit_tracker.core.security import (
     create_reset_token,
     decode_token,
     get_password_hash,
+    token_is_current,
     verify_password,
 )
 from habit_tracker.models.users import (
@@ -36,6 +37,15 @@ from habit_tracker.models.users import (
 from habit_tracker.schemas.db_models import Profile, User
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+
+def _issue_tokens(user: User) -> dict:
+    claims = {"sub": str(user.id), "ver": user.token_version}
+    return {
+        "access_token": create_access_token(data=claims),
+        "refresh_token": create_refresh_token(data=claims),
+        "token_type": "bearer",
+    }
 
 
 @router.post(
@@ -93,15 +103,7 @@ async def register(user_data: UserCreate, db: Annotated[AsyncSession, Depends(ge
     await db.commit()
     await db.refresh(new_user)
 
-    # Generate tokens
-    access_token = create_access_token(data={"sub": str(new_user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(new_user.id)})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens(new_user)
 
 
 @router.post(
@@ -146,14 +148,7 @@ async def login(
         )
 
     rate_limit.clear(account_key)
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
-
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens(user)
 
 
 @router.post(
@@ -185,14 +180,27 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user"
         )
 
-    new_access_token = create_access_token(data={"sub": str(user.id)})
-    new_refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    if not token_is_current(payload, user.token_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
+        )
 
-    return {
-        "access_token": new_access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer",
-    }
+    return _issue_tokens(user)
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Revoke every access and refresh token issued to the current user.
+
+    The token version is per user, so this ends the session on every device,
+    not only the one that called it.
+    """
+    current_user.token_version += 1
+    await db.commit()
+    return {"message": "Signed out."}
 
 
 @router.post(
@@ -266,6 +274,7 @@ async def reset_password(
         )
 
     user.password_hash = get_password_hash(request.new_password)
+    user.token_version += 1
     user.updated_date = utc_now()
     await db.commit()
 

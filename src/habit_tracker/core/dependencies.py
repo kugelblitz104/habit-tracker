@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped
 
-from habit_tracker.core.security import decode_token
+from habit_tracker.core.security import decode_token, token_is_current
 from habit_tracker.database import SessionLocal
 from habit_tracker.schemas.db_models import Habit, Profile, User
 
@@ -96,6 +96,13 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
+        )
+
+    if not token_is_current(payload, user.token_version):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return user

@@ -123,6 +123,7 @@ async def update_user(
         )
     user_data = user_update.model_dump()
     user_data["password_hash"] = get_password_hash(user_data.pop("plaintext_password"))
+    db_user.token_version += 1
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()
@@ -163,6 +164,7 @@ async def patch_user(
         user_data["password_hash"] = get_password_hash(
             user_data.pop("plaintext_password")
         )
+        db_user.token_version += 1
     for key, value in user_data.items():
         setattr(db_user, key, value)
     await db.commit()

@@ -45,6 +45,14 @@ def create_refresh_token(data: dict):
     return jwt.encode(data_to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
+def token_is_current(payload: dict, token_version: int) -> bool:
+    """True while the token's ``ver`` claim matches the user's version.
+
+    A token without the claim counts as version 0.
+    """
+    return payload.get("ver", 0) == token_version
+
+
 def create_reset_token(data: dict):
     data_to_encode = data.copy()
 
