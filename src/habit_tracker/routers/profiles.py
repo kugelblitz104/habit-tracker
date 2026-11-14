@@ -13,7 +13,7 @@ from habit_tracker.core.dependencies import (
     get_db,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import integrity_conflict
+from habit_tracker.core.route_helpers import integrity_conflict, paged
 from habit_tracker.models import (
     ProfileCreate,
     ProfileList,
@@ -86,19 +86,15 @@ async def list_profiles(
     target_user_id = user_id if user_id is not None else current_user.id
     authorize_resource_access(current_user, target_user_id, "profile")
 
-    result = await db.execute(
+    result, total = await paged(
+        db,
         select(Profile)
         .filter(Profile.user_id == target_user_id)
-        .order_by(Profile.created_date)
-        .limit(limit)
-        .offset(offset)
+        .order_by(Profile.created_date, Profile.id),
+        limit=limit,
+        offset=offset,
     )
     db_profiles = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(Profile.user_id == target_user_id)
-    )
-    total = count_result.scalar() or 0
 
     return ProfileList(
         profiles=[ProfileRead.model_validate(p) for p in db_profiles],

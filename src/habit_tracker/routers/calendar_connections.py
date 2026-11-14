@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from habit_tracker.core.dependencies import (
     get_owned_profile,
     resolve_timezone,
 )
-from habit_tracker.core.route_helpers import integrity_conflict
+from habit_tracker.core.route_helpers import integrity_conflict, paged
 from habit_tracker.models import (
     CalendarConnectionCreate,
     CalendarConnectionList,
@@ -78,19 +78,15 @@ async def list_calendar_connections(
     """
     await get_owned_profile(db, profile_id, current_user, "calendar connection")
 
-    result = await db.execute(
+    result, total = await paged(
+        db,
         select(CalendarConnection)
         .filter(CalendarConnection.profile_id == profile_id)
-        .order_by(CalendarConnection.created_date)
-        .limit(limit)
-        .offset(offset)
+        .order_by(CalendarConnection.created_date, CalendarConnection.id),
+        limit=limit,
+        offset=offset,
     )
     db_connections = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(CalendarConnection.profile_id == profile_id)
-    )
-    total = count_result.scalar() or 0
 
     return CalendarConnectionList(
         calendar_connections=[

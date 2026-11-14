@@ -16,7 +16,11 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.models import (
     ProjectTimeSummary,
     TaskTimeSummary,
@@ -269,21 +273,13 @@ async def list_time_entries(
         # project_id (adhoc); the joins resolve all three.
         filters.append(_resolved_project == project_id)
 
-    def scoped(stmt):
-        # Only join task/parent when a project filter needs resolving.
-        return _join_task_parent(stmt) if project_id is not None else stmt
-
-    count_result = await db.execute(
-        scoped(select(func.count(TimeEntry.id)).select_from(TimeEntry)).filter(*filters)
-    )
-    total = count_result.scalar() or 0
-
-    result = await db.execute(
+    result, total = await paged(
+        db,
         _join_task_parent(select(TimeEntry, _resolved_project))
         .filter(*filters)
-        .order_by(TimeEntry.started_at.desc(), TimeEntry.id.desc())
-        .limit(limit)
-        .offset(offset)
+        .order_by(TimeEntry.started_at.desc(), TimeEntry.id.desc()),
+        limit=limit,
+        offset=offset,
     )
     rows = result.all()
 

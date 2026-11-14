@@ -5,9 +5,15 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import select
 
 from habit_tracker.constants import TaskStatus
-from habit_tracker.schemas.db_models import Countdown, Task, TimeEntry
+from habit_tracker.schemas.db_models import (
+    Countdown,
+    CountdownCategory,
+    Task,
+    TimeEntry,
+)
 from tests.factories import (
     AdminUserFactory,
+    CountdownCategoryFactory,
     CountdownFactory,
     DoneTaskFactory,
     ProfileFactory,
@@ -1510,6 +1516,69 @@ class TestPatchTask:
         )
         assert response.status_code == 200
         assert response.json()["profile_id"] == other_profile.id
+
+    async def test_patch_task_profile_move_carries_time_entries(
+        self, client, db_session, login_as
+    ):
+        """A task's time entries move with it to the new profile."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        task = TaskFactory(profile=profile)
+        entry = TimeEntryFactory(profile=profile, task=task)
+        unrelated = TimeEntryFactory(profile=profile)
+        await db_session.commit()
+        entry_id, unrelated_id = entry.id, unrelated.id
+        source_id, target_id = profile.id, other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        moved = await db_session.get(TimeEntry, entry_id)
+        kept = await db_session.get(TimeEntry, unrelated_id)
+        assert moved is not None
+        assert kept is not None
+        assert moved.profile_id == target_id
+        assert kept.profile_id == source_id
+
+    async def test_patch_task_profile_move_carries_linked_countdowns(
+        self, client, db_session, login_as
+    ):
+        """A countdown linked to the task moves with it, and its group is
+        recreated under the same name in the new profile."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        task = TaskFactory(profile=profile)
+        category = CountdownCategoryFactory(profile=profile, name="Bills")
+        await db_session.commit()
+        linked = CountdownFactory(profile=profile, task=task, category_id=category.id)
+        unrelated = CountdownFactory(profile=profile)
+        await db_session.commit()
+        linked_id, unrelated_id = linked.id, unrelated.id
+        source_id, target_id = profile.id, other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/tasks/{task.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        moved = await db_session.get(Countdown, linked_id)
+        kept = await db_session.get(Countdown, unrelated_id)
+        assert moved is not None
+        assert kept is not None
+        assert moved.profile_id == target_id
+        assert kept.profile_id == source_id
+        assert moved.category_id is not None
+        group = await db_session.get(CountdownCategory, moved.category_id)
+        assert group is not None
+        assert (group.profile_id, group.name) == (target_id, "Bills")
 
     async def test_patch_task_profile_move_with_project_in_old_profile(
         self, client, db_session, login_as

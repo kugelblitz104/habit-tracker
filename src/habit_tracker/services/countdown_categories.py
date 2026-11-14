@@ -78,3 +78,22 @@ async def resolve_for_countdown(
         return None
     row = await find_or_create(db, profile_id=profile_id, name=name)
     return row.id
+
+
+async def carry_to_profile(
+    db: AsyncSession, *, category_id: int | None, profile_id: int
+) -> int | None:
+    """The id of the same-named category in `profile_id`, created if absent.
+
+    For a countdown moving to another profile: a category belongs to one
+    profile, so the countdown is refiled under the target's category of the
+    same name. Returns None when the countdown has no category.
+    """
+    current = (
+        await db.get(CountdownCategory, category_id)
+        if category_id is not None
+        else None
+    )
+    if current is None:
+        return None
+    return (await find_or_create(db, profile_id=profile_id, name=current.name)).id

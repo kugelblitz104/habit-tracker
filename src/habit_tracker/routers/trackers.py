@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,11 @@ from habit_tracker.core.dependencies import (
     get_owned_habit,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.models import (
     TrackerCreate,
     TrackerList,
@@ -130,18 +134,14 @@ async def list_trackers(
     if dated_to is not None:
         filters.append(Tracker.dated <= dated_to)
 
-    scoped = select(Tracker).join(Habit, Tracker.habit_id == Habit.id).filter(*filters)
-
-    count_result = await db.execute(
-        select(func.count(Tracker.id))
-        .select_from(Tracker)
+    result, total = await paged(
+        db,
+        select(Tracker)
         .join(Habit, Tracker.habit_id == Habit.id)
         .filter(*filters)
-    )
-    total = count_result.scalar() or 0
-
-    result = await db.execute(
-        scoped.order_by(Tracker.dated.desc(), Tracker.id).limit(limit).offset(offset)
+        .order_by(Tracker.dated.desc(), Tracker.id),
+        limit=limit,
+        offset=offset,
     )
 
     return TrackerList(

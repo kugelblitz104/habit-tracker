@@ -19,6 +19,25 @@ from tests.factories import (
 class TestListProfiles:
     """Tests for GET /profiles/ endpoint."""
 
+    async def test_paging_with_tied_created_dates_returns_each_profile_once(
+        self, client, db_session, login_as
+    ):
+        """Rows sharing a created_date page with no duplicates and no gaps."""
+        user = UserFactory(default_profile=False)
+        tied = datetime(2026, 1, 1)
+        rows = [ProfileFactory(user=user, created_date=tied) for _ in range(9)]
+        await db_session.commit()
+        await login_as(user)
+
+        seen = []
+        for offset in range(0, 9, 2):
+            response = await client.get(
+                "/profiles/", params={"limit": 2, "offset": offset}
+            )
+            assert response.status_code == 200
+            seen += [r["id"] for r in response.json()["profiles"]]
+        assert sorted(seen) == sorted(r.id for r in rows)
+
     async def test_list_own_profiles_only(self, client, db_session, login_as):
         """User sees only their own profiles."""
         user = UserFactory(default_profile=False)

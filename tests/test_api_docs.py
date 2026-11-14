@@ -1,56 +1,59 @@
-"""API documentation tests."""
+"""API documentation tests.
+
+This file pins the OpenAPI schema. The front-end generates its client from
+/openapi.json, so any change to the schema, including property or parameter
+order, breaks it. A deliberate schema change means regenerating the snapshot
+and reviewing its diff:
+
+    UPDATE_OPENAPI_SNAPSHOT=1 uv run pytest tests/test_api_docs.py
+"""
+
+import difflib
+import json
+import os
+from pathlib import Path
+
+from habit_tracker.main import app
+
+SNAPSHOT = Path(__file__).parent / "openapi.snapshot.json"
+MAX_DIFF_LINES = 80
+
+
+def _dump(schema: dict) -> str:
+    """Serialise without key sorting, so order differences show up."""
+    return json.dumps(schema, indent=2, ensure_ascii=False)
 
 
 class TestOpenAPISchema:
-    """Tests for OpenAPI schema."""
+    """The live schema matches the committed snapshot exactly, order included."""
 
-    async def test_openapi_json_available(self, shared_client):
-        """OpenAPI JSON schema is accessible."""
-        response = await shared_client.get("/openapi.json")
-        assert response.status_code == 200
-        data = response.json()
-        assert "openapi" in data
-        assert "paths" in data
-        assert "components" in data
-
-    async def test_openapi_version(self, shared_client):
-        """OpenAPI version is specified."""
-        response = await shared_client.get("/openapi.json")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["openapi"].startswith("3.")
-
-    async def test_openapi_info_section(self, shared_client):
-        """OpenAPI info section is present."""
-        response = await shared_client.get("/openapi.json")
-        assert response.status_code == 200
-        data = response.json()
-        assert "info" in data
-        assert "title" in data["info"]
-
-    async def test_openapi_paths_defined(self, shared_client):
-        """API paths are defined in schema."""
-        response = await shared_client.get("/openapi.json")
-        assert response.status_code == 200
-        data = response.json()
-        paths = data["paths"]
-        # Check key endpoints are documented
-        assert (
-            "/auth/login" in paths
-            or "/login" in paths
-            or any("login" in path for path in paths)
+    def test_schema_matches_snapshot(self):
+        live = _dump(app.openapi())
+        if os.environ.get("UPDATE_OPENAPI_SNAPSHOT"):
+            SNAPSHOT.write_text(live + "\n", encoding="utf-8", newline="\n")
+            return
+        expected = _dump(json.loads(SNAPSHOT.read_text(encoding="utf-8")))
+        if live == expected:
+            return
+        diff = list(
+            difflib.unified_diff(
+                expected.splitlines(),
+                live.splitlines(),
+                "snapshot",
+                "live",
+                lineterm="",
+            )
         )
-        assert "/users/" in paths or "/users" in paths
-        assert "/habits/" in paths or "/habits" in paths
-        assert "/trackers/" in paths or "/trackers" in paths
-
-    async def test_openapi_schemas_defined(self, shared_client):
-        """Response schemas are defined."""
-        response = await shared_client.get("/openapi.json")
-        assert response.status_code == 200
-        data = response.json()
-        schemas = data.get("components", {}).get("schemas", {})
-        assert len(schemas) > 0
+        shown = "\n".join(diff[:MAX_DIFF_LINES])
+        omitted = len(diff) - MAX_DIFF_LINES
+        if omitted > 0:
+            shown += f"\n... {omitted} more diff lines"
+        raise AssertionError(
+            "OpenAPI schema differs from tests/openapi.snapshot.json.\n"
+            "If the change is deliberate, regenerate with:\n"
+            "    UPDATE_OPENAPI_SNAPSHOT=1 uv run pytest tests/test_api_docs.py\n\n"
+            + shown
+        )
 
 
 class TestSwaggerUI:

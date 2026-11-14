@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,11 @@ from habit_tracker.core.dependencies import (
     get_db,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.models import (
     JournalEntryCreate,
     JournalEntryList,
@@ -77,19 +81,15 @@ async def list_journal_entries(
     if to_date is not None:
         filters.append(JournalEntry.entry_date <= to_date)
 
-    result = await db.execute(
+    result, total = await paged(
+        db,
         select(JournalEntry)
         .filter(*filters)
-        .order_by(JournalEntry.entry_date.desc(), JournalEntry.id)
-        .limit(limit)
-        .offset(offset)
+        .order_by(JournalEntry.entry_date.desc(), JournalEntry.id),
+        limit=limit,
+        offset=offset,
     )
     entries = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).select_from(JournalEntry).filter(*filters)
-    )
-    total = count_result.scalar() or 0
 
     return JournalEntryList(
         entries=[JournalEntryRead.model_validate(e) for e in entries],

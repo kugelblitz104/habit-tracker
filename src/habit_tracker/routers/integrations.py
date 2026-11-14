@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import integrity_conflict
+from habit_tracker.core.route_helpers import integrity_conflict, paged
 from habit_tracker.core.slugs import allocate_slug
 from habit_tracker.models import (
     IntegrationConnectionCreate,
@@ -64,19 +64,15 @@ async def list_integration_connections(
 ) -> IntegrationConnectionList:
     await get_owned_profile(db, profile_id, current_user, "integration connection")
 
-    result = await db.execute(
+    result, total = await paged(
+        db,
         select(IntegrationConnection)
         .filter(IntegrationConnection.profile_id == profile_id)
-        .order_by(IntegrationConnection.created_date)
-        .limit(limit)
-        .offset(offset)
+        .order_by(IntegrationConnection.created_date, IntegrationConnection.id),
+        limit=limit,
+        offset=offset,
     )
     connections = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(IntegrationConnection.profile_id == profile_id)
-    )
-    total = count_result.scalar() or 0
 
     return IntegrationConnectionList(
         integration_connections=[

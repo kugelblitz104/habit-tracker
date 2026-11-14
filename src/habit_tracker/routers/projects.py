@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,11 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import (
     ProjectCreate,
@@ -25,6 +29,11 @@ from habit_tracker.models import (
 )
 from habit_tracker.schemas.db_models import Profile, Project, Task, User
 from habit_tracker.services.notifications import reschedule_profile
+from habit_tracker.services.profile_moves import (
+    move_project_contents,
+    refresh_slug,
+    target_profile,
+)
 
 router = APIRouter(
     prefix="/projects", tags=["projects"], responses={404: {"description": "Not found"}}
@@ -121,18 +130,16 @@ async def list_projects(
     await get_owned_profile(db, profile_id, current_user, "project")
 
     query = select(Project).filter(Project.profile_id == profile_id)
-    count_query = select(func.count()).filter(Project.profile_id == profile_id)
     if not include_archived:
         query = query.filter(Project.archived.is_(False))
-        count_query = count_query.filter(Project.archived.is_(False))
 
-    result = await db.execute(
-        query.order_by(Project.created_date).limit(limit).offset(offset)
+    result, total = await paged(
+        db,
+        query.order_by(Project.created_date, Project.id),
+        limit=limit,
+        offset=offset,
     )
     db_projects = result.scalars().all()
-
-    count_result = await db.execute(count_query)
-    total = count_result.scalar() or 0
 
     counts = await _get_task_counts(db, [p.id for p in db_projects])
 
@@ -257,22 +264,10 @@ async def patch_project(
 
     project_data = project_update.model_dump(exclude_unset=True)
 
-    new_profile_id = project_data.get("profile_id")
-    if new_profile_id is not None and new_profile_id != db_project.profile_id:
-        new_profile = await db.get(Profile, new_profile_id)
-        if not new_profile or new_profile.user_id != profile.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New profile not found or does not belong to the same user",
-            )
-        # Move the project's tasks with it so they don't end up stranded in a
-        # project that lives in a different profile (single UPDATE, no N+1)
-        await db.execute(
-            update(Task)
-            .where(Task.project_id == db_project.id)
-            .values(profile_id=new_profile_id)
-        )
-        await reschedule_profile(db, new_profile)
+    target = await target_profile(db, profile, project_data.get("profile_id"))
+    if target is not None:
+        await move_project_contents(db, db_project.id, target.id)
+        await reschedule_profile(db, target)
 
     previous_name = db_project.name
     previous_profile_id = db_project.profile_id
@@ -280,18 +275,13 @@ async def patch_project(
     for key, value in project_data.items():
         setattr(db_project, key, value)
 
-    # Re-slug when the name changes (the slug tracks the name, so renaming a
-    # project changes its URL and the old one stops resolving - the numeric URL
-    # always keeps working). Also re-slug on a profile move, since slugs are
-    # unique per profile and the clean slug may already be taken in the new one.
-    if db_project.name != previous_name or db_project.profile_id != previous_profile_id:
-        db_project.slug = await allocate_slug(
-            db,
-            Project,
-            profile_id=db_project.profile_id,
-            source=db_project.name,
-            exclude_id=project_id,
-        )
+    await refresh_slug(
+        db,
+        db_project,
+        source=db_project.name,
+        previous_source=previous_name,
+        previous_profile_id=previous_profile_id,
+    )
 
     db_project.updated_date = utc_now()  # server-stamped, never client-set
     try:

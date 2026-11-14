@@ -4,9 +4,11 @@ Everything here is a plain helper called from inside a route function - unlike
 `core/dependencies.py`, nothing here is itself a FastAPI `Depends`.
 """
 
+from typing import Any
+
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import ColumnElement, delete, func, select
+from sqlalchemy import ColumnElement, Result, Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import get_owned_profile
@@ -60,6 +62,23 @@ async def bulk_delete_in_profile(
     return JSONResponse(
         content={"detail": detail.format(count=count), "deleted": count}
     )
+
+
+async def paged(
+    db: AsyncSession, stmt: Select[Any], *, limit: int, offset: int
+) -> tuple[Result[Any], int]:
+    """One page of `stmt`, plus the number of rows `stmt` matches in all.
+
+    `stmt` must already carry its filters and a total ORDER BY (one ending in a
+    unique column), or a tie straddling a page boundary repeats one row and
+    drops another. The total counts `stmt` itself with its ORDER BY removed, so
+    a filter cannot reach one and miss the other. The caller unpacks the
+    Result: `.scalars()` for an entity select, `.all()` for column tuples.
+    """
+    total = await db.scalar(
+        select(func.count()).select_from(stmt.order_by(None).subquery())
+    )
+    return await db.execute(stmt.limit(limit).offset(offset)), total or 0
 
 
 def integrity_conflict(detail: str) -> HTTPException:

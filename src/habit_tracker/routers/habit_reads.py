@@ -1,34 +1,27 @@
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_habit,
-    resolve_timezone,
     resolve_today,
 )
+from habit_tracker.core.route_helpers import paged
 from habit_tracker.models import (
     HabitKPIs,
     HabitStreak,
     TrackerList,
-    TrackerLite,
     TrackerLiteList,
     TrackerRead,
 )
 from habit_tracker.schemas.db_models import Tracker, User
-from habit_tracker.services.habit_stats import (
-    auto_skip_lookback_start,
-    auto_skipped_dates,
-    calculate_kpis,
-    calculate_streaks,
-)
-from habit_tracker.services.habits import TRACKER_LITE_COLUMNS
+from habit_tracker.services.habit_stats import calculate_kpis, calculate_streaks
+from habit_tracker.services.habits import habit_windows, window_bounds
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -59,19 +52,16 @@ async def list_habit_trackers(
     """
     await get_owned_habit(db, habit_id, current_user)
 
-    result = await db.execute(
+    # dated is unique per habit (uix_habit_dated), so it alone is a total order.
+    result, total = await paged(
+        db,
         select(Tracker)
         .filter(Tracker.habit_id == habit_id)
-        .order_by(Tracker.dated.desc())
-        .limit(limit)  # ge=1 validation guarantees a positive limit
-        .offset(offset)
+        .order_by(Tracker.dated.desc()),
+        limit=limit,
+        offset=offset,
     )
     db_trackers = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).select_from(Tracker).filter(Tracker.habit_id == habit_id)
-    )
-    total = count_result.scalar() or 0
 
     return TrackerList(
         trackers=[TrackerRead.model_validate(t) for t in db_trackers],
@@ -140,72 +130,30 @@ async def list_habit_trackers_lite(
     - **offset**: Number of trackers to skip (default: 0)
     """
     habit, _ = await get_owned_habit(db, habit_id, current_user)
-
-    # Validate tz even when end_date is explicit so a typo never passes
-    # silently
-    zone = resolve_timezone(tz)
-
-    # Default end_date to today if not provided; datetime.now(None) is
-    # server-local time, so a missing tz keeps the legacy behavior
-    if end_date is None:
-        end_date = datetime.now(zone).date()
-
-    # Calculate start date
-    start_date = end_date - timedelta(days=days - 1)
-
-    in_window = (
-        Tracker.habit_id == habit_id,
-        Tracker.dated >= start_date,
-        Tracker.dated <= end_date,
+    start_date, end_date = window_bounds(end_date, days, tz)
+    (window,) = await habit_windows(
+        db, [habit], start_date, end_date, limit=limit, offset=offset
     )
 
-    # Query trackers within the date range
-    result = await db.execute(
-        select(*TRACKER_LITE_COLUMNS)
-        .filter(*in_window)
-        .order_by(Tracker.dated.desc())
-        .limit(limit)
-        .offset(offset)
-    )
-    trackers_lite = [TrackerLite.model_validate(row) for row in result.all()]
-
+    # total counts the whole window, not the page
     count_result = await db.execute(
-        select(func.count()).select_from(Tracker).filter(*in_window)
+        select(func.count())
+        .select_from(Tracker)
+        .filter(
+            Tracker.habit_id == habit_id,
+            Tracker.dated >= start_date,
+            Tracker.dated <= end_date,
+        )
     )
     total = count_result.scalar() or 0
 
-    # Check if there are older trackers (for has_previous flag)
-    older_result = await db.execute(
-        select(Tracker.id)
-        .filter(Tracker.habit_id == habit_id)
-        .filter(Tracker.dated < start_date)
-        .limit(1)
-    )
-    has_previous = older_result.scalar() is not None
-
-    # Auto-skip for a day looks back over [day - range + 1, day), so the oldest
-    # day in this range needs completions from up to range - 1 days BEFORE
-    # start_date. Querying that here is what lets callers fetch only the days
-    # they actually render - the lookback never crosses the wire.
-    lookback_start = auto_skip_lookback_start(start_date, habit.range)
-    completed_result = await db.execute(
-        select(Tracker.dated)
-        .filter(Tracker.habit_id == habit_id)
-        .filter(Tracker.dated >= lookback_start)
-        .filter(Tracker.dated <= end_date)
-        .filter(Tracker.status == TrackerStatus.COMPLETED)
-    )
-    completed_dates = set(completed_result.scalars().all())
-
     return TrackerLiteList(
-        trackers=trackers_lite,
+        trackers=window.trackers,
         total=total,
         end_date=end_date,
         days=days,
-        has_previous=has_previous,
-        auto_skipped_dates=auto_skipped_dates(
-            start_date, end_date, completed_dates, habit.frequency, habit.range
-        ),
+        has_previous=window.has_previous,
+        auto_skipped_dates=window.auto_skipped_dates,
         limit=limit,
         offset=offset,
     )

@@ -20,6 +20,30 @@ TARGET_DATE = date(2026, 7, 9)
 class TestListCalendarConnections:
     """Tests for GET /calendar-connections/ endpoint."""
 
+    async def test_paging_with_tied_created_dates_returns_each_connection_once(
+        self, client, db_session, login_as
+    ):
+        """Rows sharing a created_date page with no duplicates and no gaps."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="Tied")
+        tied = datetime(2026, 1, 1)
+        rows = [
+            CalendarConnectionFactory(profile=profile, created_date=tied)
+            for _ in range(9)
+        ]
+        await db_session.commit()
+        await login_as(user)
+
+        seen = []
+        for offset in range(0, 9, 2):
+            response = await client.get(
+                "/calendar-connections/",
+                params={"profile_id": profile.id, "limit": 2, "offset": offset},
+            )
+            assert response.status_code == 200
+            seen += [r["id"] for r in response.json()["calendar_connections"]]
+        assert sorted(seen) == sorted(r.id for r in rows)
+
     async def test_list_requires_profile_id(self, client, db_session, login_as):
         """profile_id query parameter is required (422 if missing)."""
         user = UserFactory()

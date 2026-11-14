@@ -5,7 +5,6 @@ import sqlite3
 import tempfile
 import uuid
 import zipfile
-from datetime import UTC, datetime, time
 from typing import Annotated
 
 from fastapi import (
@@ -20,7 +19,6 @@ from fastapi import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     get_current_user,
@@ -46,7 +44,12 @@ from habit_tracker.services.journal_import import (
     TEMPLATE_FILENAME,
     parse_journal_file,
 )
-from habit_tracker.services.loop_format import map_color, reverse_map_color
+from habit_tracker.services.loop_format import (
+    habit_fields_from_loop,
+    loop_habit_row,
+    loop_repetition_row,
+    tracker_fields_from_loop,
+)
 from habit_tracker.services.notifications import HABIT, reschedule
 
 router = APIRouter(
@@ -54,69 +57,6 @@ router = APIRouter(
     tags=["import"],
     responses={404: {"description": "Not found"}},
 )
-
-
-def date_to_timestamp(dt: datetime) -> int:
-    """
-    Convert datetime to Loop Habit Tracker timestamp.
-    Loop Habit Tracker uses milliseconds since epoch at midnight UTC.
-    """
-    return int(dt.replace(tzinfo=UTC).timestamp() * 1000)
-
-
-def timestamp_to_date(timestamp: int) -> datetime:
-    """
-    Convert Loop Habit Tracker timestamp to datetime.
-
-    Loop stores repetition timestamps as milliseconds since epoch at midnight
-    UTC of the tracked day, so decode in UTC — a server-local decode shifts
-    every date back one day in any negative-offset timezone.
-    """
-    return datetime.fromtimestamp(timestamp / 1000, tz=UTC)
-
-
-def map_repetition_value(value: int) -> TrackerStatus | None:
-    """
-    Map a Loop Habit Tracker repetition value to a TrackerStatus.
-
-    Loop's value semantics vary by app version:
-    - 0 = not done (all versions) — never imported
-    - 1 = skipped (older exports) — SKIPPED
-    - 2 = done / YES_MANUAL — COMPLETED
-    - 3 = SKIP (Loop 2.x) — SKIPPED
-    - >3 = numerical habits store amount x 1000 — COMPLETED
-
-    Returns None for values that should not create a tracker. Writing the raw
-    value into Tracker.status would corrupt the column for 3 and numerical
-    amounts, so everything is clamped to the app's enum here.
-    """
-    if value <= 0:
-        return None
-    if value in (1, 3):
-        return TrackerStatus.SKIPPED
-    return TrackerStatus.COMPLETED
-
-
-# Loop packs its weekdays Saturday-first (bit 0 = Saturday ... bit 6 = Friday);
-# Habit.reminder_days is Monday-first, so Loop bit i is our bit (i + 5) % 7.
-def mask_from_loop(loop_mask: int) -> int:
-    """Convert a Loop reminder_days mask to Habit.reminder_days."""
-    if not loop_mask & 127:
-        return 127  # Loop treats an empty day set as every day
-    return sum(1 << ((i + 5) % 7) for i in range(7) if loop_mask >> i & 1)
-
-
-def mask_to_loop(mask: int) -> int:
-    """Convert Habit.reminder_days to a Loop reminder_days mask."""
-    return sum(1 << ((j + 2) % 7) for j in range(7) if mask >> j & 1)
-
-
-def loop_reminder_time(hour: int | None, minute: int | None) -> time | None:
-    """Loop's reminder_hour/reminder_min as a time, or None when Loop's reminder
-    is off (a null hour) or the values are out of range."""
-    if hour is None or not 0 <= hour <= 23 or not 0 <= (minute or 0) <= 59:
-        return None
-    return time(hour, minute or 0)
 
 
 @router.post(
@@ -236,99 +176,78 @@ async def import_from_loop_habit_tracker(
         for habit_row in imported_habits:
             try:
                 old_habit_id = habit_row["id"]
-                name = habit_row["name"] or "Unnamed Habit"
-                question = habit_row["question"] or f"Did you {name.lower()} today?"
-                color = map_color(habit_row["color"] or 0)
-                frequency = habit_row["freq_num"] or 1
-                range_val = habit_row["freq_den"] or 1
-                archived = bool(habit_row["archived"])
-                reminder_time = loop_reminder_time(
-                    habit_row["reminder_hour"], habit_row["reminder_min"]
-                )
+                fields = habit_fields_from_loop(dict(habit_row))
+                name = fields["name"]
 
                 # Create new habit
                 current_max_sort_order += 1
-                new_habit = Habit(
-                    profile_id=resolved_profile_id,
-                    name=name,
-                    slug=await allocate_slug(
-                        db, Habit, profile_id=resolved_profile_id, source=name
-                    ),
-                    question=question,
-                    color=color,
-                    frequency=frequency,
-                    range=range_val,
-                    reminder=reminder_time is not None,
-                    reminder_time=reminder_time,
-                    reminder_days=(
-                        mask_from_loop(habit_row["reminder_days"])
-                        if reminder_time is not None
-                        else 127
-                    ),
-                    notes=habit_row["description"],
-                    archived=archived,
-                    sort_order=current_max_sort_order,
+                slug = await allocate_slug(
+                    db, Habit, profile_id=resolved_profile_id, source=name
                 )
-                db.add(new_habit)
-                await reschedule(db, HABIT, new_habit)  # also flushes: gets the ID
 
-                # Import repetitions (trackers) for this habit
-                cursor.execute(
-                    """
-                    SELECT timestamp, value, notes
-                    FROM Repetitions
-                    WHERE habit = ?
-                    ORDER BY timestamp
-                """,
-                    (old_habit_id,),
-                )
-                repetitions = cursor.fetchall()
+                # Savepoint per habit: a database error in one habit's rows
+                # rolls back only that habit instead of failing the session
+                # for every later habit and the final commit.
+                async with db.begin_nested():
+                    new_habit = Habit(
+                        profile_id=resolved_profile_id,
+                        slug=slug,
+                        sort_order=current_max_sort_order,
+                        **fields,
+                    )
+                    db.add(new_habit)
+                    await reschedule(db, HABIT, new_habit)  # also flushes: gets the ID
 
-                habit_trackers_imported = 0
-                seen_dates: set[str] = set()
+                    # Import repetitions (trackers) for this habit
+                    cursor.execute(
+                        """
+                        SELECT timestamp, value, notes
+                        FROM Repetitions
+                        WHERE habit = ?
+                        ORDER BY timestamp
+                    """,
+                        (old_habit_id,),
+                    )
+                    repetitions = cursor.fetchall()
 
-                for rep in repetitions:
-                    try:
-                        timestamp = rep["timestamp"]
-                        value = rep["value"]
-                        notes = rep["notes"]
+                    habit_trackers_imported = 0
+                    habit_trackers_skipped = 0
+                    seen_dates: set[str] = set()
 
-                        # Convert timestamp to date
-                        rep_datetime = timestamp_to_date(timestamp)
-                        rep_date = rep_datetime.date()
-                        date_key = rep_date.isoformat()
+                    for rep in repetitions:
+                        try:
+                            tracker_fields = tracker_fields_from_loop(
+                                rep["timestamp"], rep["value"], rep["notes"]
+                            )
+                            date_key = tracker_fields["dated"].isoformat()
 
-                        # Skip duplicate dates (keep first occurrence)
-                        if date_key in seen_dates:
-                            trackers_skipped += 1
-                            continue
-                        seen_dates.add(date_key)
+                            # Skip duplicate dates (keep first occurrence)
+                            if date_key in seen_dates:
+                                habit_trackers_skipped += 1
+                                continue
+                            seen_dates.add(date_key)
 
-                        mapped_status = map_repetition_value(value)
-                        if mapped_status is None:
-                            # Not completed - skip importing
-                            trackers_skipped += 1
-                            continue
+                            if tracker_fields["status"] is None:
+                                # Not completed - skip importing
+                                habit_trackers_skipped += 1
+                                continue
 
-                        new_tracker = Tracker(
-                            habit_id=new_habit.id,
-                            dated=rep_date,
-                            status=mapped_status,
-                            note=notes,
-                        )
-                        db.add(new_tracker)
-                        habit_trackers_imported += 1
-                        trackers_imported += 1
+                            new_tracker = Tracker(
+                                habit_id=new_habit.id, **tracker_fields
+                            )
+                            db.add(new_tracker)
+                            habit_trackers_imported += 1
+                        except Exception as e:  # noqa: BLE001 - one bad row (of
+                            # arbitrary shape from a user-uploaded SQLite export)
+                            # must not abort the rest of the import; the failure
+                            # is recorded and the loop continues.
+                            habit_trackers_skipped += 1
+                            errors.append(
+                                f"Failed to import tracker for habit '{name}': {e!s}"
+                            )
 
-                    except Exception as e:  # noqa: BLE001 - one bad row (of
-                        # arbitrary shape from a user-uploaded SQLite export)
-                        # must not abort the rest of the import; the failure
-                        # is recorded and the loop continues.
-                        trackers_skipped += 1
-                        errors.append(
-                            f"Failed to import tracker for habit '{name}': {e!s}"
-                        )
-
+                trackers_imported += habit_trackers_imported
+                trackers_skipped += habit_trackers_skipped
                 habits_imported += 1
                 details.append(
                     ImportedHabitSummary(
@@ -494,13 +413,6 @@ async def export_to_loop_habit_tracker(
         habits = result.scalars().all()
 
         for position, habit in enumerate(habits):
-            # Generate a UUID for the habit
-            habit_uuid = str(uuid.uuid4())
-            # Loop reads a non-null hour as "reminder on", so an off reminder,
-            # or one with no time, is written as NULL.
-            reminder_time = habit.reminder_time if habit.reminder else None
-
-            # Insert habit into export database
             cursor.execute(
                 """
                 INSERT INTO Habits (
@@ -510,24 +422,19 @@ async def export_to_loop_habit_tracker(
                     question, uuid
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-                (
-                    1 if habit.archived else 0,
-                    reverse_map_color(habit.color),
-                    habit.notes,
-                    habit.range,  # freq_den
-                    habit.frequency,  # freq_num
-                    0,  # highlight
-                    habit.name,
-                    position,
-                    reminder_time.hour if reminder_time else None,
-                    reminder_time.minute if reminder_time else None,
-                    mask_to_loop(habit.reminder_days) if reminder_time else 127,
-                    0,  # type (boolean habit)
-                    0,  # target_type
-                    0.0,  # target_value
-                    "",  # unit
-                    habit.question,
-                    habit_uuid,
+                loop_habit_row(
+                    name=habit.name,
+                    question=habit.question,
+                    color=habit.color,
+                    frequency=habit.frequency,
+                    range=habit.range,
+                    notes=habit.notes,
+                    archived=habit.archived,
+                    reminder=habit.reminder,
+                    reminder_time=habit.reminder_time,
+                    reminder_days=habit.reminder_days,
+                    position=position,
+                    habit_uuid=str(uuid.uuid4()),
                 ),
             )
 
@@ -544,29 +451,17 @@ async def export_to_loop_habit_tracker(
             trackers = tracker_result.scalars().all()
 
             for tracker in trackers:
-                # Convert tracker to repetition using Loop 2.x semantics
-                # (0 = not done, 2 = done, 3 = skip); our import accepts both
-                # the old 1 and the new 3 for skips, so round-trips are safe
-                if tracker.status == TrackerStatus.SKIPPED:
-                    value = 3
-                elif tracker.status == TrackerStatus.COMPLETED:
-                    value = 2
-                elif tracker.note is not None:
-                    value = 0
-                else:
-                    # Not completed and not skipped - skip export
+                repetition = loop_repetition_row(
+                    loop_habit_id, tracker.dated, tracker.status, tracker.note
+                )
+                if repetition is None:
                     continue
-
-                # Convert date to timestamp (midnight of that day)
-                tracker_datetime = datetime.combine(tracker.dated, datetime.min.time())
-                timestamp = date_to_timestamp(tracker_datetime)
-
                 cursor.execute(
                     """
                     INSERT INTO Repetitions (habit, timestamp, value, notes)
                     VALUES (?, ?, ?, ?)
                 """,
-                    (loop_habit_id, timestamp, value, tracker.note),
+                    repetition,
                 )
 
         conn.commit()

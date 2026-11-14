@@ -5,18 +5,41 @@ from datetime import datetime
 from sqlalchemy import select
 
 from habit_tracker.constants import TaskStatus
-from habit_tracker.schemas.db_models import Project, Task
+from habit_tracker.schemas.db_models import Countdown, Project, Task, TimeEntry
 from tests.factories import (
+    CountdownFactory,
     DoneTaskFactory,
     ProfileFactory,
     ProjectFactory,
     TaskFactory,
+    TimeEntryFactory,
     UserFactory,
 )
 
 
 class TestListProjects:
     """Tests for GET /projects/ endpoint."""
+
+    async def test_paging_with_tied_created_dates_returns_each_project_once(
+        self, client, db_session, login_as
+    ):
+        """Rows sharing a created_date page with no duplicates and no gaps."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="Tied")
+        tied = datetime(2026, 1, 1)
+        rows = [ProjectFactory(profile=profile, created_date=tied) for _ in range(9)]
+        await db_session.commit()
+        await login_as(user)
+
+        seen = []
+        for offset in range(0, 9, 2):
+            response = await client.get(
+                "/projects/",
+                params={"profile_id": profile.id, "limit": 2, "offset": offset},
+            )
+            assert response.status_code == 200
+            seen += [r["id"] for r in response.json()["projects"]]
+        assert sorted(seen) == sorted(r.id for r in rows)
 
     async def test_list_projects_requires_profile_id(
         self, client, db_session, login_as
@@ -629,6 +652,170 @@ class TestPatchProject:
 
         await db_session.refresh(task)
         assert task.profile_id == other_profile.id
+
+    async def test_patch_project_move_carries_subtasks(
+        self, client, db_session, login_as
+    ):
+        """A subtask with no project of its own follows its parent's project."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        project = ProjectFactory(profile=profile)
+        parent = TaskFactory(profile=profile, project=project)
+        await db_session.commit()
+        subtask = TaskFactory(profile=profile, parent_id=parent.id)
+        await db_session.commit()
+
+        subtask_id, target_id = subtask.id, other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/projects/{project.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        moved = await db_session.get(Task, subtask_id)
+        assert moved is not None
+        assert moved.profile_id == target_id
+
+    async def test_patch_project_move_reslugs_tasks_in_target(
+        self, client, db_session, login_as
+    ):
+        """A moved task whose slug is taken in the target profile is renumbered,
+        and both tasks resolve by slug there."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        project = ProjectFactory(profile=profile)
+        existing = TaskFactory(profile=other_profile, title="Follow up")
+        mover = TaskFactory(profile=profile, project=project, title="Follow up")
+        await db_session.commit()
+        task_ids, target_id = [existing.id, mover.id], other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/projects/{project.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        slugs = (
+            await db_session.scalars(
+                select(Task.slug).where(Task.profile_id == target_id)
+            )
+        ).all()
+        assert sorted(slugs) == ["follow-up", "follow-up-2"]
+        for task_id in task_ids:
+            row = await db_session.get(Task, task_id)
+            assert row is not None
+            found = await client.get(
+                f"/tasks/by-slug/{row.slug}", params={"profile_id": target_id}
+            )
+            assert found.json()["id"] == task_id
+
+    async def test_patch_project_move_two_tasks_sharing_a_title(
+        self, client, db_session, login_as
+    ):
+        """Two moved tasks with the same title get distinct slugs in the target."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        project = ProjectFactory(profile=profile)
+        TaskFactory(profile=profile, project=project, title="Follow up")
+        TaskFactory(
+            profile=profile, project=project, title="Follow up", slug="follow-up-2"
+        )
+        await db_session.commit()
+        target_id = other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/projects/{project.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        slugs = (
+            await db_session.scalars(
+                select(Task.slug).where(Task.profile_id == target_id)
+            )
+        ).all()
+        assert sorted(slugs) == ["follow-up", "follow-up-2"]
+
+    async def test_patch_project_move_carries_time_entries(
+        self, client, db_session, login_as
+    ):
+        """Entries on the project's tasks, on their subtasks and on the project
+        itself all move with the project."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        project = ProjectFactory(profile=profile)
+        task = TaskFactory(profile=profile, project=project)
+        await db_session.commit()
+        subtask = TaskFactory(profile=profile, parent_id=task.id)
+        await db_session.commit()
+        entries = [
+            TimeEntryFactory(profile=profile, task=task),
+            TimeEntryFactory(profile=profile, task=subtask),
+            TimeEntryFactory(profile=profile, project=project),
+        ]
+        unrelated = TimeEntryFactory(profile=profile)
+        await db_session.commit()
+        entry_ids = [entry.id for entry in entries]
+        unrelated_id, source_id, target_id = unrelated.id, profile.id, other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/projects/{project.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        for entry_id in entry_ids:
+            row = await db_session.get(TimeEntry, entry_id)
+            assert row is not None
+            assert row.profile_id == target_id
+        row = await db_session.get(TimeEntry, unrelated_id)
+        assert row is not None
+        assert row.profile_id == source_id
+
+    async def test_patch_project_move_carries_linked_countdowns(
+        self, client, db_session, login_as
+    ):
+        """Countdowns linked to the project's tasks and subtasks move with it."""
+        user = UserFactory()
+        profile = ProfileFactory(user=user, name="One")
+        other_profile = ProfileFactory(user=user, name="Two")
+        project = ProjectFactory(profile=profile)
+        task = TaskFactory(profile=profile, project=project)
+        await db_session.commit()
+        subtask = TaskFactory(profile=profile, parent_id=task.id)
+        await db_session.commit()
+        linked = [
+            CountdownFactory(profile=profile, task=task),
+            CountdownFactory(profile=profile, task=subtask),
+        ]
+        unrelated = CountdownFactory(profile=profile)
+        await db_session.commit()
+        linked_ids = [countdown.id for countdown in linked]
+        unrelated_id, source_id, target_id = unrelated.id, profile.id, other_profile.id
+        await login_as(user)
+
+        response = await client.patch(
+            f"/projects/{project.id}", json={"profile_id": target_id}
+        )
+        assert response.status_code == 200
+
+        db_session.expire_all()
+        for countdown_id in linked_ids:
+            row = await db_session.get(Countdown, countdown_id)
+            assert row is not None
+            assert row.profile_id == target_id
+        row = await db_session.get(Countdown, unrelated_id)
+        assert row is not None
+        assert row.profile_id == source_id
 
     async def test_patch_project_null_name(self, client, db_session, login_as):
         """An explicit null for the non-nullable name is rejected (422)."""

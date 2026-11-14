@@ -1,31 +1,20 @@
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
     get_owned_profile,
-    resolve_timezone,
     resolve_today,
 )
-from habit_tracker.models import (
-    HabitKPIsList,
-    HabitTrackersLite,
-    HabitTrackersLiteList,
-    TrackerLite,
-)
-from habit_tracker.schemas.db_models import Habit, Tracker, User
-from habit_tracker.services.habit_stats import (
-    auto_skip_lookback_start,
-    auto_skipped_dates,
-    calculate_kpis,
-)
-from habit_tracker.services.habits import TRACKER_LITE_COLUMNS
+from habit_tracker.models import HabitKPIsList, HabitTrackersLiteList
+from habit_tracker.schemas.db_models import Tracker, User
+from habit_tracker.services.habit_stats import calculate_kpis
+from habit_tracker.services.habits import habit_page, habit_windows, window_bounds
 
 router = APIRouter(
     prefix="/habits", tags=["habits"], responses={404: {"description": "Not found"}}
@@ -90,107 +79,11 @@ async def list_habits_trackers_lite(
     - **offset**: Number of habits to skip (default: 0)
     """
     await get_owned_profile(db, profile_id, current_user, "habit")
-
-    # Validate tz even when end_date is explicit so a typo never passes
-    # silently
-    zone = resolve_timezone(tz)
-    if end_date is None:
-        end_date = datetime.now(zone).date()
-    start_date = end_date - timedelta(days=days - 1)
-
-    habit_filters = [Habit.profile_id == profile_id]
-    if archived is not None:
-        habit_filters.append(Habit.archived == archived)
-
-    # sort_order is the UI's display order; id breaks ties among habits that
-    # have never been reordered, which is what makes offset paging safe.
-    habits = (
-        (
-            await db.execute(
-                select(Habit)
-                .filter(*habit_filters)
-                .order_by(Habit.sort_order, Habit.id)
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .scalars()
-        .all()
+    start_date, end_date = window_bounds(end_date, days, tz)
+    habits, total = await habit_page(
+        db, profile_id, archived=archived, limit=limit, offset=offset
     )
-    total = (
-        await db.execute(select(func.count()).select_from(Habit).filter(*habit_filters))
-    ).scalar() or 0
-
-    habit_ids = [h.id for h in habits]
-    if not habit_ids:
-        return HabitTrackersLiteList(items=[], total=total, limit=limit, offset=offset)
-
-    in_window = (
-        Tracker.habit_id.in_(habit_ids),
-        Tracker.dated >= start_date,
-        Tracker.dated <= end_date,
-    )
-    window_rows = (
-        await db.execute(
-            select(Tracker.habit_id, *TRACKER_LITE_COLUMNS)
-            .filter(*in_window)
-            .order_by(Tracker.dated.desc())
-        )
-    ).all()
-    trackers_by_habit: dict[int, list[TrackerLite]] = {hid: [] for hid in habit_ids}
-    for row in window_rows:
-        trackers_by_habit[row.habit_id].append(TrackerLite.model_validate(row))
-
-    habits_with_older = set(
-        (
-            await db.execute(
-                select(Tracker.habit_id)
-                .filter(Tracker.habit_id.in_(habit_ids), Tracker.dated < start_date)
-                .distinct()
-            )
-        )
-        .scalars()
-        .all()
-    )
-
-    # One lookback query for the page, widened to the largest range on it.
-    # Pulling extra completions for narrow-range habits is harmless:
-    # auto_skipped_dates only ever reads [day - range + 1, day) for its own
-    # habit, so the surplus is never counted.
-    widest_range = max(h.range for h in habits)
-    lookback_start = auto_skip_lookback_start(start_date, widest_range)
-    completed_rows = (
-        await db.execute(
-            select(Tracker.habit_id, Tracker.dated).filter(
-                Tracker.habit_id.in_(habit_ids),
-                Tracker.dated >= lookback_start,
-                Tracker.dated <= end_date,
-                Tracker.status == TrackerStatus.COMPLETED,
-            )
-        )
-    ).all()
-    completed_by_habit: dict[int, set[date]] = {hid: set() for hid in habit_ids}
-    for habit_id, dated in completed_rows:
-        completed_by_habit[habit_id].add(dated)
-
-    items = [
-        HabitTrackersLite(
-            habit_id=habit.id,
-            trackers=trackers_by_habit[habit.id],
-            end_date=end_date,
-            days=days,
-            has_previous=habit.id in habits_with_older,
-            auto_skipped_dates=auto_skipped_dates(
-                start_date,
-                end_date,
-                completed_by_habit[habit.id],
-                habit.frequency,
-                habit.range,
-            ),
-        )
-        for habit in habits
-    ]
-
+    items = await habit_windows(db, habits, start_date, end_date)
     return HabitTrackersLiteList(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -241,27 +134,9 @@ async def list_habits_kpis(
     # for, so a typo never passes silently.
     today = resolve_today(tz)
 
-    habit_filters = [Habit.profile_id == profile_id]
-    if archived is not None:
-        habit_filters.append(Habit.archived == archived)
-
-    habits = (
-        (
-            await db.execute(
-                select(Habit)
-                .filter(*habit_filters)
-                .order_by(Habit.sort_order, Habit.id)
-                .limit(limit)
-                .offset(offset)
-            )
-        )
-        .scalars()
-        .all()
+    habits, total = await habit_page(
+        db, profile_id, archived=archived, limit=limit, offset=offset
     )
-    total = (
-        await db.execute(select(func.count()).select_from(Habit).filter(*habit_filters))
-    ).scalar() or 0
-
     habit_ids = [h.id for h in habits]
     if not habit_ids:
         return HabitKPIsList(items=[], total=total, limit=limit, offset=offset)

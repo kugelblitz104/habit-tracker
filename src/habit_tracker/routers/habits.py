@@ -2,23 +2,21 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from habit_tracker.constants import TrackerStatus
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
     get_db,
     get_owned_profile,
     resolve_habit_profile_id,
-    resolve_today,
 )
 from habit_tracker.core.route_helpers import bulk_delete_in_profile, validate_sort_ids
 from habit_tracker.core.slugs import allocate_slug, get_by_slug
 from habit_tracker.models import HabitCreate, HabitList, HabitRead
-from habit_tracker.schemas.db_models import Habit, Tracker, User
-from habit_tracker.services.habits import habit_to_read
+from habit_tracker.schemas.db_models import Habit, User
+from habit_tracker.services.habits import habit_page, habit_to_read, habits_to_read
 from habit_tracker.services.notifications import HABIT, reschedule
 
 router = APIRouter(
@@ -163,50 +161,9 @@ async def list_habits(
     - **offset**: Number of habits to skip (default: 0)
     """
     await get_owned_profile(db, profile_id, current_user, "habit")
-
-    # sort_order is the UI's display order; id breaks ties among habits that
-    # have never been reordered (sort_order defaults to 0 for all of them).
-    result = await db.execute(
-        select(Habit)
-        .filter(Habit.profile_id == profile_id)
-        .order_by(Habit.sort_order, Habit.id)
-        .limit(limit)
-        .offset(offset)
-    )
-    db_habits = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(Habit.profile_id == profile_id)
-    )
-    total = count_result.scalar() or 0
-
-    today = resolve_today(tz)
-    habit_ids = [h.id for h in db_habits]
-
-    today_trackers = {}
-    if habit_ids:
-        tracker_result = await db.execute(
-            select(Tracker).filter(
-                Tracker.habit_id.in_(habit_ids), Tracker.dated == today
-            )
-        )
-        for tracker in tracker_result.scalars().all():
-            today_trackers[tracker.habit_id] = tracker
-
-    habits_read = []
-    for habit in db_habits:
-        habit_read = HabitRead.model_validate(habit)
-        tracker = today_trackers.get(habit.id)
-        habit_read.completed_today = (
-            tracker.status == TrackerStatus.COMPLETED if tracker else False
-        )
-        habit_read.skipped_today = (
-            tracker.status == TrackerStatus.SKIPPED if tracker else False
-        )
-        habits_read.append(habit_read)
-
+    db_habits, total = await habit_page(db, profile_id, limit=limit, offset=offset)
     return HabitList(
-        habits=habits_read,
+        habits=await habits_to_read(db, db_habits, tz),
         total=total,
         limit=limit,
         offset=offset,

@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.constants import CLOSED_STATUSES, TaskStatus
-from habit_tracker.core.clock import utc_now
 from habit_tracker.core.dependencies import (
     authorize_parent_profile,
     get_current_user,
@@ -19,9 +18,10 @@ from habit_tracker.core.dependencies import (
 from habit_tracker.core.route_helpers import (
     bulk_delete_in_profile,
     integrity_conflict,
+    paged,
     validate_sort_ids,
 )
-from habit_tracker.core.slugs import allocate_slug, get_by_slug
+from habit_tracker.core.slugs import get_by_slug
 from habit_tracker.models import (
     TaskCreate,
     TaskList,
@@ -29,8 +29,9 @@ from habit_tracker.models import (
     TaskUpdate,
 )
 from habit_tracker.schemas.db_models import Profile, Project, Task, User
-from habit_tracker.services.notifications import TASK, forget, reschedule
+from habit_tracker.services.notifications import TASK, forget
 from habit_tracker.services.task_export import render_tasks_markdown
+from habit_tracker.services.tasks import add_task, apply_task_update
 
 router = APIRouter(
     prefix="/tasks", tags=["tasks"], responses={404: {"description": "Not found"}}
@@ -82,27 +83,6 @@ async def _get_subtask_counts(
         query = query.filter(Task.parent_id == parent_id)
     result = await db.execute(query)
     return {row[0]: (row[1], row[2]) for row in result.all()}
-
-
-async def _validate_parent_task(
-    db: AsyncSession, parent_id: int, profile_id: int, not_found_detail: str
-) -> None:
-    """Validate a task's prospective parent (400 on any violation).
-
-    The parent must exist, belong to ``profile_id``, and not itself be a
-    subtask (subtasks nest exactly ONE level deep).
-    """
-    parent = await db.get(Task, parent_id)
-    if not parent or parent.profile_id != profile_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=not_found_detail,
-        )
-    if parent.parent_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Subtasks can only be nested one level deep",
-        )
 
 
 async def _get_task_and_profile(
@@ -247,8 +227,6 @@ async def list_tasks(
     if created_to is not None:
         query = query.filter(Task.created_date < created_to)
 
-    total = await db.scalar(select(func.count()).select_from(query.subquery()))
-
     if closed_only:
         query = query.order_by(Task.closed_date.desc(), Task.id)
     else:
@@ -264,7 +242,7 @@ async def list_tasks(
             Task.id,
         )
 
-    result = await db.execute(query.limit(limit).offset(offset))
+    result, total = await paged(db, query, limit=limit, offset=offset)
     db_tasks = result.scalars().all()
 
     # One aggregate query for the whole profile's subtask counts (no N+1).
@@ -326,36 +304,7 @@ async def create_task(
     non-Latin script) falls back to "task", numbered as usual.
     """
     await get_owned_profile(db, task.profile_id, current_user, "task")
-
-    if task.project_id is not None:
-        project = await db.get(Project, task.project_id)
-        if not project or project.profile_id != task.profile_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Project not found or does not belong to this profile",
-            )
-
-    if task.parent_id is not None:
-        await _validate_parent_task(
-            db,
-            task.parent_id,
-            task.profile_id,
-            "Parent task not found or does not belong to this profile",
-        )
-
-    db_task = Task(**task.model_dump())
-    db_task.slug = await allocate_slug(
-        db, Task, profile_id=task.profile_id, source=task.title
-    )
-    if db_task.status in CLOSED_STATUSES:
-        db_task.closed_date = utc_now()
-    # Scheduled data only lives on SCHEDULED tasks; any other status forces the
-    # scheduled fields null (prevents orphaned scheduled data)
-    if db_task.status != TaskStatus.SCHEDULED:
-        db_task.scheduled_date = None
-        db_task.scheduled_time = None
-    db.add(db_task)
-    await reschedule(db, TASK, db_task)
+    db_task = await add_task(db, task.model_dump())
     await db.commit()
     await db.refresh(db_task)
     return _task_to_read(db_task)
@@ -551,148 +500,10 @@ async def patch_task(
     """
     db_task, profile = await _get_task_and_profile(db, task_id, current_user)
 
-    task_data = task_update.model_dump(exclude_unset=True)
-
-    # Memoised subtask count: the profile-move check and the parent_id-set
-    # check below are each only conditionally reached, and the first raises
-    # before the second when both apply, so at most one query ever runs -
-    # this just avoids writing the same query twice.
-    _cached_subtask_total: int | None = None
-
-    async def subtask_total() -> int:
-        nonlocal _cached_subtask_total
-        if _cached_subtask_total is None:
-            _cached_subtask_total = (
-                await db.scalar(
-                    select(func.count(Task.id)).filter(Task.parent_id == task_id)
-                )
-                or 0
-            )
-        return _cached_subtask_total
-
-    # Validate a profile move: new profile must belong to the same user, and
-    # the task's project (if any) must belong to the new profile
-    new_profile_id = task_data.get("profile_id")
-    if new_profile_id is not None and new_profile_id != db_task.profile_id:
-        new_profile = await db.get(Profile, new_profile_id)
-        if not new_profile or new_profile.user_id != profile.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New profile not found or does not belong to the same user",
-            )
-    target_profile_id = (
-        new_profile_id if new_profile_id is not None else db_task.profile_id
+    await apply_task_update(
+        db, db_task, profile, task_update.model_dump(exclude_unset=True)
     )
-
-    # Validate the resulting project (moved or kept) against the resulting profile
-    target_project_id = task_data.get("project_id", db_task.project_id)
-    if target_project_id is not None:
-        project = await db.get(Project, target_project_id)
-        if not project or project.profile_id != target_profile_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Project not found or does not belong to the task's profile",
-            )
-
-    # A profile move may not leave subtasks behind: a task that has subtasks
-    # cannot move (mirrors the project rule - profile coherence is enforced,
-    # never silently fixed)
-    if (
-        new_profile_id is not None
-        and new_profile_id != db_task.profile_id
-        and await subtask_total()
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot move a task with subtasks to another profile",
-        )
-
-    # Validate the resulting parent (moved or kept) against the resulting
-    # profile - so moving a subtask to another profile fails unless parent_id
-    # is nulled in the same request
-    target_parent_id = task_data.get("parent_id", db_task.parent_id)
-    if target_parent_id is not None:
-        if target_parent_id == task_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A task cannot be its own parent",
-            )
-        await _validate_parent_task(
-            db,
-            target_parent_id,
-            target_profile_id,
-            "Parent task not found or does not belong to the task's profile",
-        )
-        # ONE level deep: a task that has subtasks cannot itself become a
-        # subtask (only reachable when parent_id is being set - an existing
-        # subtask can never have subtasks of its own)
-        if "parent_id" in task_data and await subtask_total():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A task with subtasks cannot itself become a subtask",
-            )
-
-    # Status transitions: entering done/cancelled stamps closed_date unless
-    # the same patch supplied one, which is what makes "close it today, dated
-    # last Tuesday" a single request. Leaving them for an active status
-    # clears it.
-    supplied_closed_date = "closed_date" in task_data
-    was_closed = db_task.status in CLOSED_STATUSES
-    is_closing = (
-        task_data["status"] in CLOSED_STATUSES if "status" in task_data else was_closed
-    )
-
-    if supplied_closed_date and not is_closing:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="closed_date can only be set on a done or cancelled task",
-        )
-
-    if "status" in task_data:
-        if is_closing:
-            if supplied_closed_date:
-                db_task.closed_date = task_data["closed_date"]
-            elif not was_closed:
-                db_task.closed_date = utc_now()
-        else:
-            db_task.closed_date = None
-    elif supplied_closed_date:
-        db_task.closed_date = task_data["closed_date"]
-
-    # Applied above; must not also go through the generic setattr loop below.
-    task_data.pop("closed_date", None)
-
-    previous_title = db_task.title
-    previous_profile_id = db_task.profile_id
-
-    for key, value in task_data.items():
-        setattr(db_task, key, value)
-
-    # Re-slug when the title changes (the slug tracks the title, so renaming a
-    # task changes its URL and the old one stops resolving - the numeric URL
-    # always keeps working). Also re-slug on a profile move, since slugs are
-    # unique per profile and the clean slug may already be taken in the new one.
-    if db_task.title != previous_title or db_task.profile_id != previous_profile_id:
-        db_task.slug = await allocate_slug(
-            db,
-            Task,
-            profile_id=db_task.profile_id,
-            source=db_task.title,
-            exclude_id=task_id,
-        )
-
-    # Scheduled data only lives on SCHEDULED tasks; any other resulting status
-    # forces the scheduled fields null (prevents orphaned scheduled data). This
-    # fires both when status changes away from SCHEDULED and when the task was
-    # never scheduled, regardless of whether the scheduled fields were sent
-    resulting_status = task_data.get("status", db_task.status)
-    if resulting_status != TaskStatus.SCHEDULED:
-        db_task.scheduled_date = None
-        db_task.scheduled_time = None
-
-    db_task.updated_date = utc_now()  # server-stamped, never client-set
     try:
-        await reschedule(db, TASK, db_task)
         await db.commit()
     except IntegrityError:
         await db.rollback()

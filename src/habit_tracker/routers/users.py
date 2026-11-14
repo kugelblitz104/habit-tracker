@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from habit_tracker.core.dependencies import (
@@ -10,6 +10,7 @@ from habit_tracker.core.dependencies import (
     get_current_user,
     get_db,
 )
+from habit_tracker.core.route_helpers import paged
 from habit_tracker.core.security import get_password_hash
 from habit_tracker.models import (
     UserCreate,
@@ -45,13 +46,10 @@ async def list_users(
     """
     if current_user.is_admin:
         # Admins can see all users
-        result = await db.execute(
-            select(User).order_by(User.id).limit(limit).offset(offset)
+        result, total = await paged(
+            db, select(User).order_by(User.id), limit=limit, offset=offset
         )
         db_users = result.scalars().all()
-
-        count_result = await db.execute(select(func.count()).select_from(User))
-        total = count_result.scalar() or 0
 
         return UserList(
             users=[UserRead.model_validate(u) for u in db_users],

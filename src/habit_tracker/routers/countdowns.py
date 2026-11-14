@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,11 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.models import (
     CountdownCreate,
     CountdownList,
@@ -22,13 +26,16 @@ from habit_tracker.models import (
 )
 from habit_tracker.schemas.db_models import (
     Countdown,
-    CountdownCategory,
     Profile,
     Task,
     User,
 )
-from habit_tracker.services.countdown_categories import find_or_create, get_in_profile
+from habit_tracker.services.countdown_categories import (
+    carry_to_profile,
+    get_in_profile,
+)
 from habit_tracker.services.notifications import COUNTDOWN, forget, reschedule
+from habit_tracker.services.profile_moves import target_profile
 
 router = APIRouter(
     prefix="/countdowns",
@@ -106,20 +113,15 @@ async def list_countdowns(
         if archived
         else Countdown.archived_date.is_(None)
     )
-    query = select(Countdown).filter(
-        Countdown.profile_id == profile_id, archived_filter
-    )
-    result = await db.execute(
-        query.order_by(Countdown.target_date, Countdown.target_time, Countdown.id)
-        .limit(limit)
-        .offset(offset)
+    result, total = await paged(
+        db,
+        select(Countdown)
+        .filter(Countdown.profile_id == profile_id, archived_filter)
+        .order_by(Countdown.target_date, Countdown.target_time, Countdown.id),
+        limit=limit,
+        offset=offset,
     )
     countdowns = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(Countdown.profile_id == profile_id, archived_filter)
-    )
-    total = count_result.scalar() or 0
 
     return CountdownList(
         countdowns=[CountdownRead.model_validate(c) for c in countdowns],
@@ -195,14 +197,7 @@ async def patch_countdown(
         elif db_countdown.archived_date is None:
             data["archived_date"] = utc_now()
 
-    new_profile_id = data.get("profile_id")
-    if new_profile_id is not None and new_profile_id != db_countdown.profile_id:
-        new_profile = await db.get(Profile, new_profile_id)
-        if not new_profile or new_profile.user_id != profile.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New profile not found or does not belong to the same user",
-            )
+    await target_profile(db, profile, data.get("profile_id"))
 
     # Re-validate the task link whenever profile or task changes.
     if "task_id" in data or "profile_id" in data:
@@ -228,17 +223,10 @@ async def patch_countdown(
             and target_profile_id != db_countdown.profile_id
             and db_countdown.category_id is not None
         ):
-            # find_or_create flushes a new category row, so its insert can collide
-            # with a concurrent request naming the same new category.
-            current = await db.get(CountdownCategory, db_countdown.category_id)
-            data["category_id"] = (
-                (
-                    await find_or_create(
-                        db, profile_id=target_profile_id, name=current.name
-                    )
-                ).id
-                if current is not None
-                else None
+            # Flushes a new category row, so its insert can collide with a
+            # concurrent request naming the same new category.
+            data["category_id"] = await carry_to_profile(
+                db, category_id=db_countdown.category_id, profile_id=target_profile_id
             )
 
         for key, value in data.items():

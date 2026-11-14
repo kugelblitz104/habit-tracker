@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,11 @@ from habit_tracker.core.dependencies import (
     get_owned_child,
     get_owned_profile,
 )
-from habit_tracker.core.route_helpers import bulk_delete_in_profile, integrity_conflict
+from habit_tracker.core.route_helpers import (
+    bulk_delete_in_profile,
+    integrity_conflict,
+    paged,
+)
 from habit_tracker.models import (
     CountdownCategoryCreate,
     CountdownCategoryList,
@@ -61,16 +65,16 @@ async def list_countdown_categories(
     """
     await get_owned_profile(db, profile_id, current_user, "countdown category")
 
-    query = select(CountdownCategory).filter(CountdownCategory.profile_id == profile_id)
-    result = await db.execute(
-        query.order_by(CountdownCategory.name).limit(limit).offset(offset)
+    # name is unique per profile, so it alone is a total order here.
+    result, total = await paged(
+        db,
+        select(CountdownCategory)
+        .filter(CountdownCategory.profile_id == profile_id)
+        .order_by(CountdownCategory.name),
+        limit=limit,
+        offset=offset,
     )
     categories = result.scalars().all()
-
-    count_result = await db.execute(
-        select(func.count()).filter(CountdownCategory.profile_id == profile_id)
-    )
-    total = count_result.scalar() or 0
 
     return CountdownCategoryList(
         categories=[CountdownCategoryRead.model_validate(c) for c in categories],

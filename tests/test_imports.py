@@ -9,8 +9,8 @@ from datetime import UTC, date, datetime, time
 from sqlalchemy import select
 
 from habit_tracker.constants import TrackerStatus
-from habit_tracker.routers.imports import mask_from_loop, mask_to_loop
 from habit_tracker.schemas.db_models import Habit, Tracker
+from habit_tracker.services.loop_format import mask_from_loop, mask_to_loop
 from tests.factories import (
     HabitFactory,
     ProfileFactory,
@@ -563,3 +563,36 @@ class TestLoopReminders:
         assert habit.reminder is True
         assert habit.reminder_time == time(6, 0)
         assert habit.reminder_days == 0b1100000  # Sat + Sun
+
+
+class TestImportDatabaseFailureIsolation:
+    async def test_db_error_in_one_habit_does_not_sink_later_habits(
+        self, client, db_session, login_as
+    ):
+        """A NUL byte is storable in SQLite but rejected by Postgres text
+        columns, so the first habit's flush fails inside the database."""
+        user = UserFactory()
+        await db_session.commit()
+        await login_as(user)
+        content = build_loop_db(
+            habits=[
+                {"id": 1, "name": "Bad", "position": 0, "description": "a\x00b"},
+                {"id": 2, "name": "Good", "position": 1},
+            ],
+            repetitions=[],
+        )
+
+        response = await client.post(
+            "/import/loop-habit-tracker", files=upload(content)
+        )
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["habits_imported"] == 1
+        assert body["habits_skipped"] == 1
+        assert [d["original_name"] for d in body["details"]] == ["Good"]
+        assert len(body["errors"]) == 1
+        assert "Bad" in body["errors"][0]
+        db_session.expire_all()
+        names = (await db_session.execute(select(Habit.name))).scalars().all()
+        assert names == ["Good"]
